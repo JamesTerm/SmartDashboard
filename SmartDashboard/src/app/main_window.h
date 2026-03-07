@@ -1,6 +1,7 @@
 #pragma once
 
 #include "layout/layout_serializer.h"
+#include "model/variable_store.h"
 #include "transport/direct_subscriber_adapter.h"
 #include "widgets/variable_tile.h"
 
@@ -44,5 +45,6 @@ private:
     int m_nextTileOffset = 0;
     TileMap m_tiles;
     LayoutMap m_savedLayoutByKey;
+    sd::model::VariableStore m_variableStore;
     DirectSubscriberAdapter m_subscriberAdapter;
 };

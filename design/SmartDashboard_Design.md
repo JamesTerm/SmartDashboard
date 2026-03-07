@@ -667,3 +667,35 @@ Remaining optional choices (can be deferred):
 - Toolchain, Qt version, layout path, and key style locked
 
 This document is intended to be the implementation baseline for the next session.
+
+## Implementation Status Snapshot (2026-03-07)
+
+This section records what is currently implemented versus the design baseline.
+
+### Completed in code
+
+- CMake workspace + three-project split (`SmartDashboard`, `SmartDashboard_Interface_direct`, `ClientInterface_direct`).
+- Qt desktop app shell with:
+  - connection status in title/status bar
+  - editable mode for widget movement
+  - tile widgets for `bool`, `double`, `string`
+  - context menu `Change to...` options by variable type
+- Layout persistence with JSON (`version`, widget geometry, `variableKey`, `widgetType`).
+- `VariableStore` model layer for latest-value tracking before UI apply.
+- Direct transport core (Qt-free) implemented with:
+  - Win32 file mapping + named events
+  - shared ring header + framed messages
+  - publish/drain loops, sequence tracking, and heartbeat-based state transitions
+
+### In progress / not yet production-stable
+
+- Windows runtime deployment for Qt via vcpkg is partially functional but not yet fully deterministic across environments.
+- Pending finalization:
+  - consistent plugin initialization from Visual Studio F5 output folders
+  - clean handling of optional companion DLL availability in vcpkg installs
+
+### Packaging/deployment direction (locked)
+
+- For vcpkg Qt builds, prefer deterministic copy-based deployment from the active triplet output (`debug/bin`, `debug/plugins` for Debug).
+- Avoid project-external ad hoc DLL sources as a baseline strategy.
+- Keep `qt.conf` (`Plugins=plugins`) and place plugins under `plugins/` beside the executable.

@@ -14,6 +14,11 @@ target_include_directories(ClientInterface_direct
 
 target_compile_features(ClientInterface_direct PUBLIC cxx_std_20)
 
+target_link_libraries(ClientInterface_direct
+    PUBLIC
+        SmartDashboard_DirectCommon
+)
+
 add_executable(sd_direct_publisher_sample
     samples/publisher_sample.cpp
 )

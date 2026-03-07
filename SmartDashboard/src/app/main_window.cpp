@@ -94,24 +94,28 @@ void MainWindow::OnToggleEditable()
     }
 }
 
-void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, const QVariant& value, quint64)
+void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, const QVariant& value, quint64 seq)
 {
-    sd::widgets::VariableTile* tile = GetOrCreateTile(key, ToVariableType(valueType));
+    const sd::widgets::VariableType variableType = ToVariableType(valueType);
+    const std::string keyStd = key.toStdString();
+    const sd::model::VariableRecord& record = m_variableStore.Upsert(keyStd, variableType, value, seq);
+
+    sd::widgets::VariableTile* tile = GetOrCreateTile(QString::fromStdString(record.key), record.type);
     if (tile == nullptr)
     {
         return;
     }
 
-    switch (ToVariableType(valueType))
+    switch (record.type)
     {
         case sd::widgets::VariableType::Bool:
-            tile->SetBoolValue(value.toBool());
+            tile->SetBoolValue(record.value.toBool());
             break;
         case sd::widgets::VariableType::Double:
-            tile->SetDoubleValue(value.toDouble());
+            tile->SetDoubleValue(record.value.toDouble());
             break;
         case sd::widgets::VariableType::String:
-            tile->SetStringValue(value.toString());
+            tile->SetStringValue(record.value.toString());
             break;
         default:
             break;

@@ -1,6 +1,7 @@
 #include "transport/direct_subscriber_adapter.h"
 
 #include <QMetaObject>
+#include <QString>
 
 DirectSubscriberAdapter::DirectSubscriberAdapter(QObject* parent)
     : QObject(parent)

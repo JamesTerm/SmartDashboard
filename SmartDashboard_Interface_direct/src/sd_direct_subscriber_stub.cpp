@@ -1,9 +1,15 @@
 #include "sd_direct_subscriber.h"
 
+#include "sd_direct_clock.h"
+#include "sd_direct_ring.h"
+#include "sd_direct_shared_memory.h"
+#include "sd_direct_wire.h"
+
 #include <atomic>
 #include <chrono>
-#include <string>
+#include <cstddef>
 #include <thread>
+#include <utility>
 
 namespace sd::direct
 {
@@ -24,37 +30,64 @@ namespace sd::direct
 
             m_update = std::move(onUpdate);
             m_state = std::move(onState);
-            m_running.store(true);
-            m_connectionState.store(ConnectionState::Connected);
-            m_worker = std::thread(&DirectSubscriberStub::RunLoop, this);
+            SetState(ConnectionState::Connecting);
 
-            if (m_state)
+            bool created = false;
+            const std::size_t mappingBytes = sizeof(wire::RingHeader) + wire::kDefaultCapacityBytes;
+            if (!m_region.OpenOrCreate(m_config.mappingName, mappingBytes, created))
             {
-                m_state(ConnectionState::Connected);
+                SetState(ConnectionState::Disconnected);
+                return false;
             }
+
+            if (!AttachRing(m_region.Data(), m_region.Size(), true, m_ring))
+            {
+                m_region.Close();
+                SetState(ConnectionState::Disconnected);
+                return false;
+            }
+
+            bool eventCreated = false;
+            if (!m_dataEvent.OpenOrCreateAutoReset(m_config.dataEventName, eventCreated))
+            {
+                m_region.Close();
+                SetState(ConnectionState::Disconnected);
+                return false;
+            }
+
+            if (!m_heartbeatEvent.OpenOrCreateAutoReset(m_config.heartbeatEventName, eventCreated))
+            {
+                m_dataEvent.Close();
+                m_region.Close();
+                SetState(ConnectionState::Disconnected);
+                return false;
+            }
+
+            m_running.store(true);
+            m_worker = std::thread(&DirectSubscriberStub::RunLoop, this);
 
             return true;
         }
 
         void Stop() override
         {
-            if (!m_running.exchange(false))
+            if (!m_running.load())
             {
                 return;
             }
+
+            m_running.store(false);
+            m_dataEvent.Signal();
 
             if (m_worker.joinable())
             {
                 m_worker.join();
             }
 
-            m_running.store(false);
-            m_connectionState.store(ConnectionState::Disconnected);
-
-            if (m_state)
-            {
-                m_state(ConnectionState::Disconnected);
-            }
+            m_heartbeatEvent.Close();
+            m_dataEvent.Close();
+            m_region.Close();
+            SetState(ConnectionState::Disconnected);
         }
 
         ConnectionState GetState() const override
@@ -73,76 +106,66 @@ namespace sd::direct
         }
 
     private:
-        void EmitUpdateBool(const std::string& key, bool value)
+        void SetState(ConnectionState state)
         {
-            if (!m_update)
+            const ConnectionState previous = m_connectionState.exchange(state);
+            if (previous == state)
             {
                 return;
             }
 
-            VariableUpdate update;
-            update.key = key;
-            update.type = ValueType::Bool;
-            update.value.boolValue = value;
-            update.seq = ++m_lastSeq;
-            update.sourceTimestampUs = static_cast<std::uint64_t>(
-                std::chrono::duration_cast<std::chrono::microseconds>(
-                    std::chrono::steady_clock::now().time_since_epoch()
-                ).count()
-            );
-            m_update(update);
-        }
-
-        void EmitUpdateDouble(const std::string& key, double value)
-        {
-            if (!m_update)
+            if (m_state)
             {
-                return;
+                m_state(state);
             }
-
-            VariableUpdate update;
-            update.key = key;
-            update.type = ValueType::Double;
-            update.value.doubleValue = value;
-            update.seq = ++m_lastSeq;
-            update.sourceTimestampUs = static_cast<std::uint64_t>(
-                std::chrono::duration_cast<std::chrono::microseconds>(
-                    std::chrono::steady_clock::now().time_since_epoch()
-                ).count()
-            );
-            m_update(update);
-        }
-
-        void EmitUpdateString(const std::string& key, const std::string& value)
-        {
-            if (!m_update)
-            {
-                return;
-            }
-
-            VariableUpdate update;
-            update.key = key;
-            update.type = ValueType::String;
-            update.value.stringValue = value;
-            update.seq = ++m_lastSeq;
-            update.sourceTimestampUs = static_cast<std::uint64_t>(
-                std::chrono::duration_cast<std::chrono::microseconds>(
-                    std::chrono::steady_clock::now().time_since_epoch()
-                ).count()
-            );
-            m_update(update);
         }
 
         void RunLoop()
         {
-            int tick = 0;
             while (m_running.load())
             {
-                EmitUpdateBool("Robot/Enabled", (tick % 2) == 0);
-                EmitUpdateDouble("Drive/Speed", static_cast<double>(tick % 100) * 0.25);
-                EmitUpdateString("Status/Mode", (tick % 20) < 10 ? "Teleop" : "Auto");
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                ++tick;
+                const DWORD waitResult = m_dataEvent.Wait(static_cast<DWORD>(m_config.waitTimeout.count()));
+                if (waitResult == WAIT_OBJECT_0)
+                {
+                    VariableUpdate update;
+                    while (ReadNextUpsert(m_ring, update))
+                    {
+                        m_lastSeq.store(update.seq, std::memory_order_release);
+                        if (m_update)
+                        {
+                            m_update(update);
+                        }
+                    }
+                }
+
+                if (m_ring.header != nullptr)
+                {
+                    const std::uint64_t nowUs = GetSteadyNowUs();
+                    const std::uint64_t producerHeartbeatUs =
+                        m_ring.header->lastProducerHeartbeatUs.load(std::memory_order_acquire);
+                    const std::uint64_t staleLimitUs = static_cast<std::uint64_t>(m_config.staleTimeout.count()) * 1000ULL;
+
+                    if (producerHeartbeatUs == 0)
+                    {
+                        SetState(ConnectionState::Connecting);
+                    }
+                    else if ((nowUs - producerHeartbeatUs) > staleLimitUs)
+                    {
+                        SetState(ConnectionState::Stale);
+                    }
+                    else
+                    {
+                        SetState(ConnectionState::Connected);
+                    }
+
+                    m_ring.header->lastConsumerHeartbeatUs.store(nowUs, std::memory_order_release);
+                    m_droppedCount.store(m_ring.header->droppedCount.load(std::memory_order_acquire));
+                }
+
+                if (waitResult == WAIT_FAILED)
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                }
             }
         }
 
@@ -153,6 +176,10 @@ namespace sd::direct
         std::atomic<ConnectionState> m_connectionState {ConnectionState::Disconnected};
         std::atomic<std::uint64_t> m_lastSeq {0};
         std::atomic<std::uint64_t> m_droppedCount {0};
+        SharedMemoryRegion m_region;
+        NamedEvent m_dataEvent;
+        NamedEvent m_heartbeatEvent;
+        RingAttachResult m_ring;
         std::thread m_worker;
     };
 
