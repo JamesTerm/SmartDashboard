@@ -68,3 +68,16 @@
 - Reduced Windows build noise for students:
   - enabled `VcpkgXUseBuiltInApplocalDeps=true` via `CMAKE_VS_GLOBALS`
   - hid optional Qt deploy DLL missing messages by default (`SMARTDASHBOARD_VERBOSE_QT_DEPLOY=OFF`, opt-in verbose toggle)
+
+## UI polish checkpoint (2026-03-08)
+
+- Added `.gitignore` entries for common local artifacts: `build/`, `out/`, `.vs/`, and `CMakeUserPresets.json`.
+- Fixed `VariableTile` `Change to...` behavior so widget type now changes actual presentation instead of metadata only.
+- Implemented concrete type presentations:
+  - bool: `bool.led` and `bool.text`
+  - double: `double.numeric`, `double.progress`, and `double.gauge`
+  - string: `string.text` and `string.multiline`
+- Updated tile layout behavior to better match expected SmartDashboard ergonomics:
+  - progress bar shows variable name on top and uses full width below
+  - gauge hides variable name for cleaner visual appearance
+  - multiline string uses a dedicated second row with wrapping

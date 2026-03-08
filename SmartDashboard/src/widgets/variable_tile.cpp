@@ -2,10 +2,13 @@
 
 #include <QAction>
 #include <QContextMenuEvent>
+#include <QDial>
+#include <QFrame>
+#include <QGridLayout>
 #include <QLabel>
 #include <QMenu>
 #include <QMouseEvent>
-#include <QVBoxLayout>
+#include <QProgressBar>
 
 namespace sd::widgets
 {
@@ -37,18 +40,41 @@ namespace sd::widgets
         setFrameShadow(QFrame::Raised);
         setAutoFillBackground(true);
 
-        auto* layout = new QVBoxLayout(this);
-        layout->setContentsMargins(8, 8, 8, 8);
-        layout->setSpacing(4);
+        m_layout = new QGridLayout(this);
+        m_layout->setContentsMargins(8, 8, 8, 8);
+        m_layout->setHorizontalSpacing(8);
+        m_layout->setVerticalSpacing(4);
+        m_layout->setColumnStretch(0, 0);
+        m_layout->setColumnStretch(1, 1);
+        m_layout->setColumnMinimumWidth(0, 90);
 
         m_titleLabel = new QLabel(key, this);
         m_valueLabel = new QLabel(FormatValueText(), this);
         m_valueLabel->setStyleSheet("font-weight: 600;");
 
-        layout->addWidget(m_titleLabel);
-        layout->addWidget(m_valueLabel);
+        m_boolLed = new QFrame(this);
+        m_boolLed->setFixedSize(14, 14);
+        m_boolLed->setVisible(false);
+
+        m_progressBar = new QProgressBar(this);
+        m_progressBar->setRange(0, 100);
+        m_progressBar->setVisible(false);
+
+        m_gauge = new QDial(this);
+        m_gauge->setRange(0, 100);
+        m_gauge->setNotchesVisible(true);
+        m_gauge->setWrapping(false);
+        m_gauge->setVisible(false);
+
+        m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
+        m_layout->addWidget(m_valueLabel, 0, 1, 1, 1);
+        m_layout->addWidget(m_boolLed, 0, 1, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
+        m_layout->addWidget(m_progressBar, 0, 1, 1, 1);
+        m_layout->addWidget(m_gauge, 0, 1, 1, 1);
 
         setMinimumSize(180, 64);
+        UpdateWidgetPresentation();
+        UpdateValueDisplay();
     }
 
     void VariableTile::SetEditable(bool editable)
@@ -60,19 +86,19 @@ namespace sd::widgets
     void VariableTile::SetBoolValue(bool value)
     {
         m_boolValue = value;
-        m_valueLabel->setText(FormatValueText());
+        UpdateValueDisplay();
     }
 
     void VariableTile::SetDoubleValue(double value)
     {
         m_doubleValue = value;
-        m_valueLabel->setText(FormatValueText());
+        UpdateValueDisplay();
     }
 
     void VariableTile::SetStringValue(const QString& value)
     {
         m_stringValue = value;
-        m_valueLabel->setText(FormatValueText());
+        UpdateValueDisplay();
     }
 
     QString VariableTile::GetKey() const
@@ -93,6 +119,9 @@ namespace sd::widgets
     void VariableTile::SetWidgetType(const QString& widgetType)
     {
         m_widgetType = widgetType;
+        setProperty("widgetType", m_widgetType);
+        UpdateWidgetPresentation();
+        UpdateValueDisplay();
     }
 
     void VariableTile::mousePressEvent(QMouseEvent* event)
@@ -183,5 +212,112 @@ namespace sd::widgets
             default:
                 return "";
         }
+    }
+
+    void VariableTile::UpdateWidgetPresentation()
+    {
+        const bool isBoolLed = (m_widgetType == "bool.led");
+        const bool isBoolText = (m_widgetType == "bool.text");
+        const bool isDoubleNumeric = (m_widgetType == "double.numeric");
+        const bool isDoubleProgress = (m_widgetType == "double.progress");
+        const bool isDoubleGauge = (m_widgetType == "double.gauge");
+        const bool isStringText = (m_widgetType == "string.text");
+        const bool isStringMultiline = (m_widgetType == "string.multiline");
+
+        const bool showBoolLed = (m_type == VariableType::Bool && isBoolLed);
+        const bool showBoolText = (m_type == VariableType::Bool && isBoolText);
+        const bool showDoubleNumeric = (m_type == VariableType::Double && isDoubleNumeric);
+        const bool showDoubleProgress = (m_type == VariableType::Double && isDoubleProgress);
+        const bool showDoubleGauge = (m_type == VariableType::Double && isDoubleGauge);
+        const bool showStringText = (m_type == VariableType::String && isStringText);
+        const bool showStringMultiline = (m_type == VariableType::String && isStringMultiline);
+
+        m_boolLed->setVisible(showBoolLed);
+        m_progressBar->setVisible(showDoubleProgress);
+        m_gauge->setVisible(showDoubleGauge);
+
+        const bool showValueLabel = showBoolText || showDoubleNumeric || showStringText || showStringMultiline;
+        m_valueLabel->setVisible(showValueLabel);
+        m_titleLabel->setVisible(!showDoubleGauge);
+
+        if (showDoubleGauge)
+        {
+            m_layout->addWidget(m_gauge, 1, 0, 1, 2, Qt::AlignHCenter | Qt::AlignVCenter);
+        }
+        else if (showDoubleProgress)
+        {
+            m_layout->addWidget(m_titleLabel, 0, 0, 1, 2, Qt::AlignLeft | Qt::AlignTop);
+            m_layout->addWidget(m_progressBar, 1, 0, 1, 2);
+        }
+        else if (showStringMultiline)
+        {
+            m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignTop);
+            m_layout->addWidget(m_valueLabel, 1, 0, 1, 2);
+        }
+        else
+        {
+            m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
+            m_layout->addWidget(m_valueLabel, 0, 1, 1, 1);
+            m_layout->addWidget(m_boolLed, 0, 1, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
+            m_layout->addWidget(m_progressBar, 0, 1, 1, 1);
+            m_layout->addWidget(m_gauge, 0, 1, 1, 1);
+        }
+
+        if (showStringMultiline)
+        {
+            m_valueLabel->setWordWrap(true);
+            m_valueLabel->setMinimumHeight(56);
+        }
+        else
+        {
+            m_valueLabel->setWordWrap(false);
+            m_valueLabel->setMinimumHeight(0);
+        }
+    }
+
+    void VariableTile::UpdateValueDisplay()
+    {
+        if (m_progressBar->isVisible())
+        {
+            m_progressBar->setValue(DoubleToPercent(m_doubleValue));
+            return;
+        }
+
+        if (m_gauge->isVisible())
+        {
+            m_gauge->setValue(DoubleToPercent(m_doubleValue));
+            return;
+        }
+
+        if (m_boolLed->isVisible())
+        {
+            UpdateBoolLedAppearance();
+            return;
+        }
+
+        m_valueLabel->setText(FormatValueText());
+    }
+
+    int VariableTile::DoubleToPercent(double value) const
+    {
+        double clamped = value;
+        if (clamped < -1.0)
+        {
+            clamped = -1.0;
+        }
+        if (clamped > 1.0)
+        {
+            clamped = 1.0;
+        }
+
+        return static_cast<int>((clamped + 1.0) * 50.0);
+    }
+
+    void VariableTile::UpdateBoolLedAppearance()
+    {
+        const QString color = m_boolValue ? "#2ecc71" : "#7f8c8d";
+        m_boolLed->setStyleSheet(
+            QString("background-color: %1; border-radius: 7px; border: 1px solid #4b4b4b;").arg(color)
+        );
     }
 }

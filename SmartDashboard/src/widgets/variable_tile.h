@@ -4,6 +4,10 @@
 
 class QLabel;
 class QMenu;
+class QProgressBar;
+class QDial;
+class QGridLayout;
+class QFrame;
 
 namespace sd::widgets
 {
@@ -43,6 +47,10 @@ namespace sd::widgets
     private:
         void BuildContextMenu(QMenu& menu);
         QString FormatValueText() const;
+        void UpdateWidgetPresentation();
+        void UpdateValueDisplay();
+        int DoubleToPercent(double value) const;
+        void UpdateBoolLedAppearance();
 
         QString m_key;
         VariableType m_type;
@@ -55,5 +63,9 @@ namespace sd::widgets
 
         QLabel* m_titleLabel = nullptr;
         QLabel* m_valueLabel = nullptr;
+        QProgressBar* m_progressBar = nullptr;
+        QDial* m_gauge = nullptr;
+        QFrame* m_boolLed = nullptr;
+        QGridLayout* m_layout = nullptr;
     };
 }
