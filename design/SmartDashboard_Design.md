@@ -699,3 +699,12 @@ This section records what is currently implemented versus the design baseline.
 - For vcpkg Qt builds, prefer deterministic copy-based deployment from the active triplet output (`debug/bin`, `debug/plugins` for Debug).
 - Avoid project-external ad hoc DLL sources as a baseline strategy.
 - Keep `qt.conf` (`Plugins=plugins`) and place plugins under `plugins/` beside the executable.
+
+### Qt6 + vcpkg deployment guardrail
+
+For Qt6 applications using vcpkg, copy plugins from the Qt6-scoped plugin path, not the generic legacy path:
+
+- Debug: `<vcpkg>/installed/<triplet>/debug/Qt6/plugins`
+- Release: `<vcpkg>/installed/<triplet>/Qt6/plugins`
+
+Reason: environments that have both Qt5 and Qt6 installed can expose Qt5 plugins at the generic path (`.../debug/plugins`). Mixing Qt6 core DLLs with Qt5 `platforms/qwindows*.dll` causes startup failure with incompatible plugin ABI errors.

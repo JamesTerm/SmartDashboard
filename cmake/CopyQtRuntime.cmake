@@ -8,11 +8,26 @@ endif()
 
 file(MAKE_DIRECTORY "${DEST_DIR}")
 set(_plugins_dest "${DEST_DIR}/plugins")
+file(REMOVE_RECURSE "${_plugins_dest}")
 file(MAKE_DIRECTORY "${_plugins_dest}")
 
 file(GLOB _dlls "${SOURCE_BIN}/*.dll")
-if(_dlls)
-    file(COPY ${_dlls} DESTINATION "${DEST_DIR}")
+set(_filtered_dlls "")
+foreach(_dll IN LISTS _dlls)
+    get_filename_component(_dll_name "${_dll}" NAME)
+    if(_dll_name MATCHES "^Qt5.*\\.dll$")
+        continue()
+    endif()
+    list(APPEND _filtered_dlls "${_dll}")
+endforeach()
+
+file(GLOB _old_qt5_dlls "${DEST_DIR}/Qt5*.dll")
+if(_old_qt5_dlls)
+    file(REMOVE ${_old_qt5_dlls})
+endif()
+
+if(_filtered_dlls)
+    file(COPY ${_filtered_dlls} DESTINATION "${DEST_DIR}")
 endif()
 
 if(EXISTS "${SOURCE_PLUGINS}")

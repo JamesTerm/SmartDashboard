@@ -136,7 +136,7 @@ if(WIN32)
 
         if(_vcpkg_installed)
             set(_vcpkg_bin "${_vcpkg_installed}/${_vcpkg_triplet}/$<IF:$<CONFIG:Debug>,debug/bin,bin>")
-            set(_vcpkg_plugins "${_vcpkg_installed}/${_vcpkg_triplet}/$<IF:$<CONFIG:Debug>,debug/plugins,plugins>")
+            set(_vcpkg_plugins "${_vcpkg_installed}/${_vcpkg_triplet}/$<IF:$<CONFIG:Debug>,debug/Qt6/plugins,Qt6/plugins>")
 
             add_custom_command(TARGET SmartDashboardApp POST_BUILD
                 COMMAND "${CMAKE_COMMAND}" -DSOURCE_BIN="${_vcpkg_bin}" -DSOURCE_PLUGINS="${_vcpkg_plugins}"
