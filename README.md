@@ -2,11 +2,45 @@
 
 Lightweight C++ dashboard for FRC, inspired by WPILib SmartDashboard.
 
-## Why this project
+## Overview
 
 - Built as a community-friendly path forward as legacy SmartDashboard approaches end-of-life (2027).
 - Focused scope: fast live values (`bool`, `double`, `string`), editable widgets, and saved layouts.
 - Uses a direct local transport layer (`*_direct`) instead of NetworkTables for v1.
+
+## Architecture Overview
+
+Telemetry flows through a simple staged pipeline so data movement and UI behavior are easy to reason about.
+
+```text
+Robot/App Publisher (direct transport v1)
+                |
+                v
+Telemetry Ingestion
+                |
+                v
+Processing Layer
+  - Sequence/reconnect handling
+  - Latest-value update coalescing
+  - UI-facing normalization
+                |
+                v
+State Cache (VariableStore)
+                |
+                v
+Qt UI Rendering (tiles/widgets)
+```
+
+Notes:
+- The current prototype intentionally avoids NetworkTables to reduce distributed-state coupling.
+- A NetworkTables ingestion adapter could be added later without changing the UI model layer.
+
+Future consideration (not implemented yet):
+- introduce a decoupled telemetry event bus between ingestion and UI rendering
+- support topic subscriptions (for example `/robot/gyro`, `/robot/battery`, `/robot/arm/angle`)
+- allow per-subscriber rate limits with update coalescing (for example 20 Hz, 10 Hz, 5 Hz)
+- keep a latest-value cache so new subscribers receive current state immediately
+- keep ingestion/processing off the Qt UI thread and deliver UI updates via safe Qt signal/slot boundaries
 
 ## What's in this repo
 
@@ -22,7 +56,30 @@ Lightweight C++ dashboard for FRC, inspired by WPILib SmartDashboard.
 - `docs/testing.md` - automated test suite and manual validation commands
 - `docs/ai_development_guidelines.md` - expectations for responsible AI-assisted development
 - `docs/history.md` - FRC dashboard/telemetry historical context for students
+- `docs/project_history.md` - curated repository milestone history
 - `Agent_Session_Notes.md` - chronological engineering session log and checkpoints
+
+## Development Approach
+
+Development in this repository is intentionally iterative and validation-driven:
+
+- architecture planning and requirements capture before implementation
+- incremental implementation in small, reviewable slices
+- unit testing and targeted manual integration checks
+- iterative refinement of UX and architecture based on feedback
+
+AI is used as a development assistant for drafting and acceleration, not as an autonomous code generator.
+Human review, validation, and acceptance criteria remain required for non-trivial changes.
+
+See `docs/development_workflow.md` and `docs/ai_development_guidelines.md` for process details.
+
+## Project Status
+
+- Early prototype
+- Exploring dashboard architecture trade-offs
+- Exploring AI-assisted development workflows in a student-mentored setting
+
+Current focus is architecture validation, workflow clarity, and test-backed behavior, not feature completeness.
 
 ## Quick start (Windows + MSVC + vcpkg)
 
@@ -93,10 +150,16 @@ Use this check for dashboard -> app/client command flow:
 - Optional Qt runtime companion DLL misses (`dxcompiler.dll`, `dxil.dll`, `opengl32sw.dll`) are hidden by default to keep build output clean.
 - Enable deploy diagnostics only when needed with `-DSMARTDASHBOARD_VERBOSE_QT_DEPLOY=ON`.
 
-## Current status
+## Roadmap
 
-- Core app + direct transport baseline is implemented.
-- Runtime deployment is being stabilized for fully reproducible vcpkg-only startup.
+Potential next steps:
+
+- additional telemetry widgets and interaction patterns
+- richer layout customization and editing ergonomics
+- performance profiling and update-path optimization
+- plugin architecture exploration for extensibility
+- improved deployment packaging and reproducibility
+- decoupled telemetry event bus with topic subscriptions and rate-limited UI delivery
 
 For architecture and implementation details, see `design/SmartDashboard_Design.md`.
 For FRC dashboard/telemetry background and architectural evolution, see `docs/history.md`.

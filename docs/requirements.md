@@ -71,3 +71,14 @@ Build an educational, community-friendly C++ dashboard prototype for FRC that de
 
 - Clarify final deployment contract and reproducibility expectations.
 - Expand test coverage around UI interaction state transitions.
+- Evaluate a future telemetry event bus layer that decouples ingestion from UI rendering:
+  - topic-based pub/sub subscription model
+  - per-subscriber rate-limited delivery with coalescing
+  - central latest-value cache for immediate subscriber bootstrap
+  - explicit non-UI-thread ingestion/processing with safe Qt-thread handoff
+- Evaluate telemetry recording/playback architecture for post-run analysis:
+  - non-blocking recorder that writes timestamp/topic/value events to disk
+  - playback engine that replays recorded events through the same event bus contract
+  - transport-agnostic playback controls (`play`, `pause`, `seek`, speed)
+  - timeline model exposing current time, duration, and playback speed
+  - UI-ready integration points for future playback controls (without coupling UI to data source type)
