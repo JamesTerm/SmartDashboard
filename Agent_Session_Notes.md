@@ -32,6 +32,8 @@
 - Numeric double widget now supports properties toggle for `Editable` input mode.
 - Layout save/load now uses file dialogs, tracks dirty state, and prompts on close with `Yes/No/Cancel`.
 - Layout load applies entries to existing session widgets and can instantiate saved widgets immediately at startup.
+- Direct client now includes a retained key-value store (shared-memory + mutex + optional file persistence) to provide authoritative direct-table semantics.
+- `TryGet/Get` now fall back to retained store on cache miss; this addresses cross-run config retrieval for iterative tuning tests.
 
 ## Known constraints / active considerations
 
@@ -39,7 +41,7 @@
 - Deployment remains vcpkg/Qt-DLL based; static Qt distribution is not a current goal.
 - Event-bus decoupling (topic subscriptions + rate limiting + coalescing) is documented as future work, not implemented.
 - Possible future NetworkTables adapter is a design consideration, not current implementation.
-- Direct client in-memory cache is session-local; cross-run shared-state semantics still need explicit transport/model design.
+- Direct ring payload path is still single-consumer; retained store introduces shared latest-value ownership but does not yet change stream fan-out semantics.
 
 ## Next-session checklist
 

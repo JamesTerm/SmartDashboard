@@ -7,6 +7,14 @@ Curated milestone history for this repository.
 
 ## 2026-03-09 - Gauge editing workflow and layout persistence
 
+- Added direct retained-table semantics to `SmartDashboardClient` for authoritative latest-value ownership in direct mode:
+  - shared-memory retained store with named mutex for cross-process coordination
+  - optional retained file persistence path (default under `%LOCALAPPDATA%`)
+  - `TryGet/Get` now fall back to retained store when local cache misses
+  - local `Put*` writes retained entries with sequence/timestamp metadata
+- Added automated restart regression coverage:
+  - `SmartDashboardClientTests.RetainedStoreRestoresValuesAcrossClientRestart`
+  - validates cross-client restart recovery for bool/double/string values
 - Added new `double.lineplot` widget type with custom Qt paint rendering and rolling sample buffer.
 - Implemented line-plot behavior for telemetry visualization:
   - starts with normalized `[0..1]` style axis baseline

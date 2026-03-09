@@ -4,6 +4,7 @@ project(ClientInterface_direct LANGUAGES CXX)
 
 add_library(ClientInterface_direct STATIC
     src/sd_direct_publisher_stub.cpp
+    src/sd_direct_retained_store.cpp
     src/sd_smartdashboard_client.cpp
 )
 
@@ -11,6 +12,11 @@ target_include_directories(ClientInterface_direct
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/SmartDashboard_Interface_direct/include
+)
+
+target_sources(ClientInterface_direct
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/sd_direct_retained_store.h
 )
 
 target_compile_features(ClientInterface_direct PUBLIC cxx_std_20)

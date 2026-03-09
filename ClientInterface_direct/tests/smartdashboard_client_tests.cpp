@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <filesystem>
 #include <string>
 #include <thread>
 
@@ -57,6 +58,25 @@ namespace sd::direct
                 client.FlushNow();
                 std::this_thread::sleep_for(100ms);
             }
+        }
+
+        std::wstring MakeRetainedPath(const wchar_t* fileName)
+        {
+            const wchar_t* localAppData = _wgetenv(L"LOCALAPPDATA");
+            std::filesystem::path root = (localAppData != nullptr && localAppData[0] != L'\0')
+                ? std::filesystem::path(localAppData)
+                : std::filesystem::temp_directory_path();
+            root /= "SmartDashboard";
+            root /= "DirectStoreTests";
+            std::error_code ec;
+            std::filesystem::create_directories(root, ec);
+            return (root / fileName).wstring();
+        }
+
+        void RemoveRetainedFile(const std::wstring& path)
+        {
+            std::error_code ec;
+            std::filesystem::remove(std::filesystem::path(path), ec);
         }
     }
 
@@ -304,5 +324,51 @@ namespace sd::direct
         commandPublisher->Stop();
         EXPECT_TRUE(client.Unsubscribe(token));
         client.Stop();
+    }
+
+    TEST(SmartDashboardClientTests, RetainedStoreRestoresValuesAcrossClientRestart)
+    {
+        const std::wstring retainedPath = MakeRetainedPath(L"retained_store_restart_test.txt");
+        RemoveRetainedFile(retainedPath);
+
+        SmartDashboardClientConfig firstConfig;
+        firstConfig.enableSubscriber = false;
+        firstConfig.enableRetainedStore = true;
+        firstConfig.retainedStorePersistencePath = retainedPath;
+        firstConfig.publisher.autoFlushThread = false;
+
+        {
+            SmartDashboardClient first(firstConfig);
+            ASSERT_TRUE(first.Start());
+
+            first.PutDouble("Test/Retained/Double", 3.1415);
+            first.PutBoolean("Test/Retained/Bool", true);
+            first.PutString("Test/Retained/String", "persisted");
+            ASSERT_TRUE(first.FlushNow());
+
+            first.Stop();
+        }
+
+        SmartDashboardClientConfig secondConfig;
+        secondConfig.enableSubscriber = false;
+        secondConfig.enableRetainedStore = true;
+        secondConfig.retainedStorePersistencePath = retainedPath;
+        secondConfig.publisher.autoFlushThread = false;
+
+        SmartDashboardClient second(secondConfig);
+        ASSERT_TRUE(second.Start());
+
+        double restoredDouble = 0.0;
+        bool restoredBool = false;
+        std::string restoredString;
+        EXPECT_TRUE(second.TryGetDouble("Test/Retained/Double", restoredDouble));
+        EXPECT_TRUE(second.TryGetBoolean("Test/Retained/Bool", restoredBool));
+        EXPECT_TRUE(second.TryGetString("Test/Retained/String", restoredString));
+        EXPECT_NEAR(restoredDouble, 3.1415, 1e-9);
+        EXPECT_TRUE(restoredBool);
+        EXPECT_EQ(restoredString, "persisted");
+
+        second.Stop();
+        RemoveRetainedFile(retainedPath);
     }
 }

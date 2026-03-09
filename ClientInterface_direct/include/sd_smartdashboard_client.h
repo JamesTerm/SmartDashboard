@@ -17,6 +17,12 @@ namespace sd::direct
         SubscriberConfig subscriber;
         bool enableSubscriber = true;
 
+        // Shared retained key-value table (authoritative direct-store semantics).
+        // When enabled, TryGet/Get can recover values across process restarts.
+        bool enableRetainedStore = true;
+        // Optional file path for retained-store persistence (empty => auto path).
+        std::wstring retainedStorePersistencePath;
+
         // Optional command channel (dashboard -> app/client) for writable controls.
         SubscriberConfig commandSubscriber {
             L"Local\\SmartDashboard.Direct.Command.Buffer",

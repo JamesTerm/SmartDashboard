@@ -1,6 +1,10 @@
 #include "sd_smartdashboard_client.h"
 
+#include "sd_direct_clock.h"
+#include "sd_direct_retained_store.h"
+
 #include <algorithm>
+#include <cstdlib>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
@@ -10,6 +14,29 @@ namespace sd::direct
 {
     namespace
     {
+        RetainedStoreConfig BuildRetainedStoreConfig(const SmartDashboardClientConfig& config)
+        {
+            RetainedStoreConfig store;
+            store.mappingName = config.publisher.mappingName + L".Retained";
+            store.mutexName = config.publisher.mappingName + L".Retained.Mutex";
+            store.maxEntries = 1024;
+
+            if (!config.retainedStorePersistencePath.empty())
+            {
+                store.persistenceFilePath = config.retainedStorePersistencePath;
+                return store;
+            }
+
+            const wchar_t* localAppData = _wgetenv(L"LOCALAPPDATA");
+            if (localAppData != nullptr && localAppData[0] != L'\0')
+            {
+                store.persistenceFilePath = std::wstring(localAppData)
+                    + L"\\SmartDashboard\\DirectStore\\retained_values.txt";
+            }
+
+            return store;
+        }
+
         // Coalescing/latest-value cache entry used by TryGet/Get and subscriptions.
         struct CachedValue
         {
@@ -53,7 +80,9 @@ namespace sd::direct
         std::unique_ptr<IDirectPublisher> publisher;
         std::unique_ptr<IDirectSubscriber> subscriber;
         std::unique_ptr<IDirectSubscriber> commandSubscriber;
+        DirectRetainedStore retainedStore;
         bool running = false;
+        std::uint64_t localSeq = 1;
 
         mutable std::mutex mutex;
         std::unordered_map<std::string, CachedValue> cache;
@@ -127,6 +156,11 @@ namespace sd::direct
                         }
                     }
                 }
+            }
+
+            if (config.enableRetainedStore)
+            {
+                retainedStore.Put(update);
             }
 
             if (update.type == ValueType::Bool)
@@ -290,6 +324,16 @@ namespace sd::direct
             return false;
         }
 
+        if (m_impl->config.enableRetainedStore)
+        {
+            const RetainedStoreConfig retainedConfig = BuildRetainedStoreConfig(m_impl->config);
+            if (!m_impl->retainedStore.OpenOrCreate(retainedConfig))
+            {
+                m_impl->publisher->Stop();
+                return false;
+            }
+        }
+
         if (m_impl->subscriber)
         {
             const bool started = m_impl->subscriber->Start(
@@ -304,6 +348,7 @@ namespace sd::direct
 
             if (!started)
             {
+                m_impl->retainedStore.Close();
                 m_impl->publisher->Stop();
                 return false;
             }
@@ -327,6 +372,7 @@ namespace sd::direct
                 {
                     m_impl->subscriber->Stop();
                 }
+                m_impl->retainedStore.Close();
                 m_impl->publisher->Stop();
                 return false;
             }
@@ -355,6 +401,7 @@ namespace sd::direct
         {
             m_impl->publisher->Stop();
         }
+        m_impl->retainedStore.Close();
 
         m_impl->running = false;
     }
@@ -367,6 +414,8 @@ namespace sd::direct
             localUpdate.key = std::string(key);
             localUpdate.type = ValueType::Bool;
             localUpdate.value.boolValue = value;
+            localUpdate.seq = m_impl->localSeq++;
+            localUpdate.sourceTimestampUs = GetSteadyNowUs();
             m_impl->HandleUpdate(localUpdate);
 
             m_impl->publisher->PublishBool(key, value);
@@ -381,6 +430,8 @@ namespace sd::direct
             localUpdate.key = std::string(key);
             localUpdate.type = ValueType::Double;
             localUpdate.value.doubleValue = value;
+            localUpdate.seq = m_impl->localSeq++;
+            localUpdate.sourceTimestampUs = GetSteadyNowUs();
             m_impl->HandleUpdate(localUpdate);
 
             m_impl->publisher->PublishDouble(key, value);
@@ -395,6 +446,8 @@ namespace sd::direct
             localUpdate.key = std::string(key);
             localUpdate.type = ValueType::String;
             localUpdate.value.stringValue = std::string(value);
+            localUpdate.seq = m_impl->localSeq++;
+            localUpdate.sourceTimestampUs = GetSteadyNowUs();
             m_impl->HandleUpdate(localUpdate);
 
             m_impl->publisher->PublishString(key, value);
@@ -417,7 +470,24 @@ namespace sd::direct
         {
             return false;
         }
-        return m_impl->TryReadCachedBoolean(key, outValue);
+        if (m_impl->TryReadCachedBoolean(key, outValue))
+        {
+            return true;
+        }
+
+        if (!m_impl->config.enableRetainedStore)
+        {
+            return false;
+        }
+
+        VariableValue retained;
+        if (!m_impl->retainedStore.TryGet(key, ValueType::Bool, retained))
+        {
+            return false;
+        }
+
+        outValue = retained.boolValue;
+        return true;
     }
 
     bool SmartDashboardClient::TryGetDouble(std::string_view key, double& outValue) const
@@ -426,7 +496,24 @@ namespace sd::direct
         {
             return false;
         }
-        return m_impl->TryReadCachedDouble(key, outValue);
+        if (m_impl->TryReadCachedDouble(key, outValue))
+        {
+            return true;
+        }
+
+        if (!m_impl->config.enableRetainedStore)
+        {
+            return false;
+        }
+
+        VariableValue retained;
+        if (!m_impl->retainedStore.TryGet(key, ValueType::Double, retained))
+        {
+            return false;
+        }
+
+        outValue = retained.doubleValue;
+        return true;
     }
 
     bool SmartDashboardClient::TryGetString(std::string_view key, std::string& outValue) const
@@ -435,7 +522,24 @@ namespace sd::direct
         {
             return false;
         }
-        return m_impl->TryReadCachedString(key, outValue);
+        if (m_impl->TryReadCachedString(key, outValue))
+        {
+            return true;
+        }
+
+        if (!m_impl->config.enableRetainedStore)
+        {
+            return false;
+        }
+
+        VariableValue retained;
+        if (!m_impl->retainedStore.TryGet(key, ValueType::String, retained))
+        {
+            return false;
+        }
+
+        outValue = retained.stringValue;
+        return true;
     }
 
     bool SmartDashboardClient::GetBoolean(std::string_view key, bool defaultValue)
