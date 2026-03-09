@@ -57,7 +57,7 @@ Future consideration (not implemented yet):
 - `docs/ai_development_guidelines.md` - expectations for responsible AI-assisted development
 - `docs/history.md` - FRC dashboard/telemetry historical context for students
 - `docs/project_history.md` - curated repository milestone history
-- `Agent_Session_Notes.md` - chronological engineering session log and checkpoints
+- `Agent_Session_Notes.md` - lean next-session handoff context
 
 ## Development Approach
 

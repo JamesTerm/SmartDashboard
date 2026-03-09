@@ -38,7 +38,8 @@ We want students to see a repeatable engineering process, not "prompt and pray" 
 
 ## Current repository cadence
 
-- Frequent checkpoints with session notes in `Agent_Session_Notes.md`
+- Frequent checkpoints and milestone updates in `docs/project_history.md`
+- Lean next-session handoff context in `Agent_Session_Notes.md`
 - Design/architecture details in `design/SmartDashboard_Design.md`
 - Human requirements in `docs/requirements.md`
 - Testing commands and scope in `docs/testing.md`

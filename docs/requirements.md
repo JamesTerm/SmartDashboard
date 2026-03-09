@@ -3,7 +3,7 @@
 This document is the human-generated source of truth for product intent.
 
 - Edit this file when requirements or acceptance criteria change.
-- Do not use this file as a chronological log; use `Agent_Session_Notes.md` for that.
+- Do not use this file as a chronological log; use `docs/project_history.md` for milestones.
 
 ## Purpose
 
