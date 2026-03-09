@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QFrame>
+#include <QSize>
 
 class QLabel;
 class QMenu;
@@ -10,6 +11,8 @@ class QGridLayout;
 class QFrame;
 class QKeyEvent;
 class QPaintEvent;
+class QEnterEvent;
+class QEvent;
 
 namespace sd::widgets
 {
@@ -46,6 +49,8 @@ namespace sd::widgets
         void SetShowEditHandles(bool showHandles);
         void SetSnapToGrid(bool enabled, int gridSize = 8);
         void SetEditInteractionMode(EditInteractionMode mode);
+        void SetDefaultSize(const QSize& size);
+        void SetGaugeProperties(double lowerLimit, double upperLimit, double tickInterval, bool showTickMarks);
 
         QString GetKey() const;
         VariableType GetType() const;
@@ -54,6 +59,7 @@ namespace sd::widgets
 
     signals:
         void ChangeWidgetRequested(const QString& key, const QString& widgetType);
+        void RemoveRequested(const QString& key);
         void ControlBoolEdited(const QString& key, bool value);
         void ControlDoubleEdited(const QString& key, double value);
         void ControlStringEdited(const QString& key, const QString& value);
@@ -63,6 +69,8 @@ namespace sd::widgets
         void mousePressEvent(QMouseEvent* event) override;
         void mouseMoveEvent(QMouseEvent* event) override;
         void mouseReleaseEvent(QMouseEvent* event) override;
+        void enterEvent(QEnterEvent* event) override;
+        void leaveEvent(QEvent* event) override;
         void keyPressEvent(QKeyEvent* event) override;
         void contextMenuEvent(QContextMenuEvent* event) override;
 
@@ -87,6 +95,10 @@ namespace sd::widgets
         void UpdateValueDisplay();
         int DoubleToPercent(double value) const;
         void UpdateBoolLedAppearance();
+        bool IsGaugeWidget() const;
+        bool IsPropertiesSupported() const;
+        void OpenPropertiesDialog();
+        void ApplyGaugeSettings();
         DragMode HitTestDragMode(const QPoint& localPos) const;
         void UpdateCursorForPosition(const QPoint& localPos);
 
@@ -98,6 +110,7 @@ namespace sd::widgets
         bool m_snapToGrid = true;
         int m_gridSize = 8;
         EditInteractionMode m_editInteractionMode = EditInteractionMode::MoveAndResize;
+        bool m_isHovering = false;
         QPoint m_dragOrigin;
         QPoint m_dragStartGlobal;
         QRect m_dragStartGeometry;
@@ -105,6 +118,11 @@ namespace sd::widgets
         bool m_boolValue = false;
         double m_doubleValue = 0.0;
         bool m_settingGaugeProgrammatically = false;
+        QSize m_defaultSize;
+        double m_gaugeLowerLimit = -1.0;
+        double m_gaugeUpperLimit = 1.0;
+        double m_gaugeTickInterval = 0.2;
+        bool m_gaugeShowTickMarks = true;
         QString m_stringValue;
 
         QLabel* m_titleLabel = nullptr;

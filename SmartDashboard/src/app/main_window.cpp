@@ -295,8 +295,10 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
     connect(tile, &sd::widgets::VariableTile::ControlBoolEdited, this, &MainWindow::OnControlBoolEdited);
     connect(tile, &sd::widgets::VariableTile::ControlDoubleEdited, this, &MainWindow::OnControlDoubleEdited);
     connect(tile, &sd::widgets::VariableTile::ControlStringEdited, this, &MainWindow::OnControlStringEdited);
+    connect(tile, &sd::widgets::VariableTile::RemoveRequested, this, &MainWindow::OnRemoveWidgetRequested);
 
     tile->setObjectName(QString("tile_%1").arg(QString::number(m_tiles.size() + 1)));
+    tile->SetDefaultSize(QSize(220, 84));
     tile->SetEditable(m_isEditable);
     tile->SetSnapToGrid(m_snapToGrid, 8);
     tile->SetEditInteractionMode(m_editInteractionMode);
@@ -309,6 +311,16 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
         if (!entry.widgetType.isEmpty())
         {
             tile->SetWidgetType(entry.widgetType);
+        }
+
+        if (entry.gaugeLowerLimit.isValid())
+        {
+            tile->SetGaugeProperties(
+                entry.gaugeLowerLimit.toDouble(),
+                entry.gaugeUpperLimit.isValid() ? entry.gaugeUpperLimit.toDouble() : 1.0,
+                entry.gaugeTickInterval.isValid() ? entry.gaugeTickInterval.toDouble() : 0.2,
+                entry.gaugeShowTickMarks.isValid() ? entry.gaugeShowTickMarks.toBool() : true
+            );
         }
     }
     else
@@ -378,6 +390,24 @@ void MainWindow::OnControlBoolEdited(const QString& key, bool value)
     {
         m_commandPublisher->PublishBool(key, value);
     }
+}
+
+void MainWindow::OnRemoveWidgetRequested(const QString& key)
+{
+    const std::string keyStd = key.toStdString();
+    auto it = m_tiles.find(keyStd);
+    if (it == m_tiles.end())
+    {
+        return;
+    }
+
+    if (it->second != nullptr)
+    {
+        it->second->deleteLater();
+    }
+
+    m_tiles.erase(it);
+    m_savedLayoutByKey.erase(keyStd);
 }
 
 void MainWindow::OnControlDoubleEdited(const QString& key, double value)

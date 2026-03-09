@@ -37,6 +37,31 @@ Curated milestone history for this repository.
   - `docs/ai_development_guidelines.md`
 - Clarified README structure with architecture overview, status, development approach, and roadmap.
 
+## 2026-03-09 - Gauge editing workflow and layout persistence
+
+- Expanded editable tile context menu behavior (editable-only):
+  - `Change to...`
+  - `Properties...`
+  - `Send To Back`
+  - `Reset Size` (disabled when already at default)
+  - `Remove`
+- Added removable tile workflow by wiring tile-level remove action to `MainWindow` tile map/layout state cleanup.
+- Added gauge-specific properties dialog and behavior:
+  - upper/lower limit
+  - tick interval
+  - show tick marks toggle
+- Updated gauge normalization and publish mapping to use configured lower/upper limits instead of fixed `-1..1`.
+- Added layout persistence for gauge properties in serializer/load path:
+  - `gaugeLowerLimit`
+  - `gaugeUpperLimit`
+  - `gaugeTickInterval`
+  - `gaugeShowTickMarks`
+- Refined editable visual affordances:
+  - no always-on edit chrome; outline appears only when hovering active tile
+  - kept cursor-based directional resize/move hints
+  - active drag/resize outline brightens and thickens for immediate feedback
+  - gauge no longer appears disabled/inverted in editable mode while still blocking value manipulation
+
 ## Forward-looking considerations (documented, not implemented)
 
 - Optional NetworkTables adapter via transport interface extension.

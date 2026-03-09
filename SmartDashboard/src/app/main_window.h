@@ -36,6 +36,7 @@ private slots:
     void OnSaveLayout();
     void OnLoadLayout();
     void OnClearWidgets();
+    void OnRemoveWidgetRequested(const QString& key);
     void OnControlBoolEdited(const QString& key, bool value);
     void OnControlDoubleEdited(const QString& key, double value);
     void OnControlStringEdited(const QString& key, const QString& value);

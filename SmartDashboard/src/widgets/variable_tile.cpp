@@ -4,15 +4,22 @@
 
 #include <QAction>
 #include <QContextMenuEvent>
+#include <QDialog>
 #include <QDial>
+#include <QDialogButtonBox>
+#include <QDoubleSpinBox>
+#include <QEnterEvent>
 #include <QFrame>
+#include <QFormLayout>
 #include <QGridLayout>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QKeyEvent>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QProgressBar>
+#include <QCheckBox>
 
 namespace sd::widgets
 {
@@ -31,6 +38,22 @@ namespace sd::widgets
                 default:
                     return "unknown";
             }
+        }
+
+        double PercentToConfiguredRange(int rawPercent, double lower, double upper)
+        {
+            double clampedPercent = static_cast<double>(rawPercent);
+            if (clampedPercent < 0.0)
+            {
+                clampedPercent = 0.0;
+            }
+            if (clampedPercent > 100.0)
+            {
+                clampedPercent = 100.0;
+            }
+
+            const double normalized = clampedPercent / 100.0;
+            return lower + ((upper - lower) * normalized);
         }
     }
 
@@ -76,8 +99,8 @@ namespace sd::widgets
                 return;
             }
 
-            const double normalized = static_cast<double>(raw) / 100.0;
-            emit ControlDoubleEdited(m_key, (normalized * 2.0) - 1.0);
+            const double mapped = PercentToConfiguredRange(raw, m_gaugeLowerLimit, m_gaugeUpperLimit);
+            emit ControlDoubleEdited(m_key, mapped);
         });
 
         m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
@@ -110,6 +133,8 @@ namespace sd::widgets
         setFocusPolicy(Qt::StrongFocus);
 
         setMinimumSize(40, 30);
+        m_defaultSize = QSize(220, 84);
+        SetGaugeProperties(m_gaugeLowerLimit, m_gaugeUpperLimit, m_gaugeTickInterval, m_gaugeShowTickMarks);
         UpdateWidgetPresentation();
         UpdateValueDisplay();
     }
@@ -122,12 +147,14 @@ namespace sd::widgets
         // Edit mode is layout-only: never allow widget controls to send commands while moving/resizing.
         m_controlWidget->setEnabled(!m_editable);
         m_controlWidget->setAttribute(Qt::WA_TransparentForMouseEvents, m_editable);
-        m_gauge->setEnabled(!m_editable);
+        // Keep gauge visually consistent in editable mode; block interaction via mouse transparency.
+        m_gauge->setEnabled(true);
         m_gauge->setAttribute(Qt::WA_TransparentForMouseEvents, m_editable);
 
         if (!m_editable)
         {
             m_dragMode = DragMode::None;
+            m_isHovering = false;
             const bool gaugeInteractive = (m_type == VariableType::Double && m_widgetType == "double.gauge");
             setCursor(gaugeInteractive ? Qt::SizeHorCursor : Qt::ArrowCursor);
         }
@@ -161,11 +188,46 @@ namespace sd::widgets
         update();
     }
 
+    void VariableTile::SetDefaultSize(const QSize& size)
+    {
+        if (size.width() > 0 && size.height() > 0)
+        {
+            m_defaultSize = size;
+        }
+    }
+
+    void VariableTile::SetGaugeProperties(double lowerLimit, double upperLimit, double tickInterval, bool showTickMarks)
+    {
+        double lower = lowerLimit;
+        double upper = upperLimit;
+        if (upper <= lower)
+        {
+            upper = lower + 0.001;
+        }
+
+        m_gaugeLowerLimit = lower;
+        m_gaugeUpperLimit = upper;
+        m_gaugeTickInterval = tickInterval;
+        if (m_gaugeTickInterval <= 0.0)
+        {
+            m_gaugeTickInterval = 0.001;
+        }
+        m_gaugeShowTickMarks = showTickMarks;
+
+        setProperty("gaugeLowerLimit", m_gaugeLowerLimit);
+        setProperty("gaugeUpperLimit", m_gaugeUpperLimit);
+        setProperty("gaugeTickInterval", m_gaugeTickInterval);
+        setProperty("gaugeShowTickMarks", m_gaugeShowTickMarks);
+
+        ApplyGaugeSettings();
+        UpdateValueDisplay();
+    }
+
     void VariableTile::paintEvent(QPaintEvent* event)
     {
         QFrame::paintEvent(event);
 
-        if (!m_editable || !m_showEditHandles)
+        if (!m_editable || !m_showEditHandles || !m_isHovering)
         {
             return;
         }
@@ -173,34 +235,12 @@ namespace sd::widgets
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing, false);
 
-        QPen borderPen(QColor("#5a5a5a"));
-        borderPen.setStyle(Qt::DashLine);
+        const bool isDraggingOrResizing = (m_dragMode != DragMode::None);
+        QPen borderPen(QColor(isDraggingOrResizing ? "#8a8a8a" : "#5a5a5a"));
+        borderPen.setWidth(isDraggingOrResizing ? 2 : 1);
+        borderPen.setStyle(Qt::SolidLine);
         painter.setPen(borderPen);
         painter.drawRect(rect().adjusted(0, 0, -1, -1));
-
-        painter.setPen(Qt::NoPen);
-        painter.setBrush(QColor("#d0d0d0"));
-
-        const int handle = 6;
-        const int half = handle / 2;
-        const int w = width();
-        const int h = height();
-
-        const QPoint centers[] = {
-            QPoint(0, 0),
-            QPoint(w / 2, 0),
-            QPoint(w - 1, 0),
-            QPoint(0, h / 2),
-            QPoint(w - 1, h / 2),
-            QPoint(0, h - 1),
-            QPoint(w / 2, h - 1),
-            QPoint(w - 1, h - 1)
-        };
-
-        for (const QPoint& center : centers)
-        {
-            painter.drawRect(QRect(center.x() - half, center.y() - half, handle, handle));
-        }
     }
 
     void VariableTile::SetBoolValue(bool value)
@@ -262,6 +302,8 @@ namespace sd::widgets
             {
                 UpdateCursorForPosition(event->position().toPoint());
             }
+
+            update();
         }
 
         QFrame::mousePressEvent(event);
@@ -383,6 +425,8 @@ namespace sd::widgets
 
                 setGeometry(next);
             }
+
+            update();
         }
         else if (m_editable)
         {
@@ -398,9 +442,35 @@ namespace sd::widgets
         {
             m_dragMode = DragMode::None;
             UpdateCursorForPosition(event->position().toPoint());
+            update();
         }
 
         QFrame::mouseReleaseEvent(event);
+    }
+
+    void VariableTile::enterEvent(QEnterEvent* event)
+    {
+        m_isHovering = true;
+        if (m_editable)
+        {
+            UpdateCursorForPosition(event->position().toPoint());
+            update();
+        }
+
+        QFrame::enterEvent(event);
+    }
+
+    void VariableTile::leaveEvent(QEvent* event)
+    {
+        m_isHovering = false;
+        if (m_editable)
+        {
+            m_dragMode = DragMode::None;
+            setCursor(Qt::ArrowCursor);
+            update();
+        }
+
+        QFrame::leaveEvent(event);
     }
 
     void VariableTile::keyPressEvent(QKeyEvent* event)
@@ -488,6 +558,12 @@ namespace sd::widgets
 
     void VariableTile::contextMenuEvent(QContextMenuEvent* event)
     {
+        if (!m_editable)
+        {
+            event->ignore();
+            return;
+        }
+
         QMenu menu(this);
         BuildContextMenu(menu);
         menu.exec(event->globalPos());
@@ -531,8 +607,32 @@ namespace sd::widgets
                 break;
         }
 
-        menu.addSeparator();
-        menu.addAction("Properties...");
+        QAction* propertiesAction = menu.addAction("Properties...");
+        propertiesAction->setEnabled(IsPropertiesSupported());
+        connect(propertiesAction, &QAction::triggered, this, [this]()
+        {
+            OpenPropertiesDialog();
+        });
+
+        QAction* sendToBackAction = menu.addAction("Send To Back");
+        connect(sendToBackAction, &QAction::triggered, this, [this]()
+        {
+            lower();
+        });
+
+        QAction* resetSizeAction = menu.addAction("Reset Size");
+        const bool isDefaultSize = (size() == m_defaultSize);
+        resetSizeAction->setEnabled(!isDefaultSize);
+        connect(resetSizeAction, &QAction::triggered, this, [this]()
+        {
+            resize(m_defaultSize);
+        });
+
+        QAction* removeAction = menu.addAction("Remove");
+        connect(removeAction, &QAction::triggered, this, [this]()
+        {
+            emit RemoveRequested(m_key);
+        });
     }
 
     QString VariableTile::FormatValueText() const
@@ -687,18 +787,25 @@ namespace sd::widgets
 
     int VariableTile::DoubleToPercent(double value) const
     {
-        // Normalization algorithm: map -1..1 input domain to 0..100 UI control range.
+        // Normalization algorithm: map configured [lower..upper] domain to 0..100 UI control range.
         double clamped = value;
-        if (clamped < -1.0)
+        if (clamped < m_gaugeLowerLimit)
         {
-            clamped = -1.0;
+            clamped = m_gaugeLowerLimit;
         }
-        if (clamped > 1.0)
+        if (clamped > m_gaugeUpperLimit)
         {
-            clamped = 1.0;
+            clamped = m_gaugeUpperLimit;
         }
 
-        return static_cast<int>((clamped + 1.0) * 50.0);
+        const double span = m_gaugeUpperLimit - m_gaugeLowerLimit;
+        if (span <= 0.0)
+        {
+            return 0;
+        }
+
+        const double normalized = (clamped - m_gaugeLowerLimit) / span;
+        return static_cast<int>(normalized * 100.0 + 0.5);
     }
 
     void VariableTile::UpdateBoolLedAppearance()
@@ -707,6 +814,101 @@ namespace sd::widgets
         m_boolLed->setStyleSheet(
             QString("background-color: %1; border-radius: 7px; border: 1px solid #4b4b4b;").arg(color)
         );
+    }
+
+    bool VariableTile::IsGaugeWidget() const
+    {
+        return (m_type == VariableType::Double && m_widgetType == "double.gauge");
+    }
+
+    bool VariableTile::IsPropertiesSupported() const
+    {
+        return IsGaugeWidget();
+    }
+
+    void VariableTile::OpenPropertiesDialog()
+    {
+        if (!IsGaugeWidget())
+        {
+            return;
+        }
+
+        QDialog dialog(this);
+        dialog.setWindowTitle("Gauge Properties");
+
+        auto* form = new QFormLayout(&dialog);
+
+        auto* upperLimitSpin = new QDoubleSpinBox(&dialog);
+        upperLimitSpin->setDecimals(3);
+        upperLimitSpin->setRange(-1e6, 1e6);
+        upperLimitSpin->setValue(m_gaugeUpperLimit);
+
+        auto* lowerLimitSpin = new QDoubleSpinBox(&dialog);
+        lowerLimitSpin->setDecimals(3);
+        lowerLimitSpin->setRange(-1e6, 1e6);
+        lowerLimitSpin->setValue(m_gaugeLowerLimit);
+
+        auto* tickIntervalSpin = new QDoubleSpinBox(&dialog);
+        tickIntervalSpin->setDecimals(3);
+        tickIntervalSpin->setRange(0.001, 1e6);
+        tickIntervalSpin->setValue(m_gaugeTickInterval);
+
+        auto* showTickMarksCheck = new QCheckBox(&dialog);
+        showTickMarksCheck->setChecked(m_gaugeShowTickMarks);
+
+        form->addRow("Upper Limit", upperLimitSpin);
+        form->addRow("Lower Limit", lowerLimitSpin);
+        form->addRow("Tick Interval", tickIntervalSpin);
+        form->addRow("Show Tick Marks", showTickMarksCheck);
+
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        form->addRow(buttons);
+
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+        if (dialog.exec() != QDialog::Accepted)
+        {
+            return;
+        }
+
+        SetGaugeProperties(
+            lowerLimitSpin->value(),
+            upperLimitSpin->value(),
+            tickIntervalSpin->value(),
+            showTickMarksCheck->isChecked()
+        );
+    }
+
+    void VariableTile::ApplyGaugeSettings()
+    {
+        if (m_gauge == nullptr)
+        {
+            return;
+        }
+
+        m_gauge->setNotchesVisible(m_gaugeShowTickMarks);
+
+        const double span = m_gaugeUpperLimit - m_gaugeLowerLimit;
+        if (span <= 0.0)
+        {
+            m_gauge->setSingleStep(1);
+            m_gauge->setPageStep(10);
+            return;
+        }
+
+        int step = static_cast<int>((m_gaugeTickInterval / span) * 100.0 + 0.5);
+        if (step < 1)
+        {
+            step = 1;
+        }
+        if (step > 100)
+        {
+            step = 100;
+        }
+
+        m_gauge->setSingleStep(step);
+        m_gauge->setPageStep(step);
     }
 
     VariableTile::DragMode VariableTile::HitTestDragMode(const QPoint& localPos) const

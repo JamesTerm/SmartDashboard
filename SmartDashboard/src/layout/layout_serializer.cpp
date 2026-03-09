@@ -46,6 +46,27 @@ namespace sd::layout
             entry["variableKey"] = widget->property("variableKey").toString();
             entry["widgetType"] = widget->property("widgetType").toString();
 
+            const QVariant gaugeLower = widget->property("gaugeLowerLimit");
+            const QVariant gaugeUpper = widget->property("gaugeUpperLimit");
+            const QVariant gaugeTick = widget->property("gaugeTickInterval");
+            const QVariant gaugeShow = widget->property("gaugeShowTickMarks");
+            if (gaugeLower.isValid())
+            {
+                entry["gaugeLowerLimit"] = gaugeLower.toDouble();
+            }
+            if (gaugeUpper.isValid())
+            {
+                entry["gaugeUpperLimit"] = gaugeUpper.toDouble();
+            }
+            if (gaugeTick.isValid())
+            {
+                entry["gaugeTickInterval"] = gaugeTick.toDouble();
+            }
+            if (gaugeShow.isValid())
+            {
+                entry["gaugeShowTickMarks"] = gaugeShow.toBool();
+            }
+
             QJsonObject geo;
             geo["x"] = geometry.x();
             geo["y"] = geometry.y();
@@ -111,6 +132,22 @@ namespace sd::layout
                 geo.value("w").toInt(220),
                 geo.value("h").toInt(84)
             );
+            if (entry.contains("gaugeLowerLimit"))
+            {
+                layoutEntry.gaugeLowerLimit = entry.value("gaugeLowerLimit").toDouble();
+            }
+            if (entry.contains("gaugeUpperLimit"))
+            {
+                layoutEntry.gaugeUpperLimit = entry.value("gaugeUpperLimit").toDouble();
+            }
+            if (entry.contains("gaugeTickInterval"))
+            {
+                layoutEntry.gaugeTickInterval = entry.value("gaugeTickInterval").toDouble();
+            }
+            if (entry.contains("gaugeShowTickMarks"))
+            {
+                layoutEntry.gaugeShowTickMarks = entry.value("gaugeShowTickMarks").toBool();
+            }
             outEntries.push_back(layoutEntry);
         }
 
