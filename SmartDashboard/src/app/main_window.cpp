@@ -74,6 +74,26 @@ namespace
             );
         }
 
+        if (entry.progressBarLowerLimit.isValid())
+        {
+            tile->SetProgressBarProperties(
+                entry.progressBarLowerLimit.toDouble(),
+                entry.progressBarUpperLimit.isValid() ? entry.progressBarUpperLimit.toDouble() : 1.0,
+                entry.progressBarTickInterval.isValid() ? entry.progressBarTickInterval.toDouble() : 0.2,
+                entry.progressBarShowTickMarks.isValid() ? entry.progressBarShowTickMarks.toBool() : false
+            );
+        }
+
+        if (entry.sliderLowerLimit.isValid())
+        {
+            tile->SetSliderProperties(
+                entry.sliderLowerLimit.toDouble(),
+                entry.sliderUpperLimit.isValid() ? entry.sliderUpperLimit.toDouble() : 1.0,
+                entry.sliderTickInterval.isValid() ? entry.sliderTickInterval.toDouble() : 0.2,
+                entry.sliderShowTickMarks.isValid() ? entry.sliderShowTickMarks.toBool() : true
+            );
+        }
+
         if (entry.linePlotBufferSizeSamples.isValid())
         {
             tile->SetLinePlotProperties(

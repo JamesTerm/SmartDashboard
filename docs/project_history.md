@@ -7,6 +7,23 @@ Curated milestone history for this repository.
 
 ## 2026-03-09 - Gauge editing workflow and layout persistence
 
+- Finalized line-plot axis behavior updates:
+  - x-axis tick labels are now tied to fixed time values and scroll left with advancing time (no frame-to-frame relabel jitter)
+  - reset graph state now preserves visible default `0..1` x/y axes so number lines and grid lines remain visible with no samples
+- Added gauge-style properties for non-gauge numeric widgets:
+  - `double.progress`: `Upper Limit`, `Lower Limit`, `Tick Interval`, `Show Tick Marks`
+  - `double.slider`: `Upper Limit`, `Lower Limit`, `Tick Interval`, `Show Tick Marks`
+- Extended slider/control behavior to respect configured slider range for both UI->command mapping and value->UI normalization.
+- Added layout save/load coverage for new properties:
+  - `progressBarLowerLimit`
+  - `progressBarUpperLimit`
+  - `progressBarTickInterval`
+  - `progressBarShowTickMarks`
+  - `sliderLowerLimit`
+  - `sliderUpperLimit`
+  - `sliderTickInterval`
+  - `sliderShowTickMarks`
+
 - Refined `double.lineplot` behavior and readability:
   - manual Y-axis bounds now clip out-of-range sample rendering
   - added optional axis rendering controls:

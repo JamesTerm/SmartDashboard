@@ -143,6 +143,8 @@ namespace sd::widgets
 
         m_controlWidget = new TileControlWidget(m_type, this);
         m_controlWidget->setVisible(false);
+        m_controlWidget->SetDoubleRange(m_sliderLowerLimit, m_sliderUpperLimit);
+        m_controlWidget->SetDoubleTickSettings(m_sliderTickInterval, m_sliderShowTickMarks);
 
         m_layout->addWidget(m_controlWidget, 1, 0, 1, 2);
 
@@ -167,6 +169,8 @@ namespace sd::widgets
         setMinimumSize(40, 30);
         m_defaultSize = QSize(220, 84);
         SetGaugeProperties(m_gaugeLowerLimit, m_gaugeUpperLimit, m_gaugeTickInterval, m_gaugeShowTickMarks);
+        SetProgressBarProperties(m_progressBarLowerLimit, m_progressBarUpperLimit, m_progressBarTickInterval, m_progressBarShowTickMarks);
+        SetSliderProperties(m_sliderLowerLimit, m_sliderUpperLimit, m_sliderTickInterval, m_sliderShowTickMarks);
         SetLinePlotProperties(
             m_linePlotBufferSizeSamples,
             m_linePlotAutoYAxis,
@@ -263,6 +267,60 @@ namespace sd::widgets
         setProperty("gaugeShowTickMarks", m_gaugeShowTickMarks);
 
         ApplyGaugeSettings();
+        UpdateValueDisplay();
+    }
+
+    void VariableTile::SetProgressBarProperties(double lowerLimit, double upperLimit, double tickInterval, bool showTickMarks)
+    {
+        double lower = lowerLimit;
+        double upper = upperLimit;
+        if (upper <= lower)
+        {
+            upper = lower + 0.001;
+        }
+
+        m_progressBarLowerLimit = lower;
+        m_progressBarUpperLimit = upper;
+        m_progressBarTickInterval = tickInterval;
+        if (m_progressBarTickInterval <= 0.0)
+        {
+            m_progressBarTickInterval = 0.001;
+        }
+        m_progressBarShowTickMarks = showTickMarks;
+
+        setProperty("progressBarLowerLimit", m_progressBarLowerLimit);
+        setProperty("progressBarUpperLimit", m_progressBarUpperLimit);
+        setProperty("progressBarTickInterval", m_progressBarTickInterval);
+        setProperty("progressBarShowTickMarks", m_progressBarShowTickMarks);
+
+        ApplyProgressBarSettings();
+        UpdateValueDisplay();
+    }
+
+    void VariableTile::SetSliderProperties(double lowerLimit, double upperLimit, double tickInterval, bool showTickMarks)
+    {
+        double lower = lowerLimit;
+        double upper = upperLimit;
+        if (upper <= lower)
+        {
+            upper = lower + 0.001;
+        }
+
+        m_sliderLowerLimit = lower;
+        m_sliderUpperLimit = upper;
+        m_sliderTickInterval = tickInterval;
+        if (m_sliderTickInterval <= 0.0)
+        {
+            m_sliderTickInterval = 0.001;
+        }
+        m_sliderShowTickMarks = showTickMarks;
+
+        setProperty("sliderLowerLimit", m_sliderLowerLimit);
+        setProperty("sliderUpperLimit", m_sliderUpperLimit);
+        setProperty("sliderTickInterval", m_sliderTickInterval);
+        setProperty("sliderShowTickMarks", m_sliderShowTickMarks);
+
+        ApplySliderSettings();
         UpdateValueDisplay();
     }
 
@@ -951,7 +1009,7 @@ namespace sd::widgets
 
         if (m_progressBar->isVisible())
         {
-            m_progressBar->setValue(DoubleToPercent(m_doubleValue));
+            m_progressBar->setValue(ValueToPercentForProgressBar(m_doubleValue));
             return;
         }
 
@@ -1001,6 +1059,28 @@ namespace sd::widgets
         return static_cast<int>(normalized * 100.0 + 0.5);
     }
 
+    int VariableTile::ValueToPercentForProgressBar(double value) const
+    {
+        double clamped = value;
+        if (clamped < m_progressBarLowerLimit)
+        {
+            clamped = m_progressBarLowerLimit;
+        }
+        if (clamped > m_progressBarUpperLimit)
+        {
+            clamped = m_progressBarUpperLimit;
+        }
+
+        const double span = m_progressBarUpperLimit - m_progressBarLowerLimit;
+        if (span <= 0.0)
+        {
+            return 0;
+        }
+
+        const double normalized = (clamped - m_progressBarLowerLimit) / span;
+        return static_cast<int>(normalized * 100.0 + 0.5);
+    }
+
     void VariableTile::UpdateBoolLedAppearance()
     {
         const QString color = m_boolValue ? "#2ecc71" : "#7f8c8d";
@@ -1026,7 +1106,9 @@ namespace sd::widgets
 
     bool VariableTile::IsPropertiesSupported() const
     {
-        return IsGaugeWidget() || IsLinePlotWidget() || IsDoubleNumericWidget();
+        const bool isProgressBar = (m_widgetType == "double.progress");
+        const bool isSlider = (m_widgetType == "double.slider");
+        return IsGaugeWidget() || IsLinePlotWidget() || IsDoubleNumericWidget() || isProgressBar || isSlider;
     }
 
     void VariableTile::OpenPropertiesDialog()
@@ -1073,6 +1155,106 @@ namespace sd::widgets
             }
 
             SetGaugeProperties(
+                lowerLimitSpin->value(),
+                upperLimitSpin->value(),
+                tickIntervalSpin->value(),
+                showTickMarksCheck->isChecked()
+            );
+            return;
+        }
+
+        if (m_widgetType == "double.progress")
+        {
+            QDialog dialog(this);
+            dialog.setWindowTitle("Progress Bar Properties");
+
+            auto* form = new QFormLayout(&dialog);
+
+            auto* upperLimitSpin = new QDoubleSpinBox(&dialog);
+            upperLimitSpin->setDecimals(3);
+            upperLimitSpin->setRange(-1e6, 1e6);
+            upperLimitSpin->setValue(m_progressBarUpperLimit);
+
+            auto* lowerLimitSpin = new QDoubleSpinBox(&dialog);
+            lowerLimitSpin->setDecimals(3);
+            lowerLimitSpin->setRange(-1e6, 1e6);
+            lowerLimitSpin->setValue(m_progressBarLowerLimit);
+
+            auto* tickIntervalSpin = new QDoubleSpinBox(&dialog);
+            tickIntervalSpin->setDecimals(3);
+            tickIntervalSpin->setRange(0.001, 1e6);
+            tickIntervalSpin->setValue(m_progressBarTickInterval);
+
+            auto* showTickMarksCheck = new QCheckBox(&dialog);
+            showTickMarksCheck->setChecked(m_progressBarShowTickMarks);
+
+            form->addRow("Upper Limit", upperLimitSpin);
+            form->addRow("Lower Limit", lowerLimitSpin);
+            form->addRow("Tick Interval", tickIntervalSpin);
+            form->addRow("Show Tick Marks", showTickMarksCheck);
+
+            auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            form->addRow(buttons);
+
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+            if (dialog.exec() != QDialog::Accepted)
+            {
+                return;
+            }
+
+            SetProgressBarProperties(
+                lowerLimitSpin->value(),
+                upperLimitSpin->value(),
+                tickIntervalSpin->value(),
+                showTickMarksCheck->isChecked()
+            );
+            return;
+        }
+
+        if (m_widgetType == "double.slider")
+        {
+            QDialog dialog(this);
+            dialog.setWindowTitle("Slider Properties");
+
+            auto* form = new QFormLayout(&dialog);
+
+            auto* upperLimitSpin = new QDoubleSpinBox(&dialog);
+            upperLimitSpin->setDecimals(3);
+            upperLimitSpin->setRange(-1e6, 1e6);
+            upperLimitSpin->setValue(m_sliderUpperLimit);
+
+            auto* lowerLimitSpin = new QDoubleSpinBox(&dialog);
+            lowerLimitSpin->setDecimals(3);
+            lowerLimitSpin->setRange(-1e6, 1e6);
+            lowerLimitSpin->setValue(m_sliderLowerLimit);
+
+            auto* tickIntervalSpin = new QDoubleSpinBox(&dialog);
+            tickIntervalSpin->setDecimals(3);
+            tickIntervalSpin->setRange(0.001, 1e6);
+            tickIntervalSpin->setValue(m_sliderTickInterval);
+
+            auto* showTickMarksCheck = new QCheckBox(&dialog);
+            showTickMarksCheck->setChecked(m_sliderShowTickMarks);
+
+            form->addRow("Upper Limit", upperLimitSpin);
+            form->addRow("Lower Limit", lowerLimitSpin);
+            form->addRow("Tick Interval", tickIntervalSpin);
+            form->addRow("Show Tick Marks", showTickMarksCheck);
+
+            auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            form->addRow(buttons);
+
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+            if (dialog.exec() != QDialog::Accepted)
+            {
+                return;
+            }
+
+            SetSliderProperties(
                 lowerLimitSpin->value(),
                 upperLimitSpin->value(),
                 tickIntervalSpin->value(),
@@ -1205,6 +1387,33 @@ namespace sd::widgets
 
         m_gauge->setSingleStep(step);
         m_gauge->setPageStep(step);
+    }
+
+    void VariableTile::ApplyProgressBarSettings()
+    {
+        if (m_progressBar == nullptr)
+        {
+            return;
+        }
+
+        m_progressBar->setTextVisible(m_progressBarShowTickMarks);
+
+        const double span = m_progressBarUpperLimit - m_progressBarLowerLimit;
+        if (span <= 0.0)
+        {
+            return;
+        }
+    }
+
+    void VariableTile::ApplySliderSettings()
+    {
+        if (m_controlWidget == nullptr)
+        {
+            return;
+        }
+
+        m_controlWidget->SetDoubleRange(m_sliderLowerLimit, m_sliderUpperLimit);
+        m_controlWidget->SetDoubleTickSettings(m_sliderTickInterval, m_sliderShowTickMarks);
     }
 
     void VariableTile::ApplyLinePlotSettings()

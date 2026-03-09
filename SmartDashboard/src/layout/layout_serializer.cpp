@@ -71,6 +71,14 @@ namespace sd::layout
             const QVariant gaugeUpper = widget->property("gaugeUpperLimit");
             const QVariant gaugeTick = widget->property("gaugeTickInterval");
             const QVariant gaugeShow = widget->property("gaugeShowTickMarks");
+            const QVariant progressBarLower = widget->property("progressBarLowerLimit");
+            const QVariant progressBarUpper = widget->property("progressBarUpperLimit");
+            const QVariant progressBarTick = widget->property("progressBarTickInterval");
+            const QVariant progressBarShow = widget->property("progressBarShowTickMarks");
+            const QVariant sliderLower = widget->property("sliderLowerLimit");
+            const QVariant sliderUpper = widget->property("sliderUpperLimit");
+            const QVariant sliderTick = widget->property("sliderTickInterval");
+            const QVariant sliderShow = widget->property("sliderShowTickMarks");
             const QVariant linePlotBufferSize = widget->property("linePlotBufferSizeSamples");
             const QVariant linePlotAutoY = widget->property("linePlotAutoYAxis");
             const QVariant linePlotShowNumberLines = widget->property("linePlotShowNumberLines");
@@ -93,6 +101,38 @@ namespace sd::layout
             if (gaugeShow.isValid())
             {
                 entry["gaugeShowTickMarks"] = gaugeShow.toBool();
+            }
+            if (progressBarLower.isValid())
+            {
+                entry["progressBarLowerLimit"] = progressBarLower.toDouble();
+            }
+            if (progressBarUpper.isValid())
+            {
+                entry["progressBarUpperLimit"] = progressBarUpper.toDouble();
+            }
+            if (progressBarTick.isValid())
+            {
+                entry["progressBarTickInterval"] = progressBarTick.toDouble();
+            }
+            if (progressBarShow.isValid())
+            {
+                entry["progressBarShowTickMarks"] = progressBarShow.toBool();
+            }
+            if (sliderLower.isValid())
+            {
+                entry["sliderLowerLimit"] = sliderLower.toDouble();
+            }
+            if (sliderUpper.isValid())
+            {
+                entry["sliderUpperLimit"] = sliderUpper.toDouble();
+            }
+            if (sliderTick.isValid())
+            {
+                entry["sliderTickInterval"] = sliderTick.toDouble();
+            }
+            if (sliderShow.isValid())
+            {
+                entry["sliderShowTickMarks"] = sliderShow.toBool();
             }
             if (linePlotBufferSize.isValid())
             {
@@ -203,6 +243,38 @@ namespace sd::layout
             if (entry.contains("gaugeShowTickMarks"))
             {
                 layoutEntry.gaugeShowTickMarks = entry.value("gaugeShowTickMarks").toBool();
+            }
+            if (entry.contains("progressBarLowerLimit"))
+            {
+                layoutEntry.progressBarLowerLimit = entry.value("progressBarLowerLimit").toDouble();
+            }
+            if (entry.contains("progressBarUpperLimit"))
+            {
+                layoutEntry.progressBarUpperLimit = entry.value("progressBarUpperLimit").toDouble();
+            }
+            if (entry.contains("progressBarTickInterval"))
+            {
+                layoutEntry.progressBarTickInterval = entry.value("progressBarTickInterval").toDouble();
+            }
+            if (entry.contains("progressBarShowTickMarks"))
+            {
+                layoutEntry.progressBarShowTickMarks = entry.value("progressBarShowTickMarks").toBool();
+            }
+            if (entry.contains("sliderLowerLimit"))
+            {
+                layoutEntry.sliderLowerLimit = entry.value("sliderLowerLimit").toDouble();
+            }
+            if (entry.contains("sliderUpperLimit"))
+            {
+                layoutEntry.sliderUpperLimit = entry.value("sliderUpperLimit").toDouble();
+            }
+            if (entry.contains("sliderTickInterval"))
+            {
+                layoutEntry.sliderTickInterval = entry.value("sliderTickInterval").toDouble();
+            }
+            if (entry.contains("sliderShowTickMarks"))
+            {
+                layoutEntry.sliderShowTickMarks = entry.value("sliderShowTickMarks").toBool();
             }
             if (entry.contains("linePlotBufferSizeSamples"))
             {

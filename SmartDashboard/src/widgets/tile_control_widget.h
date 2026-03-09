@@ -19,6 +19,8 @@ namespace sd::widgets
 
         void SetBoolValue(bool value);
         void SetDoubleValue(double value);
+        void SetDoubleRange(double lowerLimit, double upperLimit);
+        void SetDoubleTickSettings(double tickInterval, bool showTickMarks);
         void SetStringValue(const QString& value);
 
     signals:
@@ -29,6 +31,8 @@ namespace sd::widgets
     private:
         VariableType m_type;
         bool m_settingProgrammatically = false;
+        double m_doubleLowerLimit = -1.0;
+        double m_doubleUpperLimit = 1.0;
         QCheckBox* m_checkBox = nullptr;
         QSlider* m_slider = nullptr;
         QLineEdit* m_lineEdit = nullptr;

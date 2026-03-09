@@ -37,6 +37,9 @@
 - Line plot now supports optional `Show Number Lines` and `Show Grid Lines` with persisted layout properties.
 - Line plot rendering refinements: manual Y-limit clipping, endpoint-inclusive tick labels, adaptive decimal precision, and faster Y auto-range response for smaller buffers.
 - `StreamsSineWaveDouble` now applies `SweepSeconds` changes on the active run (no extra run required).
+- Line plot x-axis ticks now use fixed time anchors and scroll naturally with the time window; reset state keeps default `0..1` axes visible so number/grid lines do not disappear.
+- Added gauge-style properties for `double.progress` and `double.slider` (`Upper/Lower Limit`, `Tick Interval`, `Show Tick Marks`) with layout persistence and load/apply support.
+- Slider control mapping now honors configured lower/upper bounds for both display updates and command writes.
 
 ## Known constraints / active considerations
 

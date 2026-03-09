@@ -53,6 +53,8 @@ namespace sd::widgets
         void SetEditInteractionMode(EditInteractionMode mode);
         void SetDefaultSize(const QSize& size);
         void SetGaugeProperties(double lowerLimit, double upperLimit, double tickInterval, bool showTickMarks);
+        void SetProgressBarProperties(double lowerLimit, double upperLimit, double tickInterval, bool showTickMarks);
+        void SetSliderProperties(double lowerLimit, double upperLimit, double tickInterval, bool showTickMarks);
         void SetLinePlotProperties(int bufferSizeSamples, bool autoYAxis, double yLowerLimit, double yUpperLimit);
         void SetLinePlotNumberLinesVisible(bool visible);
         void SetLinePlotGridLinesVisible(bool visible);
@@ -104,6 +106,7 @@ namespace sd::widgets
         void UpdateWidgetPresentation();
         void UpdateValueDisplay();
         int DoubleToPercent(double value) const;
+        int ValueToPercentForProgressBar(double value) const;
         void UpdateBoolLedAppearance();
         bool IsGaugeWidget() const;
         bool IsLinePlotWidget() const;
@@ -111,6 +114,8 @@ namespace sd::widgets
         bool IsPropertiesSupported() const;
         void OpenPropertiesDialog();
         void ApplyGaugeSettings();
+        void ApplyProgressBarSettings();
+        void ApplySliderSettings();
         void ApplyLinePlotSettings();
         DragMode HitTestDragMode(const QPoint& localPos) const;
         void UpdateCursorForPosition(const QPoint& localPos);
@@ -138,6 +143,14 @@ namespace sd::widgets
         double m_gaugeUpperLimit = 1.0;
         double m_gaugeTickInterval = 0.2;
         bool m_gaugeShowTickMarks = true;
+        double m_progressBarLowerLimit = 0.0;
+        double m_progressBarUpperLimit = 1.0;
+        double m_progressBarTickInterval = 0.2;
+        bool m_progressBarShowTickMarks = false;
+        double m_sliderLowerLimit = -1.0;
+        double m_sliderUpperLimit = 1.0;
+        double m_sliderTickInterval = 0.2;
+        bool m_sliderShowTickMarks = true;
         int m_linePlotBufferSizeSamples = 5000;
         bool m_linePlotAutoYAxis = true;
         bool m_linePlotShowNumberLines = false;

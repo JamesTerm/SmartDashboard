@@ -112,11 +112,6 @@ namespace sd::widgets
         painter.setPen(QPen(QColor("#3b3b3b"), 1));
         painter.drawRect(drawRect);
 
-        if (m_samples.size() < 2)
-        {
-            return;
-        }
-
         const AxisRange xRange = ComputeXRange();
         const AxisRange yRange = ComputeYRange();
         const double xSpan = xRange.max - xRange.min;
@@ -172,26 +167,27 @@ namespace sd::widgets
             return QString::number(value, 'f', 2);
         };
 
-        const double xStep = chooseTickStep(xSpan, std::max(2, drawRect.width() / 90));
         const double yStep = chooseTickStep(ySpan, std::max(2, drawRect.height() / 60));
 
+        // X-axis ticks: generate at fixed time intervals, render only visible ones
         std::vector<double> xTickValues;
-        int xTickSegments = 1;
+        double xTickInterval;
         if (m_showNumberLines)
         {
-            // Endpoint-inclusive x labels with pixel-driven spacing.
-            const int interiorTickCount = std::max(4, drawRect.width() / 80);
-            xTickSegments = interiorTickCount + 1;
-            for (int idx = 0; idx <= xTickSegments; ++idx)
-            {
-                const double ratio = static_cast<double>(idx) / static_cast<double>(xTickSegments);
-                xTickValues.push_back(xRange.min + (ratio * xSpan));
-            }
+            // Use pixel-driven spacing to determine tick interval
+            const int targetInteriorTicks = std::max(4, drawRect.width() / 80);
+            xTickInterval = xSpan / static_cast<double>(targetInteriorTicks + 1);
         }
         else
         {
-            const double xStartTick = std::ceil(xRange.min / xStep) * xStep;
-            for (double xTick = xStartTick; xTick <= xRange.max + (xStep * 0.5); xTick += xStep)
+            xTickInterval = chooseTickStep(xSpan, std::max(2, drawRect.width() / 90));
+        }
+
+        // Generate ticks at fixed time values that fall within visible range
+        const double xStartTick = std::floor(xRange.min / xTickInterval) * xTickInterval;
+        for (double xTick = xStartTick; xTick <= xRange.max + (xTickInterval * 0.5); xTick += xTickInterval)
+        {
+            if (xTick >= xRange.min - (xTickInterval * 0.01))
             {
                 xTickValues.push_back(xTick);
             }
@@ -253,7 +249,6 @@ namespace sd::widgets
         {
             painter.setPen(QPen(QColor("#5a5a5a"), 1));
 
-            const double xDisplayStep = xSpan / static_cast<double>(xTickSegments);
             const double yDisplayStep = ySpan / static_cast<double>(yTickSegments);
             auto decimalsForStep = [](double step)
             {
@@ -273,7 +268,7 @@ namespace sd::widgets
                 return 3;
             };
 
-            const int xDecimals = decimalsForStep(xDisplayStep);
+            const int xDecimals = decimalsForStep(xTickInterval);
             const int yDecimals = decimalsForStep(yDisplayStep);
 
             auto formatXTick = [xDecimals](double value)
@@ -319,29 +314,33 @@ namespace sd::widgets
             }
         }
 
-        QPainterPath path;
-        bool first = true;
-        for (const SamplePoint& sample : m_samples)
+        // Only draw line plot if we have at least 2 samples
+        if (m_samples.size() >= 2)
         {
-            const double xNormalized = (sample.xSeconds - xRange.min) / xSpan;
-            const double clippedY = std::clamp(sample.yValue, yRange.min, yRange.max);
-            const double yNormalized = (clippedY - yRange.min) / ySpan;
+            QPainterPath path;
+            bool first = true;
+            for (const SamplePoint& sample : m_samples)
+            {
+                const double xNormalized = (sample.xSeconds - xRange.min) / xSpan;
+                const double clippedY = std::clamp(sample.yValue, yRange.min, yRange.max);
+                const double yNormalized = (clippedY - yRange.min) / ySpan;
 
-            const qreal xPixel = drawRect.left() + (xNormalized * drawRect.width());
-            const qreal yPixel = drawRect.bottom() - (yNormalized * drawRect.height());
-            if (first)
-            {
-                path.moveTo(xPixel, yPixel);
-                first = false;
+                const qreal xPixel = drawRect.left() + (xNormalized * drawRect.width());
+                const qreal yPixel = drawRect.bottom() - (yNormalized * drawRect.height());
+                if (first)
+                {
+                    path.moveTo(xPixel, yPixel);
+                    first = false;
+                }
+                else
+                {
+                    path.lineTo(xPixel, yPixel);
+                }
             }
-            else
-            {
-                path.lineTo(xPixel, yPixel);
-            }
+
+            painter.setPen(QPen(QColor("#33b5e5"), 1.5));
+            painter.drawPath(path);
         }
-
-        painter.setPen(QPen(QColor("#33b5e5"), 1.5));
-        painter.drawPath(path);
     }
 
     LinePlotWidget::AxisRange LinePlotWidget::ComputeXRange() const

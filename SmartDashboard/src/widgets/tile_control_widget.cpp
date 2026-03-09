@@ -30,13 +30,14 @@ namespace sd::widgets
         {
             m_slider = new QSlider(Qt::Horizontal, this);
             m_slider->setRange(0, 100);
+            m_slider->setTickPosition(QSlider::TicksBelow);
             layout->addWidget(m_slider);
             connect(m_slider, &QSlider::valueChanged, this, [this](int raw)
             {
                 if (!m_settingProgrammatically)
                 {
                     const double normalized = static_cast<double>(raw) / 100.0;
-                    emit DoubleEdited((normalized * 2.0) - 1.0);
+                    emit DoubleEdited(m_doubleLowerLimit + (normalized * (m_doubleUpperLimit - m_doubleLowerLimit)));
                 }
             });
         }
@@ -74,18 +75,63 @@ namespace sd::widgets
         }
 
         double clamped = value;
-        if (clamped < -1.0)
+        if (clamped < m_doubleLowerLimit)
         {
-            clamped = -1.0;
+            clamped = m_doubleLowerLimit;
         }
-        else if (clamped > 1.0)
+        else if (clamped > m_doubleUpperLimit)
         {
-            clamped = 1.0;
+            clamped = m_doubleUpperLimit;
         }
 
+        const double span = m_doubleUpperLimit - m_doubleLowerLimit;
+        const double normalized = (span <= 0.0) ? 0.0 : (clamped - m_doubleLowerLimit) / span;
+
         m_settingProgrammatically = true;
-        m_slider->setValue(static_cast<int>((clamped + 1.0) * 50.0));
+        m_slider->setValue(static_cast<int>(normalized * 100.0 + 0.5));
         m_settingProgrammatically = false;
+    }
+
+    void TileControlWidget::SetDoubleRange(double lowerLimit, double upperLimit)
+    {
+        double lower = lowerLimit;
+        double upper = upperLimit;
+        if (upper <= lower)
+        {
+            upper = lower + 0.001;
+        }
+
+        m_doubleLowerLimit = lower;
+        m_doubleUpperLimit = upper;
+    }
+
+    void TileControlWidget::SetDoubleTickSettings(double tickInterval, bool showTickMarks)
+    {
+        if (!m_slider)
+        {
+            return;
+        }
+
+        m_slider->setTickPosition(showTickMarks ? QSlider::TicksBelow : QSlider::NoTicks);
+
+        const double span = m_doubleUpperLimit - m_doubleLowerLimit;
+        int tickStep = 1;
+        if (span > 0.0 && tickInterval > 0.0)
+        {
+            tickStep = static_cast<int>((tickInterval / span) * 100.0 + 0.5);
+            if (tickStep < 1)
+            {
+                tickStep = 1;
+            }
+            if (tickStep > 100)
+            {
+                tickStep = 100;
+            }
+        }
+
+        m_slider->setTickInterval(tickStep);
+        m_slider->setSingleStep(tickStep);
+        m_slider->setPageStep(tickStep);
     }
 
     void TileControlWidget::SetStringValue(const QString& value)

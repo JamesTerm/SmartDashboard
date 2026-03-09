@@ -19,6 +19,14 @@ namespace sd::layout
         QVariant gaugeUpperLimit;
         QVariant gaugeTickInterval;
         QVariant gaugeShowTickMarks;
+        QVariant progressBarLowerLimit;
+        QVariant progressBarUpperLimit;
+        QVariant progressBarTickInterval;
+        QVariant progressBarShowTickMarks;
+        QVariant sliderLowerLimit;
+        QVariant sliderUpperLimit;
+        QVariant sliderTickInterval;
+        QVariant sliderShowTickMarks;
         QVariant linePlotBufferSizeSamples;
         QVariant linePlotAutoYAxis;
         QVariant linePlotShowNumberLines;
