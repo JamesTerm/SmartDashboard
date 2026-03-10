@@ -1094,7 +1094,12 @@ namespace sd::widgets
 
     void VariableTile::UpdateValueDisplay()
     {
-        if (m_controlWidget->isVisible())
+        const bool isBoolCheckbox = (m_type == VariableType::Bool && m_widgetType == "bool.checkbox");
+        const bool isDoubleSlider = (m_type == VariableType::Double && m_widgetType == "double.slider");
+        const bool isStringEdit = (m_type == VariableType::String && m_widgetType == "string.edit");
+        const bool usesControlWidget = isBoolCheckbox || isDoubleSlider || isStringEdit;
+
+        if (usesControlWidget)
         {
             if (m_type == VariableType::Bool)
             {
@@ -1111,7 +1116,8 @@ namespace sd::widgets
             return;
         }
 
-        if (m_doubleEdit->isVisible())
+        const bool usesDoubleEdit = (m_type == VariableType::Double && m_widgetType == "double.numeric" && m_doubleNumericEditable);
+        if (usesDoubleEdit)
         {
             m_settingDoubleEditProgrammatically = true;
             m_doubleEdit->setText(QString::number(m_doubleValue, 'f', 4));
@@ -1119,13 +1125,13 @@ namespace sd::widgets
             return;
         }
 
-        if (m_progressBar->isVisible())
+        if (m_type == VariableType::Double && m_widgetType == "double.progress")
         {
             m_progressBar->setValue(ValueToPercentForProgressBar(m_doubleValue));
             return;
         }
 
-        if (m_gauge->isVisible())
+        if (m_type == VariableType::Double && m_widgetType == "double.gauge")
         {
             m_settingGaugeProgrammatically = true;
             m_gauge->setValue(DoubleToPercent(m_doubleValue));
@@ -1133,13 +1139,13 @@ namespace sd::widgets
             return;
         }
 
-        if (m_linePlot->isVisible())
+        if (m_type == VariableType::Double && m_widgetType == "double.lineplot")
         {
             m_linePlot->AddSample(m_doubleValue);
             return;
         }
 
-        if (m_boolLed->isVisible())
+        if (m_type == VariableType::Bool && m_widgetType == "bool.led")
         {
             UpdateBoolLedAppearance();
             return;

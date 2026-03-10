@@ -6,10 +6,11 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Test)
 
 qt_add_executable(SmartDashboardApp WIN32
     src/main.cpp
+    dist/win/app_icon.rc
     src/app/main_window.h
     src/app/main_window.cpp
     src/model/variable_store.h
@@ -45,6 +46,46 @@ target_link_libraries(SmartDashboardApp
 )
 
 target_compile_features(SmartDashboardApp PRIVATE cxx_std_20)
+
+if(BUILD_TESTING)
+    include(FetchContent)
+
+    if(NOT TARGET GTest::gtest)
+        FetchContent_Declare(
+            googletest
+            URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
+        )
+
+        set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(googletest)
+    endif()
+
+    add_executable(SmartDashboard_tests
+        tests/variable_tile_tests.cpp
+        src/widgets/variable_tile.cpp
+        src/widgets/line_plot_widget.cpp
+        src/widgets/tile_control_widget.cpp
+    )
+
+    target_include_directories(SmartDashboard_tests
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+
+    target_link_libraries(SmartDashboard_tests
+        PRIVATE
+            Qt6::Core
+            Qt6::Gui
+            Qt6::Widgets
+            Qt6::Test
+            GTest::gtest_main
+    )
+
+    target_compile_features(SmartDashboard_tests PRIVATE cxx_std_20)
+
+    include(GoogleTest)
+    gtest_discover_tests(SmartDashboard_tests)
+endif()
 
 if(WIN32)
     set(SMARTDASHBOARD_QT_EXTRA_DLL_DIRS "" CACHE STRING "Optional semicolon-separated directories to search for Qt runtime companion DLLs")

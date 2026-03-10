@@ -42,6 +42,10 @@
 - Added progress-bar range properties for `double.progress` (`Upper/Lower Limit`) with layout persistence and load/apply support.
 - Slider control mapping now honors configured lower/upper bounds for both display updates and command writes.
 - Follow-up: progress bar tick settings were removed because Qt `QProgressBar` cannot render true tick marks; progress bar now exposes only upper/lower limits.
+- Fixed startup/load ordering issue for `double.progress`: value routing now keys off configured `widgetType` instead of widget visibility, preventing initial chunk-fill misses when tiles are not yet shown.
+- Added `SmartDashboard_tests` target and `tests/variable_tile_tests.cpp` regression test (`ProgressBarZeroCentersBeforeWidgetIsShown`) to lock in centered-zero startup behavior.
+- Added Windows app icon resource wiring for `SmartDashboardApp.exe` (`dist/win/smartdashboard_app.ico` + `dist/win/app_icon.rc`).
+- Stabilized `SmartDashboardClientTests.AssertiveGetPublishesDefaultAndCallbackReceivesUpdates` by using unique per-test direct channels and disabling retained-store fallback in that test.
 
 ## Known constraints / active considerations
 

@@ -26,10 +26,17 @@ namespace sd::direct
 
         TestChannels MakeSharedTestChannels()
         {
+            static std::atomic<std::uint64_t> testChannelNonce {1};
+            const std::uint64_t nonce = testChannelNonce.fetch_add(1);
+            const auto nowUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()
+            ).count();
+            const std::wstring suffix = L"." + std::to_wstring(nowUs) + L"." + std::to_wstring(nonce);
+
             TestChannels channels;
-            channels.mappingName = L"Local\\SmartDashboard.Direct.Buffer";
-            channels.dataEventName = L"Local\\SmartDashboard.Direct.DataAvailable";
-            channels.heartbeatEventName = L"Local\\SmartDashboard.Direct.Heartbeat";
+            channels.mappingName = L"Local\\SmartDashboard.Direct.Buffer" + suffix;
+            channels.dataEventName = L"Local\\SmartDashboard.Direct.DataAvailable" + suffix;
+            channels.heartbeatEventName = L"Local\\SmartDashboard.Direct.Heartbeat" + suffix;
             return channels;
         }
 
@@ -92,6 +99,7 @@ namespace sd::direct
         config.subscriber.mappingName = channels.mappingName;
         config.subscriber.dataEventName = channels.dataEventName;
         config.subscriber.heartbeatEventName = channels.heartbeatEventName;
+        config.enableRetainedStore = false;
 
         SmartDashboardClient client(config);
         ASSERT_TRUE(client.Start());
