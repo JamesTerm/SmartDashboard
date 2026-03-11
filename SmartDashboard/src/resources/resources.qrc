@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/app">
+        <file alias="icon.ico">../../dist/win/smartdashboard_app.ico</file>
+    </qresource>
+</RCC>

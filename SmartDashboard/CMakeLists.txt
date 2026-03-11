@@ -11,6 +11,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Test)
 qt_add_executable(SmartDashboardApp WIN32
     src/main.cpp
     dist/win/app_icon.rc
+    src/resources/resources.qrc
     src/app/main_window.h
     src/app/main_window.cpp
     src/model/variable_store.h

@@ -35,6 +35,7 @@
 - Progress-bar startup behavior is stabilized by routing value updates via configured `widgetType` (not transient visibility state).
 - `SmartDashboard_tests` target exists with `tests/variable_tile_tests.cpp` regression coverage for centered-zero progress-bar startup behavior.
 - App icon is now wired for Windows builds via `dist/win/app_icon.rc` and `dist/win/smartdashboard_app.ico`.
+- Runtime Qt icon is also set via `src/resources/resources.qrc` + `QApplication::setWindowIcon`, so titlebar/taskbar icon paths match the EXE icon.
 - `AssertiveGetPublishesDefaultAndCallbackReceivesUpdates` test isolation uses unique per-test direct channels and disables retained fallback for that case.
 
 ## Known constraints / active considerations

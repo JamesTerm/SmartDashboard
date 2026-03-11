@@ -1,6 +1,7 @@
 #include "app/main_window.h"
 
 #include <QApplication>
+#include <QIcon>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -32,8 +33,17 @@ int main(int argc, char* argv[])
 
     // Qt application bootstrap: create app object, show main window, run event loop.
     QApplication app(argc, argv);
+    const QIcon appIcon(QStringLiteral(":/app/icon.ico"));
+    if (!appIcon.isNull())
+    {
+        QApplication::setWindowIcon(appIcon);
+    }
 
     MainWindow window;
+    if (!appIcon.isNull())
+    {
+        window.setWindowIcon(appIcon);
+    }
     window.show();
 
     const int exitCode = app.exec();

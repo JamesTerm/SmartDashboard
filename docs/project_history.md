@@ -116,6 +116,14 @@ Curated milestone history for this repository.
   - `Load Layout (Merge)` keeps existing merge semantics
   - `Load Layout (Replace)` clears widgets first, then loads selected layout.
 
+## 2026-03-10 - Runtime app/taskbar icon parity
+
+- Extended icon integration beyond EXE resources so runtime UI surfaces use the same icon:
+  - added Qt resource manifest `SmartDashboard/src/resources/resources.qrc`
+  - included icon asset alias for runtime lookup (`:/app/icon.ico`)
+  - set application and main window icon in startup path (`QApplication::setWindowIcon` + `window.setWindowIcon`).
+- Result: titlebar/taskbar icon now aligns with embedded EXE icon on launch.
+
 ## 2026-03-09 - Gauge editing workflow and layout persistence
 
 - Finalized line-plot axis behavior updates:
