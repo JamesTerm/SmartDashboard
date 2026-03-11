@@ -46,6 +46,10 @@ Curated milestone history for this repository.
   - choosing `NT: Set team...` enables team mode
 - Added NT key normalization for legacy server namespace prefix:
   - incoming `/SmartDashboard/<key>` is normalized to `<key>` for layout/widget key matching
+- Fixed NT command/write interoperability for existing keys:
+  - write path now sends `FIELD_UPDATE` for known entries using server-provided entry ids
+  - keeps `ENTRY_ASSIGNMENT` only for first-time keys
+  - aligns client writes with legacy NT2 server expectations (resolves editable numeric writeback failures)
 
 ## 2026-03-10 - Legacy XML import parity and widget property refinements
 

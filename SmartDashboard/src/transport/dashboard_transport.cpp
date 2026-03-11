@@ -266,7 +266,28 @@ namespace sd::transport
                 std::uint16_t id = 0;
                 std::uint16_t seq = 0;
                 std::uint8_t typeId = 0;
+                std::string wireKey;
             };
+
+            static std::string NormalizeIncomingKey(const std::string& wireKey)
+            {
+                static const std::string prefix = "/SmartDashboard/";
+                if (wireKey.rfind(prefix, 0) == 0)
+                {
+                    return wireKey.substr(prefix.size());
+                }
+                return wireKey;
+            }
+
+            static std::string ToWireKey(const std::string& key)
+            {
+                static const std::string prefix = "/SmartDashboard/";
+                if (key.rfind(prefix, 0) == 0)
+                {
+                    return key;
+                }
+                return prefix + key;
+            }
 
             static void WriteU16(std::vector<std::uint8_t>& out, std::uint16_t value)
             {
@@ -471,11 +492,8 @@ namespace sd::transport
                     return false;
                 }
 
-                std::string key(keyBytes.begin(), keyBytes.end());
-                if (key.rfind("/SmartDashboard/", 0) == 0)
-                {
-                    key = key.substr(std::string("/SmartDashboard/").size());
-                }
+                const std::string wireKey(keyBytes.begin(), keyBytes.end());
+                const std::string key = NormalizeIncomingKey(wireKey);
                 VariableUpdate update;
                 update.key = QString::fromStdString(key);
                 update.seq = seq;
@@ -492,6 +510,7 @@ namespace sd::transport
                     meta.id = entryId;
                     meta.seq = seq;
                     meta.typeId = valueType;
+                    meta.wireKey = wireKey;
                     m_keyToEntry[key] = meta;
                     m_idToKey[entryId] = key;
                 }
@@ -620,16 +639,23 @@ namespace sd::transport
 
                 EntryMeta meta;
                 auto it = m_keyToEntry.find(key);
+                bool isUpdate = false;
                 if (it == m_keyToEntry.end())
                 {
                     meta.id = m_nextEntryId++;
                     meta.seq = 0;
                     meta.typeId = typeId;
+                    meta.wireKey = ToWireKey(key);
                 }
                 else
                 {
                     meta = it->second;
                     meta.typeId = typeId;
+                    if (meta.wireKey.empty())
+                    {
+                        meta.wireKey = ToWireKey(key);
+                    }
+                    isUpdate = true;
                 }
 
                 meta.seq = static_cast<std::uint16_t>(meta.seq + 1);
@@ -637,13 +663,22 @@ namespace sd::transport
                 m_idToKey[meta.id] = key;
 
                 std::vector<std::uint8_t> packet;
-                packet.push_back(0x10);
-                const std::size_t bounded = std::min<std::size_t>(key.size(), 65535u);
-                WriteU16(packet, static_cast<std::uint16_t>(bounded));
-                packet.insert(packet.end(), key.begin(), key.begin() + static_cast<std::ptrdiff_t>(bounded));
-                packet.push_back(typeId);
-                WriteU16(packet, meta.id);
-                WriteU16(packet, meta.seq);
+                if (isUpdate)
+                {
+                    packet.push_back(0x11);
+                    WriteU16(packet, meta.id);
+                    WriteU16(packet, meta.seq);
+                }
+                else
+                {
+                    packet.push_back(0x10);
+                    const std::size_t bounded = std::min<std::size_t>(meta.wireKey.size(), 65535u);
+                    WriteU16(packet, static_cast<std::uint16_t>(bounded));
+                    packet.insert(packet.end(), meta.wireKey.begin(), meta.wireKey.begin() + static_cast<std::ptrdiff_t>(bounded));
+                    packet.push_back(typeId);
+                    WriteU16(packet, meta.id);
+                    WriteU16(packet, meta.seq);
+                }
                 appendValue(packet);
 
                 return SendExact(m_socket, packet.data(), packet.size());

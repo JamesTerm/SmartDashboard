@@ -47,6 +47,7 @@
 - Robot_Simulation is used as interoperability validation target, not as a build-time library dependency.
 - NT UX tweak: setting explicit host now automatically disables `NT: Use team number`; setting team auto-enables team mode.
 - NT key normalization: incoming keys with `/SmartDashboard/` prefix are normalized to layout keys by stripping that prefix on ingest.
+- NT write-path fix: existing keys now publish as `FIELD_UPDATE` (0x11) using server-assigned entry id/seq, while first-time keys publish as `ENTRY_ASSIGNMENT` (0x10) under `/SmartDashboard/` wire namespace.
 - Direct ring payload path is still single-consumer; retained store introduces shared latest-value ownership but does not yet change stream fan-out semantics.
 - If startup false-dirty (`*`) behavior regresses, add a focused startup regression test that validates initial title/dirty state before any editable interaction.
 
