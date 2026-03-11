@@ -916,6 +916,8 @@ void MainWindow::OnSetNtHost()
     }
 
     m_connectionConfig.ntHost = value.trimmed();
+    m_connectionConfig.ntUseTeam = false;
+    ApplyTransportMenuChecks();
     PersistConnectionSettings();
 }
 
@@ -939,6 +941,8 @@ void MainWindow::OnSetNtTeam()
     }
 
     m_connectionConfig.ntTeam = team;
+    m_connectionConfig.ntUseTeam = true;
+    ApplyTransportMenuChecks();
     PersistConnectionSettings();
 }
 

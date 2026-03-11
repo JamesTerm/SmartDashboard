@@ -41,6 +41,11 @@ Curated milestone history for this repository.
 - Removed external build dependency on Robot_Simulation SmartDashboard sources.
 - Replaced dependency-based NT path with an in-tree NT2-compatible client transport implementation in `dashboard_transport.cpp`.
 - Kept Robot_Simulation as runtime interoperability test target to validate protocol compatibility on a second machine with no shared source path assumptions.
+- Fixed NT connection UX consistency:
+  - choosing `NT: Set host...` now disables team mode
+  - choosing `NT: Set team...` enables team mode
+- Added NT key normalization for legacy server namespace prefix:
+  - incoming `/SmartDashboard/<key>` is normalized to `<key>` for layout/widget key matching
 
 ## 2026-03-10 - Legacy XML import parity and widget property refinements
 

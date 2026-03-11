@@ -471,7 +471,11 @@ namespace sd::transport
                     return false;
                 }
 
-                const std::string key(keyBytes.begin(), keyBytes.end());
+                std::string key(keyBytes.begin(), keyBytes.end());
+                if (key.rfind("/SmartDashboard/", 0) == 0)
+                {
+                    key = key.substr(std::string("/SmartDashboard/").size());
+                }
                 VariableUpdate update;
                 update.key = QString::fromStdString(key);
                 update.seq = seq;

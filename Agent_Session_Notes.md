@@ -45,6 +45,8 @@
 - Main window now uses a transport-agnostic adapter interface (`dashboard_transport`) with Connection menu actions (Connect/Disconnect, Direct vs NetworkTables selection, NT host/team settings persisted in QSettings).
 - NetworkTables menu path now uses an in-tree NT2-compatible client implementation (socket + message framing/handshake), so no external source dependency is required for build.
 - Robot_Simulation is used as interoperability validation target, not as a build-time library dependency.
+- NT UX tweak: setting explicit host now automatically disables `NT: Use team number`; setting team auto-enables team mode.
+- NT key normalization: incoming keys with `/SmartDashboard/` prefix are normalized to layout keys by stripping that prefix on ingest.
 - Direct ring payload path is still single-consumer; retained store introduces shared latest-value ownership but does not yet change stream fan-out semantics.
 - If startup false-dirty (`*`) behavior regresses, add a focused startup regression test that validates initial title/dirty state before any editable interaction.
 
