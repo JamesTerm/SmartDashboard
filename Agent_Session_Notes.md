@@ -89,6 +89,11 @@
 - Added replay planning + user-facing docs:
   - `docs/replay_parity_roadmap.md` (iterative parity checklist and acceptance path)
   - `docs/replay_user_manual.md` (operator workflow guide for replay controls and timeline interactions)
+- Branch/status handoff update:
+  - feature branch `feature/playback-recording-replay` was merged into local `main`
+  - stable milestone tag created: `v0.9.0-replay-foundation`
+  - current active branch for next work: `feature/replay-iteration-a-timeline-readability`
+  - next planned implementation slice: Iteration A from `docs/replay_parity_roadmap.md` (timeline readability)
 
 ## Known constraints / active considerations
 

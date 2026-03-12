@@ -103,6 +103,13 @@ Curated milestone history for this repository.
 - Added `docs/replay_user_manual.md` to provide operator instructions for replay mode, timeline controls, and troubleshooting usage patterns.
 - Updated `README.md` and session notes to surface these docs for both student learning and practical test workflows.
 
+## 2026-03-12 - Stability checkpoint and branch transition
+
+- Merged `feature/playback-recording-replay` into local `main` after replay + capture CLI validation.
+- Created annotated stability tag: `v0.9.0-replay-foundation`.
+- Started next iteration branch: `feature/replay-iteration-a-timeline-readability`.
+- Next implementation target is Iteration A from `docs/replay_parity_roadmap.md` (timeline readability and temporal affordances).
+
 ## 2026-03-11 - Line-plot smoothing, direct stream cadence tuning, and direct-label compaction
 
 - Improved line-plot smooth-scrolling behavior in `SmartDashboard/src/widgets/line_plot_widget.cpp`:
