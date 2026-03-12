@@ -35,6 +35,7 @@ Preferred/optional:
 - `--heartbeat-event-name <name>` direct subscriber heartbeat-event override
 - `--wait-for-connected-ms <number>` fail if direct channel does not reach `Connected` in time (default `2000`)
 - `--require-first-sample` fail non-zero if zero telemetry samples were captured
+- `--connect-method <direct|auto>` channel selection strategy (`direct` by default)
 - `--list-signals` print observed signals and exit
 - `--signals <csv>` capture only selected signals
 - `--stop-file <path>` stop early when file appears
@@ -67,6 +68,12 @@ And add:
 
 - `--wait-for-connected-ms 5000`
 - `--require-first-sample`
+
+If you are unsure which direct channel family is active, use:
+
+- `--connect-method auto`
+
+`auto` currently tries explicit overrides first (if provided), then known built-in direct channel defaults.
 
 This gives an explicit failure instead of silently producing an empty run file.
 
@@ -124,6 +131,7 @@ build/ClientInterface_direct/Debug/SmartDashboardCaptureCli.exe \
       "heartbeat_event_name": "",
       "wait_for_connected_ms": 2000,
       "require_first_sample": false,
+      "connect_method": "direct",
       "signals": "",
       "stop_file": ""
     },

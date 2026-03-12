@@ -74,6 +74,11 @@
   - strict non-empty guard: `--require-first-sample` (fails non-zero on empty capture)
   - verbose output now includes connection diagnostics and selected channel names
   - summary now distinguishes `Connection state at capture end` vs `Post-stop connection state` to avoid false confusion when post-stop is `Disconnected`
+- Iteration-2 started on capture connection method selection:
+  - new arg `--connect-method <direct|auto>`
+  - `auto` tries explicit overrides first (if set), then known default direct channel families
+  - this is intended to reduce empty-run risk when publisher channel family is uncertain
+  - external validation note: healthy captures may end with `Connection state at capture end: Stale` and `Post-stop connection state: Disconnected`; this is acceptable when `Connection observed during capture: true` and sample counts are non-zero
 - Added internal automated coverage for capture CLI behavior:
   - `ClientInterface_direct/tests/capture_cli_tests.cpp`
   - validates successful capture on custom direct channels and timeout failure path

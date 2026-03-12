@@ -53,6 +53,7 @@ namespace
         std::string heartbeatEventName;
         int waitForConnectedMs = 2000;
         bool requireFirstSample = false;
+        std::string connectMethod = "direct";
         std::vector<std::pair<std::string, std::string>> tags;
         std::vector<std::string> rawArgs;
     };
@@ -167,6 +168,76 @@ namespace
         return std::wstring(text.begin(), text.end());
     }
 
+    bool IsConnectMethodValid(const std::string& method)
+    {
+        return method == "direct" || method == "auto";
+    }
+
+    struct ChannelCandidate
+    {
+        std::string description;
+        sd::direct::SubscriberConfig config;
+    };
+
+    std::vector<ChannelCandidate> BuildChannelCandidates(const CliOptions& options)
+    {
+        std::vector<ChannelCandidate> candidates;
+
+        auto buildConfigFromOptions = [&]() -> sd::direct::SubscriberConfig
+        {
+            sd::direct::SubscriberConfig cfg;
+            if (!options.mappingName.empty())
+            {
+                cfg.mappingName = ToWideLossy(options.mappingName);
+            }
+            if (!options.dataEventName.empty())
+            {
+                cfg.dataEventName = ToWideLossy(options.dataEventName);
+            }
+            if (!options.heartbeatEventName.empty())
+            {
+                cfg.heartbeatEventName = ToWideLossy(options.heartbeatEventName);
+            }
+            return cfg;
+        };
+
+        if (options.connectMethod == "direct")
+        {
+            ChannelCandidate candidate;
+            candidate.description = "direct";
+            candidate.config = buildConfigFromOptions();
+            candidates.push_back(std::move(candidate));
+            return candidates;
+        }
+
+        // auto mode: try explicit override first (if present), then known defaults.
+        if (!options.mappingName.empty() || !options.dataEventName.empty() || !options.heartbeatEventName.empty())
+        {
+            ChannelCandidate explicitCandidate;
+            explicitCandidate.description = "explicit-override";
+            explicitCandidate.config = buildConfigFromOptions();
+            candidates.push_back(std::move(explicitCandidate));
+        }
+
+        {
+            ChannelCandidate defaultCandidate;
+            defaultCandidate.description = "smartdashboard-default";
+            defaultCandidate.config = sd::direct::SubscriberConfig {};
+            candidates.push_back(std::move(defaultCandidate));
+        }
+
+        {
+            ChannelCandidate legacyCandidate;
+            legacyCandidate.description = "legacy-short";
+            legacyCandidate.config.mappingName = L"Local\\SmartDashboard.Buffer";
+            legacyCandidate.config.dataEventName = L"Local\\SmartDashboard.DataAvailable";
+            legacyCandidate.config.heartbeatEventName = L"Local\\SmartDashboard.Heartbeat";
+            candidates.push_back(std::move(legacyCandidate));
+        }
+
+        return candidates;
+    }
+
     std::string GenerateRunId()
     {
         const auto now = std::chrono::system_clock::now();
@@ -202,6 +273,7 @@ namespace
            << "  --heartbeat-event-name <name> (direct channel heartbeat event override)\n"
            << "  --wait-for-connected-ms <number> (default 2000)\n"
            << "  --require-first-sample     (fail if no samples captured)\n"
+           << "  --connect-method <direct|auto> (default direct)\n"
            << "  --list-signals\n"
            << "  --signals <csv>\n"
            << "  --stop-file <path>\n"
@@ -418,6 +490,15 @@ namespace
             {
                 options.requireFirstSample = true;
             }
+            else if (arg == "--connect-method")
+            {
+                auto v = needValue(arg);
+                if (!v)
+                {
+                    return false;
+                }
+                options.connectMethod = *v;
+            }
             else if (arg == "--list-signals")
             {
                 options.listSignals = true;
@@ -487,6 +568,12 @@ namespace
         if (options.waitForConnectedMs < 0)
         {
             error = "--wait-for-connected-ms must be >= 0";
+            return false;
+        }
+
+        if (!IsConnectMethodValid(options.connectMethod))
+        {
+            error = "--connect-method must be one of: direct, auto";
             return false;
         }
 
@@ -629,6 +716,7 @@ namespace
         json << "      \"heartbeat_event_name\": \"" << EscapeJson(options.heartbeatEventName) << "\",\n";
         json << "      \"wait_for_connected_ms\": " << options.waitForConnectedMs << ",\n";
         json << "      \"require_first_sample\": " << (options.requireFirstSample ? "true" : "false") << ",\n";
+        json << "      \"connect_method\": \"" << EscapeJson(options.connectMethod) << "\",\n";
         json << "      \"signals\": \"" << EscapeJson(options.signalsCsv) << "\",\n";
         json << "      \"stop_file\": \"" << EscapeJson(options.stopFilePath) << "\"\n";
         json << "    },\n";
@@ -802,47 +890,107 @@ int main(int argc, char** argv)
         state.useFilter = !state.filterSignals.empty();
     }
 
-    sd::direct::SubscriberConfig subscriberConfig;
-    if (!options.mappingName.empty())
+    std::atomic<sd::direct::ConnectionState> connectionState {sd::direct::ConnectionState::Disconnected};
+    std::atomic<bool> connectedObserved {false};
+    std::atomic<bool> sampleObserved {false};
+    std::unique_ptr<sd::direct::IDirectSubscriber> subscriber;
+
+    const std::vector<ChannelCandidate> candidates = BuildChannelCandidates(options);
+    if (candidates.empty())
     {
-        subscriberConfig.mappingName = ToWideLossy(options.mappingName);
-    }
-    if (!options.dataEventName.empty())
-    {
-        subscriberConfig.dataEventName = ToWideLossy(options.dataEventName);
-    }
-    if (!options.heartbeatEventName.empty())
-    {
-        subscriberConfig.heartbeatEventName = ToWideLossy(options.heartbeatEventName);
-    }
-    auto subscriber = sd::direct::CreateDirectSubscriber(subscriberConfig);
-    if (!subscriber)
-    {
-        std::cerr << "Failed to create direct subscriber\n";
+        std::cerr << "No connection candidates available\n";
         return 3;
     }
 
-    std::atomic<sd::direct::ConnectionState> connectionState {sd::direct::ConnectionState::Disconnected};
-    std::atomic<bool> connectedObserved {false};
-    const bool started = subscriber->Start(
-        [&state](const sd::direct::VariableUpdate& update)
-        {
-            AddUpdate(state, update, Clock::now());
-        },
-        [&connectionState, &connectedObserved](sd::direct::ConnectionState next)
-        {
-            connectionState.store(next, std::memory_order_relaxed);
-            if (next == sd::direct::ConnectionState::Connected)
-            {
-                connectedObserved.store(true, std::memory_order_relaxed);
-            }
-        }
-    );
-
-    if (!started)
+    const int perCandidateWaitMs = (std::max)(250, options.waitForConnectedMs / static_cast<int>(candidates.size()));
+    bool subscriberStarted = false;
+    std::string selectedCandidate = "";
+    for (const ChannelCandidate& candidate : candidates)
     {
-        std::cerr << "Failed to start direct subscriber\n";
-        return 4;
+        subscriber = sd::direct::CreateDirectSubscriber(candidate.config);
+        if (!subscriber)
+        {
+            continue;
+        }
+
+        const bool started = subscriber->Start(
+            [&state, &sampleObserved](const sd::direct::VariableUpdate& update)
+            {
+                sampleObserved.store(true, std::memory_order_relaxed);
+                AddUpdate(state, update, Clock::now());
+            },
+            [&connectionState, &connectedObserved](sd::direct::ConnectionState next)
+            {
+                connectionState.store(next, std::memory_order_relaxed);
+                if (next == sd::direct::ConnectionState::Connected)
+                {
+                    connectedObserved.store(true, std::memory_order_relaxed);
+                }
+            }
+        );
+
+        if (!started)
+        {
+            subscriber.reset();
+            continue;
+        }
+
+        if (options.waitForConnectedMs <= 0)
+        {
+            subscriberStarted = true;
+            selectedCandidate = candidate.description;
+            break;
+        }
+
+        const auto deadline = Clock::now() + std::chrono::milliseconds(perCandidateWaitMs);
+        bool connectedSeen = false;
+        while (Clock::now() < deadline)
+        {
+            if (connectionState.load(std::memory_order_relaxed) == sd::direct::ConnectionState::Connected)
+            {
+                connectedSeen = true;
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        if (connectedSeen)
+        {
+            if (options.connectMethod == "auto" && options.requireFirstSample)
+            {
+                const auto sampleDeadline = Clock::now() + std::chrono::milliseconds((std::max)(250, perCandidateWaitMs / 2));
+                bool sawSample = sampleObserved.load(std::memory_order_relaxed);
+                while (!sawSample && Clock::now() < sampleDeadline)
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    sawSample = sampleObserved.load(std::memory_order_relaxed);
+                }
+
+                if (!sawSample)
+                {
+                    subscriber->Stop();
+                    subscriber.reset();
+                    connectionState.store(sd::direct::ConnectionState::Disconnected, std::memory_order_relaxed);
+                    continue;
+                }
+            }
+
+            subscriberStarted = true;
+            selectedCandidate = candidate.description;
+            break;
+        }
+
+        subscriber->Stop();
+        subscriber.reset();
+        connectionState.store(sd::direct::ConnectionState::Disconnected, std::memory_order_relaxed);
+    }
+
+    if (!subscriberStarted || !subscriber)
+    {
+        std::cerr << "Connection timeout: could not reach Connected using connect method '" << options.connectMethod
+                  << "' within " << options.waitForConnectedMs << " ms.\n"
+                  << "Tip: pass --mapping-name/--data-event-name/--heartbeat-event-name if your publisher uses custom direct channel names.\n";
+        return 6;
     }
 
     if (!options.quiet)
@@ -858,36 +1006,15 @@ int main(int argc, char** argv)
                       << "Require first sample: " << (options.requireFirstSample ? "true" : "false") << "\n"
                       << "Mapping: " << (options.mappingName.empty() ? "<default>" : options.mappingName) << "\n"
                       << "Data event: " << (options.dataEventName.empty() ? "<default>" : options.dataEventName) << "\n"
-                      << "Heartbeat event: " << (options.heartbeatEventName.empty() ? "<default>" : options.heartbeatEventName) << "\n";
+                      << "Heartbeat event: " << (options.heartbeatEventName.empty() ? "<default>" : options.heartbeatEventName) << "\n"
+                      << "Connect method: " << options.connectMethod << "\n"
+                      << "Selected channel candidate: " << selectedCandidate << "\n";
         }
     }
 
     if (options.startDelayMs > 0)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(options.startDelayMs));
-    }
-
-    if (options.waitForConnectedMs > 0)
-    {
-        const auto deadline = Clock::now() + std::chrono::milliseconds(options.waitForConnectedMs);
-        bool connectedSeen = false;
-        while (Clock::now() < deadline)
-        {
-            if (connectionState.load(std::memory_order_relaxed) == sd::direct::ConnectionState::Connected)
-            {
-                connectedSeen = true;
-                break;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-
-        if (!connectedSeen)
-        {
-            std::cerr << "Connection timeout: did not reach Connected within " << options.waitForConnectedMs << " ms.\n"
-                      << "Tip: pass --mapping-name/--data-event-name/--heartbeat-event-name if your publisher uses custom direct channel names.\n";
-            subscriber->Stop();
-            return 6;
-        }
     }
 
     const auto startWall = std::chrono::system_clock::now();

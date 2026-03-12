@@ -87,6 +87,16 @@ Curated milestone history for this repository.
   - `ClientInterface_direct/tests/capture_cli_tests.cpp`
   - covers successful capture against custom channel names and connection-timeout failure behavior
 
+## 2026-03-12 - Capture CLI iteration 2 (connection method selection)
+
+- Added `--connect-method <direct|auto>` to `SmartDashboardCaptureCli`.
+- Implemented candidate-based connection selection:
+  - `direct`: use explicit/direct configured channel path only
+  - `auto`: try explicit overrides first (if provided), then known default direct channel families
+- Added selected-candidate diagnostics in verbose output for troubleshooting.
+- Extended internal tests with auto-mode coverage against legacy-short channel naming.
+- Updated README and harness docs with auto-connect usage guidance.
+
 ## 2026-03-11 - Line-plot smoothing, direct stream cadence tuning, and direct-label compaction
 
 - Improved line-plot smooth-scrolling behavior in `SmartDashboard/src/widgets/line_plot_widget.cpp`:
