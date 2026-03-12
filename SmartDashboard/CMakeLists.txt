@@ -24,6 +24,8 @@ qt_add_executable(SmartDashboardApp WIN32
     src/widgets/variable_tile.cpp
     src/widgets/line_plot_widget.h
     src/widgets/line_plot_widget.cpp
+    src/widgets/playback_timeline_widget.h
+    src/widgets/playback_timeline_widget.cpp
     src/widgets/tile_control_widget.h
     src/widgets/tile_control_widget.cpp
 )
@@ -62,9 +64,11 @@ if(BUILD_TESTING)
 
     add_executable(SmartDashboard_tests
         tests/line_plot_widget_tests.cpp
+        tests/playback_timeline_widget_tests.cpp
         tests/variable_tile_tests.cpp
         src/widgets/variable_tile.cpp
         src/widgets/line_plot_widget.cpp
+        src/widgets/playback_timeline_widget.cpp
         src/widgets/tile_control_widget.cpp
     )
 

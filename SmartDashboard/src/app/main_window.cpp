@@ -2,14 +2,21 @@
 
 #include "layout/layout_serializer.h"
 #include "sd_direct_types.h"
+#include "widgets/playback_timeline_widget.h"
 
 #include <QAction>
 #include <QApplication>
+#include <QComboBox>
 #include <QCloseEvent>
 #include <QCoreApplication>
+#include <QDateTime>
+#include <QDir>
 #include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QHBoxLayout>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
 #include <QMenu>
@@ -18,11 +25,17 @@
 #include <QLineEdit>
 #include <QMetaObject>
 #include <QPalette>
+#include <QPushButton>
+#include <QSaveFile>
 #include <QSettings>
 #include <QStringList>
 #include <QStatusBar>
+#include <QTimer>
 #include <QVariant>
+#include <QWidgetAction>
 #include <QWidget>
+
+#include <chrono>
 
 namespace
 {
@@ -221,6 +234,10 @@ MainWindow::MainWindow(QWidget* parent)
     m_useDirectTransportAction->setCheckable(true);
     m_useNetworkTablesTransportAction = connectionMenu->addAction("Use NetworkTables transport");
     m_useNetworkTablesTransportAction->setCheckable(true);
+    m_useReplayTransportAction = connectionMenu->addAction("Use Replay transport");
+    m_useReplayTransportAction->setCheckable(true);
+    connectionMenu->addSeparator();
+    m_openReplayFileAction = connectionMenu->addAction("Replay: Open session file...");
     connectionMenu->addSeparator();
     m_ntUseTeamAction = connectionMenu->addAction("NT: Use team number");
     m_ntUseTeamAction->setCheckable(true);
@@ -231,9 +248,41 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_disconnectTransportAction, &QAction::triggered, this, &MainWindow::OnDisconnectTransport);
     connect(m_useDirectTransportAction, &QAction::triggered, this, &MainWindow::OnUseDirectTransport);
     connect(m_useNetworkTablesTransportAction, &QAction::triggered, this, &MainWindow::OnUseNetworkTablesTransport);
+    connect(m_useReplayTransportAction, &QAction::triggered, this, &MainWindow::OnUseReplayTransport);
+    connect(m_openReplayFileAction, &QAction::triggered, this, &MainWindow::OnOpenReplayFile);
     connect(m_ntUseTeamAction, &QAction::triggered, this, &MainWindow::OnToggleNtUseTeam);
     connect(ntSetHostAction, &QAction::triggered, this, &MainWindow::OnSetNtHost);
     connect(ntSetTeamAction, &QAction::triggered, this, &MainWindow::OnSetNtTeam);
+
+    auto* playbackControls = new QWidget(this);
+    auto* playbackLayout = new QHBoxLayout(playbackControls);
+    playbackLayout->setContentsMargins(0, 0, 0, 0);
+    playbackLayout->setSpacing(6);
+
+    auto* playbackLabel = new QLabel("Playback", playbackControls);
+    playbackLayout->addWidget(playbackLabel);
+
+    auto* playbackButton = new QPushButton("Play", playbackControls);
+    playbackButton->setObjectName("playbackPlayPauseButton");
+    playbackLayout->addWidget(playbackButton);
+
+    m_playbackRateCombo = new QComboBox(playbackControls);
+    m_playbackRateCombo->addItem("0.25x", 0.25);
+    m_playbackRateCombo->addItem("0.5x", 0.5);
+    m_playbackRateCombo->addItem("1x", 1.0);
+    m_playbackRateCombo->addItem("2x", 2.0);
+    m_playbackRateCombo->setCurrentIndex(2);
+    playbackLayout->addWidget(m_playbackRateCombo);
+
+    statusBar()->addPermanentWidget(playbackControls);
+    m_playPausePlaybackAction = new QAction("Play", this);
+    connect(m_playPausePlaybackAction, &QAction::triggered, this, &MainWindow::OnPlaybackPlayPause);
+    connect(playbackButton, &QPushButton::clicked, this, &MainWindow::OnPlaybackPlayPause);
+    connect(m_playbackRateCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::OnPlaybackRateChanged);
+
+    m_playbackTimeline = new sd::widgets::PlaybackTimelineWidget(this);
+    statusBar()->addPermanentWidget(m_playbackTimeline, 1);
+    connect(m_playbackTimeline, &sd::widgets::PlaybackTimelineWidget::CursorScrubbedUs, this, &MainWindow::OnPlaybackCursorScrubbed);
 
     QSettings settings("SmartDashboard", "SmartDashboardApp");
     m_connectionConfig.kind = static_cast<sd::transport::TransportKind>(
@@ -243,7 +292,14 @@ MainWindow::MainWindow(QWidget* parent)
     m_connectionConfig.ntTeam = settings.value("connection/ntTeam", 0).toInt();
     m_connectionConfig.ntUseTeam = settings.value("connection/ntUseTeam", true).toBool();
     m_connectionConfig.ntClientName = settings.value("connection/ntClientName", "SmartDashboardApp").toString();
+    m_connectionConfig.replayFilePath = settings.value("connection/replayFilePath").toString();
     ApplyTransportMenuChecks();
+
+    m_playbackUiTimer = new QTimer(this);
+    m_playbackUiTimer->setInterval(100);
+    connect(m_playbackUiTimer, &QTimer::timeout, this, &MainWindow::UpdatePlaybackUiState);
+    m_playbackUiTimer->start();
+    UpdatePlaybackUiState();
 
     connect(
         qApp,
@@ -361,6 +417,8 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
         default:
             break;
     }
+
+    RecordVariableEvent(key, valueType, value, seq);
 }
 
 void MainWindow::OnConnectionStateChanged(int state)
@@ -375,6 +433,7 @@ void MainWindow::OnConnectionStateChanged(int state)
     }
 
     UpdateWindowConnectionText(state);
+    RecordConnectionEvent(state);
 }
 
 void MainWindow::OnSaveLayout()
@@ -928,6 +987,22 @@ void MainWindow::OnUseNetworkTablesTransport()
     }
     ApplyTransportMenuChecks();
     PersistConnectionSettings();
+    UpdatePlaybackUiState();
+}
+
+void MainWindow::OnUseReplayTransport()
+{
+    m_connectionConfig.kind = sd::transport::TransportKind::Replay;
+    for (const auto& [_, tile] : m_tiles)
+    {
+        if (tile != nullptr)
+        {
+            tile->SetTitleText(BuildDisplayLabel(tile->GetKey()));
+        }
+    }
+    ApplyTransportMenuChecks();
+    PersistConnectionSettings();
+    UpdatePlaybackUiState();
 }
 
 void MainWindow::OnSetNtHost()
@@ -984,6 +1059,60 @@ void MainWindow::OnToggleNtUseTeam()
     PersistConnectionSettings();
 }
 
+void MainWindow::OnOpenReplayFile()
+{
+    const QString selected = QFileDialog::getOpenFileName(
+        this,
+        "Open Replay Session",
+        m_connectionConfig.replayFilePath,
+        "Replay Files (*.jsonl *.log);;All Files (*)"
+    );
+    if (selected.isEmpty())
+    {
+        return;
+    }
+
+    m_connectionConfig.replayFilePath = selected;
+    m_connectionConfig.kind = sd::transport::TransportKind::Replay;
+    ApplyTransportMenuChecks();
+    PersistConnectionSettings();
+    StartTransport();
+}
+
+void MainWindow::OnPlaybackPlayPause()
+{
+    if (!m_transport || !m_transport->SupportsPlayback())
+    {
+        return;
+    }
+
+    const bool playing = m_transport->IsPlaybackPlaying();
+    m_transport->SetPlaybackPlaying(!playing);
+    UpdatePlaybackUiState();
+}
+
+void MainWindow::OnPlaybackRateChanged(int index)
+{
+    if (!m_transport || !m_transport->SupportsPlayback() || m_playbackRateCombo == nullptr)
+    {
+        return;
+    }
+
+    const double rate = m_playbackRateCombo->itemData(index).toDouble();
+    m_transport->SetPlaybackRate(rate);
+}
+
+void MainWindow::OnPlaybackCursorScrubbed(std::int64_t cursorUs)
+{
+    if (!m_transport || !m_transport->SupportsPlayback())
+    {
+        return;
+    }
+
+    m_transport->SeekPlaybackUs(cursorUs);
+    UpdatePlaybackUiState();
+}
+
 void MainWindow::ApplyTransportMenuChecks()
 {
     if (m_useDirectTransportAction != nullptr)
@@ -996,9 +1125,19 @@ void MainWindow::ApplyTransportMenuChecks()
         m_useNetworkTablesTransportAction->setChecked(m_connectionConfig.kind == sd::transport::TransportKind::NetworkTables);
     }
 
+    if (m_useReplayTransportAction != nullptr)
+    {
+        m_useReplayTransportAction->setChecked(m_connectionConfig.kind == sd::transport::TransportKind::Replay);
+    }
+
     if (m_ntUseTeamAction != nullptr)
     {
         m_ntUseTeamAction->setChecked(m_connectionConfig.ntUseTeam);
+    }
+
+    if (m_openReplayFileAction != nullptr)
+    {
+        m_openReplayFileAction->setEnabled(true);
     }
 }
 
@@ -1010,15 +1149,18 @@ void MainWindow::PersistConnectionSettings() const
     settings.setValue("connection/ntTeam", m_connectionConfig.ntTeam);
     settings.setValue("connection/ntUseTeam", m_connectionConfig.ntUseTeam);
     settings.setValue("connection/ntClientName", m_connectionConfig.ntClientName);
+    settings.setValue("connection/replayFilePath", m_connectionConfig.replayFilePath);
 }
 
 void MainWindow::StartTransport()
 {
     StopTransport();
+    StartSessionRecording();
 
     m_transport = sd::transport::CreateDashboardTransport(m_connectionConfig);
     if (!m_transport)
     {
+        StopSessionRecording();
         UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
         return;
     }
@@ -1049,20 +1191,310 @@ void MainWindow::StartTransport()
                 tile->SetTitleText(BuildDisplayLabel(tile->GetKey()));
             }
         }
+
+        if (m_transport->SupportsPlayback() && m_playbackRateCombo != nullptr)
+        {
+            m_transport->SetPlaybackRate(m_playbackRateCombo->currentData().toDouble());
+        }
     }
 
     if (!started)
     {
+        StopSessionRecording();
         m_transport.reset();
         UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
     }
+
+    UpdatePlaybackUiState();
 }
 
 void MainWindow::StopTransport()
 {
     if (m_transport)
     {
+        RecordConnectionEvent(static_cast<int>(sd::transport::ConnectionState::Disconnected));
         m_transport->Stop();
         m_transport.reset();
     }
+
+    StopSessionRecording();
+    UpdatePlaybackUiState();
+}
+
+void MainWindow::UpdatePlaybackUiState()
+{
+    const bool hasPlayback = (m_transport != nullptr) && m_transport->SupportsPlayback();
+
+    if (m_playPausePlaybackAction != nullptr)
+    {
+        m_playPausePlaybackAction->setEnabled(hasPlayback);
+        m_playPausePlaybackAction->setText(hasPlayback && m_transport->IsPlaybackPlaying() ? "Pause" : "Play");
+    }
+
+    if (m_playbackRateCombo != nullptr)
+    {
+        m_playbackRateCombo->setEnabled(hasPlayback);
+    }
+
+    if (m_playbackTimeline != nullptr)
+    {
+        m_playbackTimeline->setEnabled(hasPlayback);
+        if (hasPlayback)
+        {
+            const std::int64_t durationUs = m_transport->GetPlaybackDurationUs();
+            const std::int64_t cursorUs = m_transport->GetPlaybackCursorUs();
+            m_playbackTimeline->SetDurationUs(durationUs);
+            if (m_playbackTimeline->GetWindowEndUs() <= m_playbackTimeline->GetWindowStartUs())
+            {
+                m_playbackTimeline->SetWindowUs(0, durationUs);
+            }
+            m_playbackTimeline->SetCursorUs(cursorUs);
+        }
+        else
+        {
+            m_playbackTimeline->SetDurationUs(0);
+            m_playbackTimeline->SetCursorUs(0);
+            m_playbackTimeline->SetWindowUs(0, 0);
+        }
+    }
+}
+
+void MainWindow::StartSessionRecording()
+{
+    StopSessionRecording();
+
+    if (!IsRecordingTransportKind(m_connectionConfig.kind))
+    {
+        return;
+    }
+
+    const QString logsDir = QDir::currentPath() + "/logs";
+    QDir().mkpath(logsDir);
+
+    const QString timestamp = QDateTime::currentDateTimeUtc().toString("yyyyMMdd_HHmmss_zzz");
+    m_recordingFilePath = QString("%1/session_%2.jsonl").arg(logsDir, timestamp);
+
+    m_recordingStartEpochUs = static_cast<std::uint64_t>(QDateTime::currentMSecsSinceEpoch()) * 1000ULL;
+    m_recordingStartSteadyUs = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()
+        ).count()
+    );
+    m_recordingLastTimestampUs = 0;
+
+    {
+        std::lock_guard<std::mutex> lock(m_recordingMutex);
+        m_recordingQueue.clear();
+        m_recordingStopRequested = false;
+        m_recordingThreadRunning = true;
+    }
+
+    m_recordingThread = std::thread([this]()
+    {
+        QFile file(m_recordingFilePath);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+        {
+            std::lock_guard<std::mutex> lock(m_recordingMutex);
+            m_recordingThreadRunning = false;
+            return;
+        }
+
+        while (true)
+        {
+            QByteArray line;
+            {
+                std::unique_lock<std::mutex> lock(m_recordingMutex);
+                m_recordingCv.wait(lock, [this]()
+                {
+                    return m_recordingStopRequested || !m_recordingQueue.empty();
+                });
+
+                if (!m_recordingQueue.empty())
+                {
+                    line = std::move(m_recordingQueue.front());
+                    m_recordingQueue.pop_front();
+                }
+                else if (m_recordingStopRequested)
+                {
+                    break;
+                }
+            }
+
+            if (!line.isEmpty())
+            {
+                file.write(line);
+                file.write("\n");
+            }
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(m_recordingMutex);
+            while (!m_recordingQueue.empty())
+            {
+                const QByteArray line = std::move(m_recordingQueue.front());
+                m_recordingQueue.pop_front();
+                if (!line.isEmpty())
+                {
+                    file.write(line);
+                    file.write("\n");
+                }
+            }
+            m_recordingThreadRunning = false;
+        }
+
+        file.flush();
+        file.close();
+    });
+}
+
+void MainWindow::StopSessionRecording()
+{
+    {
+        std::lock_guard<std::mutex> lock(m_recordingMutex);
+        if (!m_recordingThreadRunning && !m_recordingThread.joinable())
+        {
+            return;
+        }
+
+        m_recordingStopRequested = true;
+    }
+
+    m_recordingCv.notify_all();
+    if (m_recordingThread.joinable())
+    {
+        m_recordingThread.join();
+    }
+
+    std::lock_guard<std::mutex> lock(m_recordingMutex);
+    m_recordingQueue.clear();
+    m_recordingThreadRunning = false;
+    m_recordingStopRequested = false;
+}
+
+void MainWindow::RecordVariableEvent(const QString& key, int valueType, const QVariant& value, quint64 seq)
+{
+    if (!IsRecordingTransportKind(m_connectionConfig.kind))
+    {
+        return;
+    }
+
+    std::uint64_t nowSteadyUs = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()
+        ).count()
+    );
+
+    std::uint64_t timestampUs = 0;
+    if (nowSteadyUs >= m_recordingStartSteadyUs)
+    {
+        timestampUs = nowSteadyUs - m_recordingStartSteadyUs;
+    }
+    if (timestampUs < m_recordingLastTimestampUs)
+    {
+        timestampUs = m_recordingLastTimestampUs;
+    }
+    m_recordingLastTimestampUs = timestampUs;
+
+    QString typeString = "string";
+    if (valueType == static_cast<int>(sd::direct::ValueType::Bool))
+    {
+        typeString = "bool";
+    }
+    else if (valueType == static_cast<int>(sd::direct::ValueType::Double))
+    {
+        typeString = "double";
+    }
+
+    QJsonObject object;
+    object.insert("eventKind", "data");
+    object.insert("timestampUs", static_cast<qint64>(timestampUs));
+    object.insert("key", key);
+    object.insert("valueType", typeString);
+    object.insert("seq", QString::number(seq));
+    if (typeString == "bool")
+    {
+        object.insert("value", value.toBool());
+    }
+    else if (typeString == "double")
+    {
+        object.insert("value", value.toDouble());
+    }
+    else
+    {
+        object.insert("value", value.toString());
+    }
+
+    const QByteArray line = QJsonDocument(object).toJson(QJsonDocument::Compact);
+    {
+        std::lock_guard<std::mutex> lock(m_recordingMutex);
+        if (!m_recordingThreadRunning || m_recordingStopRequested)
+        {
+            return;
+        }
+
+        m_recordingQueue.push_back(line);
+    }
+    m_recordingCv.notify_one();
+}
+
+void MainWindow::RecordConnectionEvent(int state)
+{
+    if (!IsRecordingTransportKind(m_connectionConfig.kind))
+    {
+        return;
+    }
+
+    std::uint64_t nowSteadyUs = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()
+        ).count()
+    );
+
+    std::uint64_t timestampUs = 0;
+    if (nowSteadyUs >= m_recordingStartSteadyUs)
+    {
+        timestampUs = nowSteadyUs - m_recordingStartSteadyUs;
+    }
+    if (timestampUs < m_recordingLastTimestampUs)
+    {
+        timestampUs = m_recordingLastTimestampUs;
+    }
+    m_recordingLastTimestampUs = timestampUs;
+
+    QString stateText = "Disconnected";
+    if (state == static_cast<int>(sd::transport::ConnectionState::Connecting))
+    {
+        stateText = "Connecting";
+    }
+    else if (state == static_cast<int>(sd::transport::ConnectionState::Connected))
+    {
+        stateText = "Connected";
+    }
+    else if (state == static_cast<int>(sd::transport::ConnectionState::Stale))
+    {
+        stateText = "Stale";
+    }
+
+    QJsonObject object;
+    object.insert("eventKind", "connection_state");
+    object.insert("timestampUs", static_cast<qint64>(timestampUs));
+    object.insert("state", stateText);
+    object.insert("stateValue", state);
+
+    const QByteArray line = QJsonDocument(object).toJson(QJsonDocument::Compact);
+    {
+        std::lock_guard<std::mutex> lock(m_recordingMutex);
+        if (!m_recordingThreadRunning || m_recordingStopRequested)
+        {
+            return;
+        }
+
+        m_recordingQueue.push_back(line);
+    }
+    m_recordingCv.notify_one();
+}
+
+bool MainWindow::IsRecordingTransportKind(sd::transport::TransportKind kind) const
+{
+    return kind == sd::transport::TransportKind::Direct || kind == sd::transport::TransportKind::NetworkTables;
 }

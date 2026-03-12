@@ -3,6 +3,11 @@
 #include "sd_direct_publisher.h"
 #include "sd_direct_subscriber.h"
 
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QVariant>
+
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -12,8 +17,10 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include <winsock2.h>
@@ -783,12 +790,509 @@ namespace sd::transport
             std::map<std::string, EntryMeta> m_keyToEntry;
             std::map<std::uint16_t, std::string> m_idToKey;
         };
+
+        class ReplayDashboardTransport final : public IDashboardTransport
+        {
+        public:
+            explicit ReplayDashboardTransport(ConnectionConfig config)
+                : m_config(std::move(config))
+            {
+            }
+
+            ~ReplayDashboardTransport() override
+            {
+                Stop();
+            }
+
+            bool Start(VariableUpdateCallback onVariableUpdate, ConnectionStateCallback onConnectionState) override
+            {
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    m_onVariableUpdate = std::move(onVariableUpdate);
+                    m_onConnectionState = std::move(onConnectionState);
+                    if (m_running)
+                    {
+                        return true;
+                    }
+                }
+
+                if (!LoadReplayFile())
+                {
+                    PublishState(ConnectionState::Disconnected);
+                    return false;
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    m_running = true;
+                    m_playing = false;
+                    m_playbackRate = 1.0;
+                    m_cursorUs = 0;
+                    m_nextEventIndex = 0;
+                    m_lastTickUs = 0;
+                }
+
+                PublishState(ConnectionState::Connected);
+                SeekPlaybackUs(0);
+                m_worker = std::thread([this]() { RunPlaybackLoop(); });
+                return true;
+            }
+
+            void Stop() override
+            {
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    if (!m_running)
+                    {
+                        return;
+                    }
+                    m_running = false;
+                    m_playing = false;
+                }
+
+                if (m_worker.joinable())
+                {
+                    m_worker.join();
+                }
+
+                PublishState(ConnectionState::Disconnected);
+            }
+
+            bool PublishBool(const QString& key, bool value) override
+            {
+                static_cast<void>(key);
+                static_cast<void>(value);
+                return false;
+            }
+
+            bool PublishDouble(const QString& key, double value) override
+            {
+                static_cast<void>(key);
+                static_cast<void>(value);
+                return false;
+            }
+
+            bool PublishString(const QString& key, const QString& value) override
+            {
+                static_cast<void>(key);
+                static_cast<void>(value);
+                return false;
+            }
+
+            bool SupportsPlayback() const override
+            {
+                return true;
+            }
+
+            bool SetPlaybackPlaying(bool isPlaying) override
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                if (!m_running)
+                {
+                    return false;
+                }
+
+                m_playing = isPlaying;
+                m_lastTickUs = NowSteadyUs();
+                return true;
+            }
+
+            bool SeekPlaybackUs(std::int64_t cursorUs) override
+            {
+                std::vector<VariableUpdate> reconstructed;
+                std::size_t targetIndex = 0;
+                std::int64_t clampedCursorUs = 0;
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    clampedCursorUs = std::clamp<std::int64_t>(cursorUs, 0, m_durationUs);
+                    targetIndex = FindFirstEventAfterTimeLocked(clampedCursorUs);
+
+                    std::map<std::string, VariableUpdate> latestByKey;
+
+                    std::size_t startIndex = 0;
+                    const Checkpoint* checkpoint = FindCheckpointForEventLocked(targetIndex);
+                    if (checkpoint != nullptr)
+                    {
+                        latestByKey = checkpoint->latestByKey;
+                        startIndex = checkpoint->eventIndex;
+                    }
+
+                    for (std::size_t i = startIndex; i < targetIndex; ++i)
+                    {
+                        const ReplayEvent& event = m_events[i];
+                        if (event.kind != ReplayEventKind::Data)
+                        {
+                            continue;
+                        }
+                        latestByKey[event.update.key.toStdString()] = event.update;
+                    }
+
+                    reconstructed.reserve(latestByKey.size());
+                    for (const auto& [_, update] : latestByKey)
+                    {
+                        reconstructed.push_back(update);
+                    }
+
+                    m_cursorUs = clampedCursorUs;
+                    m_nextEventIndex = targetIndex;
+                    m_lastTickUs = NowSteadyUs();
+                }
+
+                for (const VariableUpdate& update : reconstructed)
+                {
+                    PublishUpdate(update);
+                }
+
+                return true;
+            }
+
+            bool SetPlaybackRate(double rate) override
+            {
+                const double bounded = std::clamp(rate, 0.05, 8.0);
+                std::lock_guard<std::mutex> lock(m_mutex);
+                if (!m_running)
+                {
+                    return false;
+                }
+
+                m_playbackRate = bounded;
+                m_lastTickUs = NowSteadyUs();
+                return true;
+            }
+
+            std::int64_t GetPlaybackDurationUs() const override
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                return m_durationUs;
+            }
+
+            std::int64_t GetPlaybackCursorUs() const override
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                return m_cursorUs;
+            }
+
+            bool IsPlaybackPlaying() const override
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                return m_playing;
+            }
+
+        private:
+            enum class ReplayEventKind
+            {
+                Data,
+                ConnectionState,
+                Marker
+            };
+
+            struct ReplayEvent
+            {
+                ReplayEventKind kind = ReplayEventKind::Data;
+                std::int64_t timestampUs = 0;
+                VariableUpdate update;
+            };
+
+            struct Checkpoint
+            {
+                std::size_t eventIndex = 0;
+                std::map<std::string, VariableUpdate> latestByKey;
+            };
+
+            static std::int64_t NowSteadyUs()
+            {
+                const auto now = std::chrono::steady_clock::now();
+                const auto epoch = now.time_since_epoch();
+                return std::chrono::duration_cast<std::chrono::microseconds>(epoch).count();
+            }
+
+            bool LoadReplayFile()
+            {
+                if (m_config.replayFilePath.trimmed().isEmpty())
+                {
+                    return false;
+                }
+
+                QFile file(m_config.replayFilePath);
+                if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+                {
+                    return false;
+                }
+
+                std::vector<ReplayEvent> loaded;
+                loaded.reserve(4096);
+                while (!file.atEnd())
+                {
+                    const QByteArray line = file.readLine().trimmed();
+                    if (line.isEmpty())
+                    {
+                        continue;
+                    }
+
+                    QJsonParseError parseError;
+                    const QJsonDocument doc = QJsonDocument::fromJson(line, &parseError);
+                    if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+                    {
+                        continue;
+                    }
+
+                    ReplayEvent event;
+                    if (!ParseReplayEvent(doc.object(), event))
+                    {
+                        continue;
+                    }
+
+                    loaded.push_back(std::move(event));
+                }
+
+                if (loaded.empty())
+                {
+                    return false;
+                }
+
+                std::lock_guard<std::mutex> lock(m_mutex);
+                m_events = std::move(loaded);
+                m_durationUs = std::max<std::int64_t>(0, m_events.back().timestampUs);
+                BuildCheckpointsLocked();
+                return true;
+            }
+
+            bool ParseReplayEvent(const QJsonObject& object, ReplayEvent& event)
+            {
+                const QString kind = object.value("eventKind").toString("data");
+                event.timestampUs = object.value("timestampUs").toVariant().toLongLong();
+
+                if (kind == "connection_state")
+                {
+                    event.kind = ReplayEventKind::ConnectionState;
+                    return true;
+                }
+
+                if (kind == "marker")
+                {
+                    event.kind = ReplayEventKind::Marker;
+                    return true;
+                }
+
+                event.kind = ReplayEventKind::Data;
+                event.update.key = object.value("key").toString();
+                event.update.seq = object.value("seq").toVariant().toULongLong();
+
+                const QVariant typeVariant = object.value("valueType").toVariant();
+                if (typeVariant.typeId() == QMetaType::QString)
+                {
+                    const QString typeText = typeVariant.toString().toLower();
+                    if (typeText == "bool")
+                    {
+                        event.update.valueType = static_cast<int>(sd::direct::ValueType::Bool);
+                    }
+                    else if (typeText == "double")
+                    {
+                        event.update.valueType = static_cast<int>(sd::direct::ValueType::Double);
+                    }
+                    else
+                    {
+                        event.update.valueType = static_cast<int>(sd::direct::ValueType::String);
+                    }
+                }
+                else
+                {
+                    event.update.valueType = typeVariant.toInt();
+                }
+
+                if (event.update.valueType == static_cast<int>(sd::direct::ValueType::Bool))
+                {
+                    event.update.value = object.value("value").toBool();
+                }
+                else if (event.update.valueType == static_cast<int>(sd::direct::ValueType::Double))
+                {
+                    event.update.value = object.value("value").toDouble();
+                }
+                else
+                {
+                    event.update.value = object.value("value").toString();
+                }
+
+                return !event.update.key.isEmpty();
+            }
+
+            void BuildCheckpointsLocked()
+            {
+                m_checkpoints.clear();
+
+                std::map<std::string, VariableUpdate> latestByKey;
+                latestByKey.clear();
+
+                constexpr std::size_t checkpointStride = 1000;
+                for (std::size_t i = 0; i < m_events.size(); ++i)
+                {
+                    const ReplayEvent& event = m_events[i];
+                    if (event.kind == ReplayEventKind::Data)
+                    {
+                        latestByKey[event.update.key.toStdString()] = event.update;
+                    }
+
+                    if (i == 0 || (i % checkpointStride) == 0)
+                    {
+                        Checkpoint cp;
+                        cp.eventIndex = i;
+                        cp.latestByKey = latestByKey;
+                        m_checkpoints.push_back(std::move(cp));
+                    }
+                }
+            }
+
+            const Checkpoint* FindCheckpointForEventLocked(std::size_t eventIndex) const
+            {
+                if (m_checkpoints.empty())
+                {
+                    return nullptr;
+                }
+
+                const Checkpoint* candidate = nullptr;
+                for (const Checkpoint& cp : m_checkpoints)
+                {
+                    if (cp.eventIndex > eventIndex)
+                    {
+                        break;
+                    }
+                    candidate = &cp;
+                }
+
+                return candidate;
+            }
+
+            std::size_t FindFirstEventAfterTimeLocked(std::int64_t cursorUs) const
+            {
+                auto it = std::lower_bound(
+                    m_events.begin(),
+                    m_events.end(),
+                    cursorUs,
+                    [](const ReplayEvent& event, std::int64_t value)
+                    {
+                        return event.timestampUs < value;
+                    }
+                );
+
+                return static_cast<std::size_t>(std::distance(m_events.begin(), it));
+            }
+
+            bool IsRunningLocked() const
+            {
+                return m_running;
+            }
+
+            void RunPlaybackLoop()
+            {
+                while (true)
+                {
+                    std::vector<VariableUpdate> updates;
+                    bool shouldSleep = true;
+
+                    {
+                        std::lock_guard<std::mutex> lock(m_mutex);
+                        if (!IsRunningLocked())
+                        {
+                            break;
+                        }
+
+                        if (!m_playing)
+                        {
+                            m_lastTickUs = NowSteadyUs();
+                        }
+                        else
+                        {
+                            const std::int64_t nowUs = NowSteadyUs();
+                            const std::int64_t deltaUs = std::max<std::int64_t>(0, nowUs - m_lastTickUs);
+                            m_lastTickUs = nowUs;
+                            const std::int64_t playbackDeltaUs = static_cast<std::int64_t>(static_cast<double>(deltaUs) * m_playbackRate);
+
+                            const std::int64_t oldCursor = m_cursorUs;
+                            m_cursorUs = std::clamp<std::int64_t>(m_cursorUs + playbackDeltaUs, 0, m_durationUs);
+                            const std::size_t endIndex = FindFirstEventAfterTimeLocked(m_cursorUs);
+
+                            while (m_nextEventIndex < endIndex && m_nextEventIndex < m_events.size())
+                            {
+                                const ReplayEvent& event = m_events[m_nextEventIndex];
+                                if (event.kind == ReplayEventKind::Data && event.timestampUs >= oldCursor)
+                                {
+                                    updates.push_back(event.update);
+                                }
+                                ++m_nextEventIndex;
+                            }
+
+                            if (m_cursorUs >= m_durationUs)
+                            {
+                                m_playing = false;
+                            }
+
+                            shouldSleep = updates.empty();
+                        }
+                    }
+
+                    for (const VariableUpdate& update : updates)
+                    {
+                        PublishUpdate(update);
+                    }
+
+                    if (shouldSleep)
+                    {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+                    }
+                }
+            }
+
+            void PublishState(ConnectionState state)
+            {
+                ConnectionStateCallback callback;
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    callback = m_onConnectionState;
+                }
+
+                if (callback)
+                {
+                    callback(state);
+                }
+            }
+
+            void PublishUpdate(const VariableUpdate& update)
+            {
+                VariableUpdateCallback callback;
+                {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    callback = m_onVariableUpdate;
+                }
+
+                if (callback)
+                {
+                    callback(update);
+                }
+            }
+
+            ConnectionConfig m_config;
+            mutable std::mutex m_mutex;
+            bool m_running = false;
+            bool m_playing = false;
+            double m_playbackRate = 1.0;
+            std::int64_t m_durationUs = 0;
+            std::int64_t m_cursorUs = 0;
+            std::int64_t m_lastTickUs = 0;
+            std::size_t m_nextEventIndex = 0;
+            std::vector<ReplayEvent> m_events;
+            std::vector<Checkpoint> m_checkpoints;
+            std::thread m_worker;
+            VariableUpdateCallback m_onVariableUpdate;
+            ConnectionStateCallback m_onConnectionState;
+        };
     }
 
     QString ToDisplayString(TransportKind kind)
     {
         switch (kind)
         {
+            case TransportKind::Replay:
+                return "Replay";
             case TransportKind::NetworkTables:
                 return "NetworkTables";
             case TransportKind::Direct:
@@ -799,6 +1303,11 @@ namespace sd::transport
 
     std::unique_ptr<IDashboardTransport> CreateDashboardTransport(const ConnectionConfig& config)
     {
+        if (config.kind == TransportKind::Replay)
+        {
+            return std::make_unique<ReplayDashboardTransport>(config);
+        }
+
         if (config.kind == TransportKind::NetworkTables)
         {
             return std::make_unique<NetworkTablesDashboardTransport>(config);

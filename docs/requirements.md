@@ -82,3 +82,14 @@ Build an educational, community-friendly C++ dashboard prototype for FRC that de
   - transport-agnostic playback controls (`play`, `pause`, `seek`, speed)
   - timeline model exposing current time, duration, and playback speed
   - UI-ready integration points for future playback controls (without coupling UI to data source type)
+
+## Next feature acceptance checklist (recording/playback)
+
+- [ ] Dashboard can record bool/double/string telemetry updates to a session file during live operation.
+- [ ] Replay mode can load a recorded session and feed updates through the same model/widget flow used for live transports.
+- [ ] Global playback controls exist: `play`, `pause`, `seek`, and speed selection (`0.25x`, `0.5x`, `1x`, `2x` minimum).
+- [ ] All widgets stay synchronized to one shared global replay cursor.
+- [ ] Timeline interactions support scrub, zoom, and pan for match-scale and sub-second analysis.
+- [ ] Replay is deterministic: same recording + same cursor position produces the same displayed state.
+- [ ] Replay seek performance is indexed or otherwise optimized to avoid full-file replay from time zero on typical jumps.
+- [ ] Automated tests cover recorder/replay roundtrip and replay seek correctness.

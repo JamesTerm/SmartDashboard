@@ -12,7 +12,8 @@ namespace sd::transport
     enum class TransportKind
     {
         Direct,
-        NetworkTables
+        NetworkTables,
+        Replay
     };
 
     enum class ConnectionState
@@ -30,6 +31,7 @@ namespace sd::transport
         int ntTeam = 0;
         bool ntUseTeam = true;
         QString ntClientName = "SmartDashboardApp";
+        QString replayFilePath;
     };
 
     struct VariableUpdate
@@ -54,6 +56,44 @@ namespace sd::transport
         virtual bool PublishBool(const QString& key, bool value) = 0;
         virtual bool PublishDouble(const QString& key, double value) = 0;
         virtual bool PublishString(const QString& key, const QString& value) = 0;
+
+        virtual bool SupportsPlayback() const
+        {
+            return false;
+        }
+
+        virtual bool SetPlaybackPlaying(bool isPlaying)
+        {
+            static_cast<void>(isPlaying);
+            return false;
+        }
+
+        virtual bool SeekPlaybackUs(std::int64_t cursorUs)
+        {
+            static_cast<void>(cursorUs);
+            return false;
+        }
+
+        virtual bool SetPlaybackRate(double rate)
+        {
+            static_cast<void>(rate);
+            return false;
+        }
+
+        virtual std::int64_t GetPlaybackDurationUs() const
+        {
+            return 0;
+        }
+
+        virtual std::int64_t GetPlaybackCursorUs() const
+        {
+            return 0;
+        }
+
+        virtual bool IsPlaybackPlaying() const
+        {
+            return false;
+        }
     };
 
     QString ToDisplayString(TransportKind kind);

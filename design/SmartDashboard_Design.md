@@ -704,6 +704,181 @@ Implication for future iterations:
 - As NT adapter matures, this dashboard can coexist with tools like Shuffleboard by reading/writing the same robot-hosted NT topics
 - Direct transport remains valuable for local teaching, isolated simulation, and controlled integration tests
 
+## Telemetry Recording and Playback Design (Iteration 4)
+
+This section defines the next feature slice: timeline-based recording and replay for post-run diagnostics.
+
+### Why this matters
+
+Live dashboards answer "what is happening now," but match debugging often needs "what happened 4 seconds before failure."
+
+Student-relevant examples:
+
+- Brownout investigation (voltage dip + subsystem behavior at the same timestamp)
+- Command/telemetry mismatch investigation after reconnects
+- Driver station incident review where root cause is only visible after zooming into a narrow time window
+
+Core teaching goal: show how to design one UI workflow that works for both real-time streams and deterministic replay.
+
+### Scope for this iteration
+
+In scope:
+
+- Record timestamped bool/double/string updates to disk during live sessions
+- Replay recorded sessions through the same dashboard data path used by live transport
+- Add global playback controls (`play`, `pause`, `seek`, speed)
+- Add a shared timeline model (`cursor`, `duration`, `visible window`, zoom, pan)
+- Keep all widgets time-synchronized to one global cursor
+
+Out of scope for first playback slice:
+
+- Full annotation system with rich editing
+- Video sync or external media timelines
+- Cross-file session merge/comparison views
+- Complete replacement of current transport internals
+
+### Workflow requirements (must-have UX)
+
+The first usable playback workflow must include:
+
+- One global cursor shared across all widgets
+- Scrub, zoom, and pan timeline interactions (Audacity-style mental model)
+- Deterministic replay (same file + same cursor -> same dashboard state)
+- Step and speed controls (`0.25x`, `0.5x`, `1x`, `2x` minimum)
+- System markers for notable events (connect/disconnect, stream gaps)
+- Fast seek behavior suitable for jumping around an entire match log
+
+### Architecture decision: replay as a transport adapter
+
+Decision: implement playback as an additional `IDashboardTransport` implementation.
+
+Rationale:
+
+- Preserves existing model/widget flow (`MainWindow` + `VariableStore` + tiles)
+- Avoids transport-specific branches in widget logic
+- Keeps the teaching story clean: "live and replay are different sources behind one contract"
+- Supports future parity tests across `Direct`, `NetworkTables`, and `Replay`
+
+Alternatives considered:
+
+1. Embed replay directly in `MainWindow`
+   - Pro: quick prototype
+   - Con: UI and data source logic become tightly coupled, harder to test
+2. Embed replay in `VariableStore`
+   - Pro: centralizes state logic
+   - Con: store takes on I/O and timeline orchestration concerns
+
+Both alternatives are rejected for long-term maintainability and student readability.
+
+### Timeline model
+
+Define a transport-agnostic timeline state object:
+
+- `mode`: live or replay
+- `cursorUs`: current playback position in microseconds
+- `durationUs`: total log duration
+- `windowStartUs` / `windowEndUs`: visible region
+- `playbackRate`: speed multiplier
+- `isPlaying`: play/pause state
+
+Behavior rules:
+
+- Cursor clamps to `[0, durationUs]`
+- `seek(t)` sets cursor exactly, then publishes reconstructed latest state at `t`
+- Zoom changes visible window width around cursor anchor
+- Pan moves visible window without changing data values until cursor changes
+
+### Recording format and event schema
+
+Use an append-only event stream with explicit type/value data.
+
+Event fields (minimum):
+
+- `timestampUs` (monotonic session-relative time)
+- `key`
+- `valueType` (`bool|double|string`)
+- `value`
+- `seq` (if available from source transport)
+- `eventKind` (`data`, `connection_state`, optional `marker`)
+
+Design notes:
+
+- Keep v1 file format simple and inspectable (newline-delimited JSON is acceptable for first slice)
+- Add a lightweight side index for fast seek (`time bucket -> file offset`)
+- Store metadata header (format version, session start wall-clock, source transport kind)
+
+### Determinism and correctness rules
+
+Replay correctness contract:
+
+- Replaying a file to the same cursor produces identical `VariableStore` state
+- Ties at equal timestamps are resolved by stable file order
+- Values are applied in recorded order within each timestamp bucket
+- Seeking backwards reconstructs state from nearest index checkpoint plus forward apply
+
+This contract is more important than visual polish in the first playback release.
+
+### Performance and threading model
+
+Recorder:
+
+- Transport callback path enqueues compact event records into a lock-protected buffer
+- Background writer thread flushes batched records to disk (bounded interval/size)
+- UI thread is never blocked on file I/O
+
+Replay:
+
+- Replay worker advances cursor by elapsed wall time scaled by `playbackRate`
+- Seeks use index-assisted repositioning, then emit updates through normal transport callback flow
+- UI updates remain on Qt thread via queued invocation (same rule as current transports)
+
+### Incremental implementation slices
+
+Slice 1 (minimum vertical path):
+
+1. Recorder writes events to a session log file
+2. Replay transport reads file and supports `play/pause/seek/speed`
+3. Main window can switch source to replay mode
+4. Basic timeline bar supports scrub + zoom + pan
+
+Slice 2:
+
+- Add index/checkpoint optimization for fast random seeks
+- Add system markers and marker jump actions
+- Add focused UI tests for mode transitions and seek edge cases
+
+Slice 3:
+
+- Add user bookmarks/annotations and anomaly marker generation
+- Add derived range stats for selected timeline windows
+
+### Validation plan
+
+Automated tests (new):
+
+- Replay determinism test (same cursor -> same store state)
+- Seek correctness tests (forward/backward/edge seeks)
+- Recorder/replay roundtrip test for mixed bool/double/string streams
+- Timeline speed test (`0.5x`, `1x`, `2x`) with cursor progression checks
+
+Manual checks (student workflow):
+
+- Record a short live run with known value transitions
+- Replay, zoom into a 5-second region, scrub and verify synchronized widgets
+- Inject a synthetic brownout marker case and verify fast jump + correlation behavior
+
+### Teaching notes (for code comments and docs)
+
+When implementing this section, comments should explicitly name the core concepts students should learn:
+
+- append-only log
+- latest-value cache
+- index-assisted seek
+- deterministic replay contract
+- producer/consumer buffering
+
+Comments should explain why each pattern is used and what trade-off it makes.
+
 ## Proposed Initial Folder Layout
 
 ```text

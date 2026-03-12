@@ -6,9 +6,14 @@
 #include "widgets/variable_tile.h"
 
 #include <QMainWindow>
+#include <QByteArray>
 #include <QVariant>
 
+#include <condition_variable>
+#include <deque>
+#include <mutex>
 #include <string>
+#include <thread>
 
 #include <cstdint>
 #include <memory>
@@ -20,6 +25,14 @@ class QEvent;
 class QLabel;
 class QWidget;
 class QMenu;
+class QActionGroup;
+class QComboBox;
+class QTimer;
+
+namespace sd::widgets
+{
+    class PlaybackTimelineWidget;
+}
 
 class MainWindow final : public QMainWindow
 {
@@ -51,9 +64,14 @@ private slots:
     void OnDisconnectTransport();
     void OnUseDirectTransport();
     void OnUseNetworkTablesTransport();
+    void OnUseReplayTransport();
     void OnSetNtHost();
     void OnSetNtTeam();
     void OnToggleNtUseTeam();
+    void OnOpenReplayFile();
+    void OnPlaybackPlayPause();
+    void OnPlaybackRateChanged(int index);
+    void OnPlaybackCursorScrubbed(std::int64_t cursorUs);
 
 private:
     using TileMap = std::unordered_map<std::string, sd::widgets::VariableTile*>;
@@ -80,6 +98,12 @@ private:
     QString BuildDisplayLabel(const QString& key) const;
     void StartTransport();
     void StopTransport();
+    void UpdatePlaybackUiState();
+    void StartSessionRecording();
+    void StopSessionRecording();
+    void RecordVariableEvent(const QString& key, int valueType, const QVariant& value, quint64 seq);
+    void RecordConnectionEvent(int state);
+    bool IsRecordingTransportKind(sd::transport::TransportKind kind) const;
 
     QWidget* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
@@ -92,7 +116,13 @@ private:
     QAction* m_disconnectTransportAction = nullptr;
     QAction* m_useDirectTransportAction = nullptr;
     QAction* m_useNetworkTablesTransportAction = nullptr;
+    QAction* m_useReplayTransportAction = nullptr;
     QAction* m_ntUseTeamAction = nullptr;
+    QAction* m_openReplayFileAction = nullptr;
+    QAction* m_playPausePlaybackAction = nullptr;
+    QComboBox* m_playbackRateCombo = nullptr;
+    sd::widgets::PlaybackTimelineWidget* m_playbackTimeline = nullptr;
+    QTimer* m_playbackUiTimer = nullptr;
     bool m_isEditable = false;
     bool m_snapToGrid = true;
     sd::widgets::EditInteractionMode m_editInteractionMode = sd::widgets::EditInteractionMode::MoveAndResize;
@@ -107,4 +137,15 @@ private:
     sd::model::VariableStore m_variableStore;
     sd::transport::ConnectionConfig m_connectionConfig;
     std::unique_ptr<sd::transport::IDashboardTransport> m_transport;
+
+    std::mutex m_recordingMutex;
+    std::condition_variable m_recordingCv;
+    std::deque<QByteArray> m_recordingQueue;
+    std::thread m_recordingThread;
+    bool m_recordingThreadRunning = false;
+    bool m_recordingStopRequested = false;
+    QString m_recordingFilePath;
+    std::uint64_t m_recordingStartEpochUs = 0;
+    std::uint64_t m_recordingLastTimestampUs = 0;
+    std::uint64_t m_recordingStartSteadyUs = 0;
 };
