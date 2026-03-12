@@ -73,6 +73,7 @@ private slots:
     void OnToggleNtUseTeam();
     void OnOpenReplayFile();
     void OnRecordToggled(bool checked);
+    void OnPlaybackRewindToStart();
     void OnPlaybackPlayPause();
     void OnPlaybackRateChanged(int index);
     void OnPlaybackCursorScrubbed(std::int64_t cursorUs);
@@ -126,6 +127,7 @@ private:
     QAction* m_openReplayFileAction = nullptr;
     QWidget* m_telemetryControlsPanel = nullptr;
     QPushButton* m_recordButton = nullptr;
+    QToolButton* m_rewindButton = nullptr;
     QToolButton* m_playPauseButton = nullptr;
     QComboBox* m_playbackRateCombo = nullptr;
     sd::widgets::PlaybackTimelineWidget* m_playbackTimeline = nullptr;

@@ -52,6 +52,15 @@
   - compact transport controls now use icon-style play/pause and record indicators
   - record control is disabled/ghosted in replay transport
   - replay label compaction now matches direct mode (shows last key segment only)
+- Replay workflow/connection semantics were further refined:
+  - switching transport kind now tears down active transport first so stale "Connected" state does not persist across mode changes
+  - replay mode status bar now shows only `Replay` (filename kept in title bar)
+  - replay mode window title shows selected replay filename (or `no file selected`)
+  - replay mode auto-starts when a persisted replay file path exists; Connect/Disconnect actions are disabled in replay mode
+- Telemetry controls got additional UX polish:
+  - playback controls/scrub are ghosted when not in replay mode
+  - added rewind-to-start control (`|◀`) that pauses playback and seeks to t=0
+  - play/pause icon now has explicit disabled-state styling so ghosting is visually obvious
 
 ## Known constraints / active considerations
 

@@ -30,6 +30,22 @@ Curated milestone history for this repository.
   - record control is disabled/ghosted while replay transport is active
   - compact icon controls now use a combined play/pause button and a separate record indicator button for better timeline real estate
 
+### Follow-up refinement (same session)
+
+- Fixed transport-switch connection-state consistency in `MainWindow`:
+  - changing transport kind now stops any active transport first, preventing stale connected-state UI when mode changes
+- Updated replay-mode status/title behavior:
+  - status bar now shows concise `Replay` text only (to preserve timeline width)
+  - window title carries replay file context (`Replay (<filename>)` or `Replay (no file selected)`)
+- Updated replay control semantics:
+  - replay mode auto-starts when a persisted replay file path exists (no manual Connect required)
+  - Connect/Disconnect actions are disabled in replay mode
+- Added compact rewind-to-start playback control (`|◀`) for replay workflows:
+  - rewinds to cursor `0` and pauses playback
+- Improved non-replay visual affordances:
+  - play/pause icon now has explicit disabled-state styling so ghosted state is clear
+  - replay-only controls (scrub, speed, play/pause, rewind) are visibly ghosted outside replay mode
+
 ## 2026-03-11 - Line-plot smoothing, direct stream cadence tuning, and direct-label compaction
 
 - Improved line-plot smooth-scrolling behavior in `SmartDashboard/src/widgets/line_plot_widget.cpp`:
