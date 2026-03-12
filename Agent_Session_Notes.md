@@ -61,6 +61,17 @@
   - playback controls/scrub are ghosted when not in replay mode
   - added rewind-to-start control (`|◀`) that pauses playback and seeks to t=0
   - play/pause icon now has explicit disabled-state styling so ghosting is visually obvious
+- Added standalone testing-harness capture CLI target `SmartDashboardCaptureCli`:
+  - source: `ClientInterface_direct/tools/smartdashboard_capture_cli.cpp`
+  - build target wired in `ClientInterface_direct/CMakeLists.txt`
+  - exe path (Debug): `build/ClientInterface_direct/Debug/SmartDashboardCaptureCli.exe`
+  - supports required args (`--out`, `--label`, `--duration-sec`) and preferred ops (`--start-delay-ms`, `--sample-ms`, `--overwrite`, `--append`, `--quiet`, `--verbose`, repeatable `--tag`)
+  - supports orchestration args (`--list-signals`, `--signals`, `--stop-file`, `--run-id`)
+  - writes stable metadata + signal-series JSON schema with robust temp-file replace on overwrite mode
+- New teaching/user docs for harness usage:
+  - `docs/testing_harness_capture_cli.md`
+  - README section `Testing Harness Capture CLI`
+  - examples intentionally use generic placeholders (`example_name_1`, `example_name_2`) to avoid project-specific confusion
 
 ## Known constraints / active considerations
 

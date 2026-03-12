@@ -46,6 +46,27 @@ Curated milestone history for this repository.
   - play/pause icon now has explicit disabled-state styling so ghosted state is clear
   - replay-only controls (scrub, speed, play/pause, rewind) are visibly ghosted outside replay mode
 
+## 2026-03-12 - Standalone testing-harness capture CLI
+
+- Added new standalone command-driven capture executable target:
+  - `SmartDashboardCaptureCli` (`ClientInterface_direct/tools/smartdashboard_capture_cli.cpp`)
+  - build wiring added in `ClientInterface_direct/CMakeLists.txt`
+- Implemented command-line contract for automated A/B harness runs:
+  - required args: `--out`, `--label`, `--duration-sec`
+  - preferred args: `--start-delay-ms`, `--sample-ms`, `--overwrite`, `--append`, `--quiet`, `--verbose`, repeatable `--tag k=v`
+  - operational args: `--list-signals`, `--signals`, `--stop-file`, `--run-id`
+- Implemented runtime and output behavior:
+  - clear usage and argument validation with non-zero error exits
+  - deterministic metadata-rich JSON output (`schema_version`, `metadata`, `signals`)
+  - robust file write path using temp-file + rename for overwrite mode
+  - append mode support for multi-run documents in one file
+  - console summary includes start/end timestamps, output path, and per-signal sample counts
+- Added teaching/documentation coverage:
+  - `docs/testing_harness_capture_cli.md` with argument reference and schema sample
+  - `README.md` section `Testing Harness Capture CLI` with runnable commands
+- Generalized sample naming for clarity in public docs/help text:
+  - replaced project-specific names with `example_name_1` and `example_name_2`
+
 ## 2026-03-11 - Line-plot smoothing, direct stream cadence tuning, and direct-label compaction
 
 - Improved line-plot smooth-scrolling behavior in `SmartDashboard/src/widgets/line_plot_widget.cpp`:

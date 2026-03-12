@@ -58,6 +58,7 @@ Future consideration (not implemented yet):
 - `docs/ai_development_guidelines.md` - expectations for responsible AI-assisted development
 - `docs/history.md` - FRC dashboard/telemetry historical context for students
 - `docs/project_history.md` - curated repository milestone history
+- `docs/testing_harness_capture_cli.md` - command-line telemetry capture for automated test harness runs
 - `Agent_Session_Notes.md` - lean next-session handoff context
 
 ## Development Approach
@@ -164,3 +165,21 @@ Potential next steps:
 
 For architecture and implementation details, see `design/SmartDashboard_Design.md`.
 For FRC dashboard/telemetry background and architectural evolution, see `docs/history.md`.
+
+## Testing Harness Capture CLI
+
+For automation-first perf testing (A/B harness runs), this repo includes a standalone capture executable:
+
+- target: `SmartDashboardCaptureCli`
+- exe path (Debug): `build/ClientInterface_direct/Debug/SmartDashboardCaptureCli.exe`
+
+Example commands:
+
+- example_name_1 worker ON prefetch OFF:
+  - `build/ClientInterface_direct/Debug/SmartDashboardCaptureCli.exe --out runs/example_name_1_worker_on_prefetch_off.json --label "example_name_1 worker ON prefetch OFF" --duration-sec 45 --tag app=example_name_1 --tag worker=on --tag prefetch=off`
+- example_name_1 worker OFF prefetch OFF:
+  - `build/ClientInterface_direct/Debug/SmartDashboardCaptureCli.exe --out runs/example_name_1_worker_off_prefetch_off.json --label "example_name_1 worker OFF prefetch OFF" --duration-sec 45 --tag app=example_name_1 --tag worker=off --tag prefetch=off`
+- example_name_2 worker OFF prefetch OFF:
+  - `build/ClientInterface_direct/Debug/SmartDashboardCaptureCli.exe --out runs/example_name_2_worker_off_prefetch_off.json --label "example_name_2 worker OFF prefetch OFF" --duration-sec 45 --tag app=example_name_2 --tag worker=off --tag prefetch=off`
+
+See `docs/testing_harness_capture_cli.md` for full argument reference and JSON schema details.

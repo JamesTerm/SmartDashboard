@@ -45,6 +45,22 @@ target_link_libraries(sd_command_roundtrip_sample
         ClientInterface_direct
 )
 
+add_executable(SmartDashboardCaptureCli
+    tools/smartdashboard_capture_cli.cpp
+)
+
+target_link_libraries(SmartDashboardCaptureCli
+    PRIVATE
+        SmartDashboard_Interface_direct
+)
+
+target_include_directories(SmartDashboardCaptureCli
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/SmartDashboard_Interface_direct/include
+)
+
+target_compile_features(SmartDashboardCaptureCli PRIVATE cxx_std_20)
+
 if(BUILD_TESTING)
     include(FetchContent)
 
