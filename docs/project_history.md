@@ -97,6 +97,12 @@ Curated milestone history for this repository.
 - Extended internal tests with auto-mode coverage against legacy-short channel naming.
 - Updated README and harness docs with auto-connect usage guidance.
 
+## 2026-03-12 - Replay parity roadmap and user manual
+
+- Added `docs/replay_parity_roadmap.md` to define iterative replay parity goals against modern dashboard workflows.
+- Added `docs/replay_user_manual.md` to provide operator instructions for replay mode, timeline controls, and troubleshooting usage patterns.
+- Updated `README.md` and session notes to surface these docs for both student learning and practical test workflows.
+
 ## 2026-03-11 - Line-plot smoothing, direct stream cadence tuning, and direct-label compaction
 
 - Improved line-plot smooth-scrolling behavior in `SmartDashboard/src/widgets/line_plot_widget.cpp`:

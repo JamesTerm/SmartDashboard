@@ -86,6 +86,9 @@
   - `docs/testing_harness_capture_cli.md`
   - README section `Testing Harness Capture CLI`
   - examples intentionally use generic placeholders (`example_name_1`, `example_name_2`) to avoid project-specific confusion
+- Added replay planning + user-facing docs:
+  - `docs/replay_parity_roadmap.md` (iterative parity checklist and acceptance path)
+  - `docs/replay_user_manual.md` (operator workflow guide for replay controls and timeline interactions)
 
 ## Known constraints / active considerations
 

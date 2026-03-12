@@ -59,6 +59,8 @@ Future consideration (not implemented yet):
 - `docs/history.md` - FRC dashboard/telemetry historical context for students
 - `docs/project_history.md` - curated repository milestone history
 - `docs/testing_harness_capture_cli.md` - command-line telemetry capture for automated test harness runs
+- `docs/replay_parity_roadmap.md` - replay/timeline parity roadmap versus modern dashboard workflows
+- `docs/replay_user_manual.md` - operator-focused replay feature usage guide
 - `Agent_Session_Notes.md` - lean next-session handoff context
 
 ## Development Approach
