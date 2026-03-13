@@ -71,6 +71,10 @@ Build an educational, community-friendly C++ dashboard prototype for FRC that de
 
 - Clarify final deployment contract and reproducibility expectations.
 - Expand test coverage around UI interaction state transitions.
+- Evaluate long-term line-plot architecture direction for higher-scale telemetry UX:
+  - option A: many independent lightweight line-plot widgets (legacy SmartDashboard style)
+  - option B: one high-performance telemetry panel with multiple traces/axes and shared timeline controls
+  - define how this choice affects buffer ownership, decimation strategy, rendering batching, and UI layout workflow
 - Evaluate a future telemetry event bus layer that decouples ingestion from UI rendering:
   - topic-based pub/sub subscription model
   - per-subscriber rate-limited delivery with coalescing

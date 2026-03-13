@@ -40,6 +40,9 @@
 - Line plot x-axis model refined to sample-anchored behavior: right edge is newest sample, left edge is oldest retained sample (up to configured buffer size), so the 250th sample back stays pinned to the left margin once buffer is full.
 - Line plot ingest now advances x-position by EMA-estimated sample period per sample (instead of raw wall-clock gaps), preserving smooth left/right anchoring through pause/resume and irregular transport timing.
 - Number-line/gridline stability work remains centered on x-axis spacing and anchoring; rendering path itself is stable.
+- Added x-tick hysteresis in line plot step selection (`0.70x..1.60x` hold window) to reduce x-axis/gridline oscillation under jittered cadence while keeping absolute-time tick anchoring.
+- Added line-plot burst/pause/resume regression case that validates x-range remains exactly `[oldestRetained, newestRetained]` with full buffer anchoring.
+- New student/mentor-friendly reference doc created: `docs/line_plot_notes.md` summarizing tradeoffs (time accuracy vs readability), sample-anchored viewport behavior, EMA/tick concepts, and diagnostics ideas.
 - Added `SmartDashboard/tests/line_plot_widget_tests.cpp` stress-oriented regression coverage for varying buffer/rate scenarios; `SmartDashboard_tests` now includes both line-plot and variable-tile tests.
 - `DirectPublisherTests.StreamsSineWaveDouble` now exposes live-tunable `Test/DoubleSine/Config/SampleRateMs` (default 16 ms) so publish cadence can be adjusted without editing code.
 - Direct transport UI label compaction: tile title text now shows only the last key segment in Direct mode (for example `.../Config/SampleRateMs` -> `SampleRateMs`) while preserving full underlying keys for publish/subscribe and layout identity.

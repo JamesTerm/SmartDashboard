@@ -5,6 +5,19 @@ Curated milestone history for this repository.
 - Edit this file for durable project milestones and outcomes.
 - Keep lean handoff context in `Agent_Session_Notes.md`.
 
+## 2026-03-13 - Line-plot axis stabilization follow-up and student notes
+
+- Refined line-plot x-axis stabilization in `SmartDashboard/src/widgets/line_plot_widget.cpp`:
+  - retained sample-anchored viewport semantics (`left=oldest retained`, `right=newest retained`)
+  - added x tick-step hysteresis (`0.70x..1.60x` hold window) to reduce number-line/gridline oscillation under jittered update cadence
+  - kept absolute-time tick anchoring (`floor(min/step) * step`) so grid alignment remains deterministic
+- Expanded automated line-plot regression coverage in `SmartDashboard/tests/line_plot_widget_tests.cpp`:
+  - strengthened jitter stability scenario by evaluating steady-state (post-buffer-fill) tick behavior
+  - added burst/pause/resume anchoring test to verify x-range remains exactly oldest/newest retained sample bounds at full buffer depth
+- Added student-facing concept/reference document:
+  - `docs/line_plot_notes.md`
+  - covers design tradeoffs, anchoring strategies, EMA smoothing rationale, hysteresis concept, and diagnostics ideas for future tuning.
+
 ## 2026-03-12 - Telemetry recording/replay slice and controls refinement
 
 - Added first telemetry recording/replay vertical slice on feature branch `feature/playback-recording-replay`.

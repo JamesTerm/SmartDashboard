@@ -71,5 +71,6 @@ namespace sd::widgets
         double m_manualYLowerLimit = 0.0;
         double m_manualYUpperLimit = 1.0;
         double m_estimatedSamplePeriodSeconds = 0.02;
+        mutable double m_lastXTickInterval = 0.0;
     };
 }

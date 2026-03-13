@@ -72,6 +72,7 @@ namespace sd::widgets
         m_hasStarted = false;
         m_hasLastSampleTime = false;
         m_estimatedSamplePeriodSeconds = 0.02;
+        m_lastXTickInterval = 0.0;
         m_renderTimer.stop();
         update();
     }
@@ -410,7 +411,23 @@ namespace sd::widgets
         }
 
         const int targetTicks = m_showNumberLines ? std::max(4, drawWidth / 80) : std::max(2, drawWidth / 90);
-        return ChooseNiceTickStep(xSpan, targetTicks);
+        const double candidate = ChooseNiceTickStep(xSpan, targetTicks);
+        if (m_lastXTickInterval <= 0.0)
+        {
+            m_lastXTickInterval = candidate;
+            return candidate;
+        }
+
+        // Tick hysteresis: hold current spacing unless candidate moves outside a
+        // tolerance window. This prevents 1/2/5 step flip-flop around thresholds.
+        const double holdLow = m_lastXTickInterval * 0.70;
+        const double holdHigh = m_lastXTickInterval * 1.60;
+        if (candidate < holdLow || candidate > holdHigh)
+        {
+            m_lastXTickInterval = candidate;
+        }
+
+        return m_lastXTickInterval;
     }
 
     LinePlotWidget::AxisRange LinePlotWidget::ComputeYRange() const

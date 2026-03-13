@@ -87,10 +87,18 @@ TEST(LinePlotWidgetTests, XTickIntervalRemainsStableUnderJitteredCadence)
     std::vector<double> observedIntervals;
     observedIntervals.reserve(180);
 
+    // Fill the buffer first so we measure tick stability during steady-state
+    // scrolling, not the initial range-growth phase.
+    for (int i = 0; i < 250; ++i)
+    {
+        plot.AddSample(std::sin(static_cast<double>(i) * 0.08));
+        QThread::msleep(16);
+    }
+
     const int cadencePatternMs[] = { 16, 17, 15, 16, 18, 14, 16, 16 };
     for (int i = 0; i < 180; ++i)
     {
-        const double value = std::sin(static_cast<double>(i) * 0.08);
+        const double value = std::sin(static_cast<double>(i + 250) * 0.08);
         plot.AddSample(value);
         observedIntervals.push_back(plot.GetXTickIntervalForTesting(drawWidth));
         QThread::msleep(static_cast<unsigned long>(cadencePatternMs[i % 8]));
@@ -105,5 +113,42 @@ TEST(LinePlotWidgetTests, XTickIntervalRemainsStableUnderJitteredCadence)
         }
     }
 
-    EXPECT_LE(tickSwitches, 12);
+    EXPECT_LE(tickSwitches, 2);
+}
+
+TEST(LinePlotWidgetTests, XRangeAnchorsToOldestAndNewestDuringBurstPauseResume)
+{
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::LinePlotWidget plot;
+    plot.SetBufferSizeSamples(250);
+
+    for (int i = 0; i < 250; ++i)
+    {
+        plot.AddSample(std::sin(static_cast<double>(i) * 0.05));
+        QThread::msleep(16);
+    }
+
+    const auto beforePauseRange = plot.GetXRangeForTesting();
+    const double beforePauseOldest = plot.GetOldestSampleTimeForTesting();
+    const double beforePauseLatest = plot.GetLatestSampleTimeForTesting();
+    EXPECT_NEAR(beforePauseRange.first, beforePauseOldest, 1e-9);
+    EXPECT_NEAR(beforePauseRange.second, beforePauseLatest, 1e-9);
+
+    QThread::msleep(400);
+
+    for (int i = 0; i < 30; ++i)
+    {
+        plot.AddSample(std::cos(static_cast<double>(i) * 0.07));
+        QThread::msleep(16);
+    }
+
+    const auto afterResumeRange = plot.GetXRangeForTesting();
+    const double afterResumeOldest = plot.GetOldestSampleTimeForTesting();
+    const double afterResumeLatest = plot.GetLatestSampleTimeForTesting();
+
+    EXPECT_EQ(plot.GetSampleCountForTesting(), 250);
+    EXPECT_NEAR(afterResumeRange.first, afterResumeOldest, 1e-9);
+    EXPECT_NEAR(afterResumeRange.second, afterResumeLatest, 1e-9);
+    EXPECT_GT(afterResumeRange.second - afterResumeRange.first, 0.001);
 }
