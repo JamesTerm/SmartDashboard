@@ -159,6 +159,24 @@ Curated milestone history for this repository.
   - built `SmartDashboardApp`
   - playback timeline regression tests pass after D-slice changes
 
+## 2026-03-13 - Replay UX persistence polish and menu/docking refinements
+
+- Applied operator-driven replay UX polish based on manual walkthrough feedback:
+  - moved telemetry feature toggle to `View` (`Enable telemetry recording/playback UI`)
+  - moved replay file-open action to `File` (`Replay: Open session file...`) so `Connection` remains transport-focused
+- Improved Replay Markers dock affordances and recoverability:
+  - added dock context menu actions (`Float`, `Dock Right`, `Dock Left`) for deterministic dock/float transitions
+  - retained close/visibility management through `View -> Replay Markers`
+- Improved replay usability details:
+  - marker list item interaction hardening for click-to-seek reliability
+  - timeline auto-follow behavior while playing in zoomed windows (cursor past ~85% pans window forward)
+- Added replay analysis persistence behaviors:
+  - user bookmarks now persist across sessions (`QSettings` key `replay/userBookmarks`)
+  - replay marker panel visibility preference now persists reliably across sessions (`QSettings` key `replay/markersVisible`), including startup/replay-context transitions
+- Validation:
+  - built `SmartDashboardApp` after each incremental UX/persistence patch
+  - manual operator validation confirmed replay marker visibility preference now restores correctly between sessions
+
 ## 2026-03-11 - Line-plot smoothing, direct stream cadence tuning, and direct-label compaction
 
 - Improved line-plot smooth-scrolling behavior in `SmartDashboard/src/widgets/line_plot_widget.cpp`:

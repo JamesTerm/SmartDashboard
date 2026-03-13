@@ -118,6 +118,8 @@ private:
     void RefreshReplayMarkers();
     void RefreshReplayMarkerList(std::int64_t cursorUs);
     void RefreshReplaySummaryLabel();
+    void LoadUserReplayBookmarks();
+    void PersistUserReplayBookmarks() const;
     void StepPlaybackByUs(std::int64_t deltaUs);
     void StartSessionRecording();
     void StopSessionRecording();
@@ -137,7 +139,8 @@ private:
     QAction* m_useDirectTransportAction = nullptr;
     QAction* m_useNetworkTablesTransportAction = nullptr;
     QAction* m_useReplayTransportAction = nullptr;
-    QAction* m_telemetryFeatureAction = nullptr;
+    QAction* m_telemetryFeatureViewAction = nullptr;
+    QAction* m_replayMarkersViewAction = nullptr;
     QAction* m_ntUseTeamAction = nullptr;
     QAction* m_openReplayFileAction = nullptr;
     QWidget* m_telemetryControlsPanel = nullptr;
@@ -184,5 +187,7 @@ private:
     std::vector<sd::transport::PlaybackMarker> m_replayMarkers;
     std::vector<sd::transport::PlaybackMarker> m_userReplayBookmarks;
     std::vector<std::int64_t> m_replayMarkerTimesUs;
+    bool m_replayMarkersPreferredVisible = true;
+    bool m_syncingReplayMarkerDockVisibility = false;
     bool m_syncingMarkerSelection = false;
 };

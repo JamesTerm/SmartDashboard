@@ -41,6 +41,8 @@
 #include <QtWidgets/QDockWidget>
 #include <QtWidgets/QListWidget>
 #include <QtWidgets/QListWidgetItem>
+#include <QtCore/QJsonArray>
+#include <QtCore/QPoint>
 
 #include <chrono>
 #include <limits>
@@ -231,12 +233,15 @@ MainWindow::MainWindow(QWidget* parent)
     QAction* loadLayoutAction = fileMenu->addAction("Load Layout (Merge)");
     QAction* loadLayoutReplaceAction = fileMenu->addAction("Load Layout (Replace)");
     QAction* importLegacyXmlAction = fileMenu->addAction("Import Legacy XML...");
+    m_openReplayFileAction = fileMenu->addAction("Replay: Open session file...");
+    fileMenu->addSeparator();
     QAction* clearWidgetsAction = fileMenu->addAction("Clear Widgets");
     connect(saveLayoutAction, &QAction::triggered, this, &MainWindow::OnSaveLayout);
     connect(saveLayoutAsAction, &QAction::triggered, this, &MainWindow::OnSaveLayoutAs);
     connect(loadLayoutAction, &QAction::triggered, this, &MainWindow::OnLoadLayout);
     connect(loadLayoutReplaceAction, &QAction::triggered, this, &MainWindow::OnLoadLayoutReplace);
     connect(importLegacyXmlAction, &QAction::triggered, this, &MainWindow::OnImportLegacyXmlLayout);
+    connect(m_openReplayFileAction, &QAction::triggered, this, &MainWindow::OnOpenReplayFile);
     connect(clearWidgetsAction, &QAction::triggered, this, &MainWindow::OnClearWidgets);
 
     QMenu* viewMenu = menuBar()->addMenu("&View");
@@ -265,6 +270,16 @@ MainWindow::MainWindow(QWidget* parent)
     m_resizeModeAction->setChecked(false);
     m_moveResizeModeAction->setChecked(true);
 
+    viewMenu->addSeparator();
+    m_telemetryFeatureViewAction = viewMenu->addAction("Enable telemetry recording/playback UI");
+    m_telemetryFeatureViewAction->setCheckable(true);
+    m_telemetryFeatureViewAction->setChecked(true);
+
+    m_replayMarkersViewAction = viewMenu->addAction("Replay Markers");
+    m_replayMarkersViewAction->setCheckable(true);
+    m_replayMarkersViewAction->setChecked(true);
+    m_replayMarkersViewAction->setEnabled(false);
+
     m_statusLabel = new QLabel("State: Disconnected", this);
     statusBar()->addPermanentWidget(m_statusLabel);
 
@@ -279,11 +294,6 @@ MainWindow::MainWindow(QWidget* parent)
     m_useReplayTransportAction = connectionMenu->addAction("Use Replay transport");
     m_useReplayTransportAction->setCheckable(true);
     connectionMenu->addSeparator();
-    m_telemetryFeatureAction = connectionMenu->addAction("Enable telemetry recording/playback UI");
-    m_telemetryFeatureAction->setCheckable(true);
-    m_telemetryFeatureAction->setChecked(true);
-    m_openReplayFileAction = connectionMenu->addAction("Replay: Open session file...");
-    connectionMenu->addSeparator();
     m_ntUseTeamAction = connectionMenu->addAction("NT: Use team number");
     m_ntUseTeamAction->setCheckable(true);
     QAction* ntSetHostAction = connectionMenu->addAction("NT: Set host...");
@@ -294,8 +304,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_useDirectTransportAction, &QAction::triggered, this, &MainWindow::OnUseDirectTransport);
     connect(m_useNetworkTablesTransportAction, &QAction::triggered, this, &MainWindow::OnUseNetworkTablesTransport);
     connect(m_useReplayTransportAction, &QAction::triggered, this, &MainWindow::OnUseReplayTransport);
-    connect(m_telemetryFeatureAction, &QAction::triggered, this, &MainWindow::OnToggleTelemetryFeature);
-    connect(m_openReplayFileAction, &QAction::triggered, this, &MainWindow::OnOpenReplayFile);
+    connect(m_telemetryFeatureViewAction, &QAction::triggered, this, &MainWindow::OnToggleTelemetryFeature);
     connect(m_ntUseTeamAction, &QAction::triggered, this, &MainWindow::OnToggleNtUseTeam);
     connect(ntSetHostAction, &QAction::triggered, this, &MainWindow::OnSetNtHost);
     connect(ntSetTeamAction, &QAction::triggered, this, &MainWindow::OnSetNtTeam);
@@ -404,6 +413,8 @@ MainWindow::MainWindow(QWidget* parent)
     m_replayMarkerDock = new QDockWidget("Replay Markers", this);
     m_replayMarkerDock->setObjectName("replayMarkerDock");
     m_replayMarkerDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    m_replayMarkerDock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
+    m_replayMarkerDock->setContextMenuPolicy(Qt::CustomContextMenu);
     auto* markerPanel = new QWidget(m_replayMarkerDock);
     auto* markerPanelLayout = new QVBoxLayout(markerPanel);
     markerPanelLayout->setContentsMargins(4, 4, 4, 4);
@@ -420,6 +431,115 @@ MainWindow::MainWindow(QWidget* parent)
 
     m_replayMarkerDock->setWidget(markerPanel);
     addDockWidget(Qt::RightDockWidgetArea, m_replayMarkerDock);
+    connect(
+        m_replayMarkerDock,
+        &QWidget::customContextMenuRequested,
+        this,
+        [this](const QPoint& pos)
+        {
+            if (m_replayMarkerDock == nullptr)
+            {
+                return;
+            }
+
+            QMenu menu(this);
+            QAction* floatAction = menu.addAction("Float");
+            floatAction->setCheckable(true);
+            floatAction->setChecked(m_replayMarkerDock->isFloating());
+
+            menu.addSeparator();
+            QAction* dockRightAction = menu.addAction("Dock Right");
+            QAction* dockLeftAction = menu.addAction("Dock Left");
+
+            QAction* chosen = menu.exec(m_replayMarkerDock->mapToGlobal(pos));
+            if (chosen == nullptr)
+            {
+                return;
+            }
+
+            if (chosen == floatAction)
+            {
+                m_replayMarkerDock->setFloating(!m_replayMarkerDock->isFloating());
+                m_replayMarkerDock->show();
+                return;
+            }
+
+            if (chosen == dockRightAction)
+            {
+                m_replayMarkerDock->setFloating(false);
+                addDockWidget(Qt::RightDockWidgetArea, m_replayMarkerDock);
+                m_replayMarkerDock->show();
+                return;
+            }
+
+            if (chosen == dockLeftAction)
+            {
+                m_replayMarkerDock->setFloating(false);
+                addDockWidget(Qt::LeftDockWidgetArea, m_replayMarkerDock);
+                m_replayMarkerDock->show();
+            }
+        }
+    );
+    connect(
+        m_replayMarkerDock,
+        &QDockWidget::visibilityChanged,
+        this,
+        [this](bool visible)
+        {
+            if (m_replayMarkerDock == nullptr || !m_replayMarkerDock->isEnabled())
+            {
+                return;
+            }
+
+            if (m_syncingReplayMarkerDockVisibility)
+            {
+                return;
+            }
+
+            if (!QCoreApplication::closingDown()
+                && isVisible()
+                && m_replayMarkersViewAction != nullptr
+                && m_replayMarkersViewAction->isEnabled())
+            {
+                m_replayMarkersPreferredVisible = visible;
+                QSettings settings("SmartDashboard", "SmartDashboardApp");
+                settings.setValue("replay/markersVisible", m_replayMarkersPreferredVisible);
+            }
+
+            if (m_replayMarkersViewAction != nullptr)
+            {
+                const bool prior = m_replayMarkersViewAction->blockSignals(true);
+                m_replayMarkersViewAction->setChecked(visible);
+                m_replayMarkersViewAction->blockSignals(prior);
+            }
+        }
+    );
+    connect(
+        m_replayMarkersViewAction,
+        &QAction::toggled,
+        this,
+        [this](bool checked)
+        {
+            if (m_syncingReplayMarkerDockVisibility)
+            {
+                return;
+            }
+
+            if (m_replayMarkerDock != nullptr)
+            {
+                m_syncingReplayMarkerDockVisibility = true;
+                m_replayMarkerDock->setVisible(checked);
+                m_syncingReplayMarkerDockVisibility = false;
+            }
+
+            m_replayMarkersPreferredVisible = checked;
+            if (!QCoreApplication::closingDown())
+            {
+                QSettings settings("SmartDashboard", "SmartDashboardApp");
+                settings.setValue("replay/markersVisible", m_replayMarkersPreferredVisible);
+            }
+        }
+    );
     connect(m_replayMarkerList, &QListWidget::itemActivated, this, &MainWindow::OnReplayMarkerActivated);
     connect(m_replayMarkerList, &QListWidget::itemClicked, this, &MainWindow::OnReplayMarkerActivated);
 
@@ -434,14 +554,22 @@ MainWindow::MainWindow(QWidget* parent)
     m_connectionConfig.replayFilePath = settings.value("connection/replayFilePath").toString();
     m_telemetryFeatureEnabled = settings.value("telemetry/enabled", true).toBool();
     m_recordRequested = settings.value("telemetry/recordEnabled", false).toBool();
-    if (m_telemetryFeatureAction != nullptr)
+    m_replayMarkersPreferredVisible = settings.value("replay/markersVisible", true).toBool();
+    if (m_telemetryFeatureViewAction != nullptr)
     {
-        m_telemetryFeatureAction->setChecked(m_telemetryFeatureEnabled);
+        m_telemetryFeatureViewAction->setChecked(m_telemetryFeatureEnabled);
+    }
+    if (m_replayMarkersViewAction != nullptr)
+    {
+        m_replayMarkersViewAction->setChecked(m_replayMarkersPreferredVisible);
+        m_replayMarkersViewAction->setEnabled(false);
     }
     if (m_recordButton != nullptr)
     {
         m_recordButton->setChecked(m_recordRequested);
     }
+
+    LoadUserReplayBookmarks();
     ApplyTransportMenuChecks();
 
     m_playbackUiTimer = new QTimer(this);
@@ -849,12 +977,70 @@ void MainWindow::LoadWindowGeometry()
     }
 }
 
+void MainWindow::LoadUserReplayBookmarks()
+{
+    m_userReplayBookmarks.clear();
+
+    QSettings settings("SmartDashboard", "SmartDashboardApp");
+    const QString raw = settings.value("replay/userBookmarks").toString();
+    if (raw.trimmed().isEmpty())
+    {
+        return;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isArray())
+    {
+        return;
+    }
+
+    const QJsonArray entries = doc.array();
+    m_userReplayBookmarks.reserve(static_cast<std::size_t>(entries.size()));
+    for (const QJsonValue& value : entries)
+    {
+        if (!value.isObject())
+        {
+            continue;
+        }
+
+        const QJsonObject obj = value.toObject();
+        sd::transport::PlaybackMarker marker;
+        marker.timestampUs = obj.value("timestampUs").toVariant().toLongLong();
+        marker.kind = sd::transport::PlaybackMarkerKind::Generic;
+        marker.label = obj.value("label").toString();
+        if (marker.label.trimmed().isEmpty())
+        {
+            marker.label = QString("Bookmark %1").arg(FormatReplayTimeUs(marker.timestampUs));
+        }
+        m_userReplayBookmarks.push_back(marker);
+    }
+}
+
+void MainWindow::PersistUserReplayBookmarks() const
+{
+    QJsonArray entries;
+    for (const sd::transport::PlaybackMarker& marker : m_userReplayBookmarks)
+    {
+        QJsonObject obj;
+        obj.insert("timestampUs", QJsonValue::fromVariant(QVariant::fromValue<qlonglong>(marker.timestampUs)));
+        obj.insert("label", marker.label);
+        entries.append(obj);
+    }
+
+    QSettings settings("SmartDashboard", "SmartDashboardApp");
+    settings.setValue("replay/userBookmarks", QString::fromUtf8(QJsonDocument(entries).toJson(QJsonDocument::Compact)));
+}
+
 void MainWindow::SaveWindowGeometry() const
 {
     // Save persisted main-window geometry/state for next launch.
     QSettings settings("SmartDashboard", "SmartDashboardApp");
     settings.setValue("window/geometry", saveGeometry());
     settings.setValue("window/state", saveState());
+    settings.setValue("replay/markersVisible", m_replayMarkersPreferredVisible);
+
+    PersistUserReplayBookmarks();
 }
 
 void MainWindow::OnControlBoolEdited(const QString& key, bool value)
@@ -1216,7 +1402,23 @@ void MainWindow::OnUseReplayTransport()
 
 void MainWindow::OnToggleTelemetryFeature()
 {
-    m_telemetryFeatureEnabled = (m_telemetryFeatureAction != nullptr) && m_telemetryFeatureAction->isChecked();
+    bool checked = m_telemetryFeatureEnabled;
+    if (sender() == m_telemetryFeatureViewAction && m_telemetryFeatureViewAction != nullptr)
+    {
+        checked = m_telemetryFeatureViewAction->isChecked();
+    }
+    else if (m_telemetryFeatureViewAction != nullptr)
+    {
+        checked = m_telemetryFeatureViewAction->isChecked();
+    }
+    m_telemetryFeatureEnabled = checked;
+
+    if (m_telemetryFeatureViewAction != nullptr)
+    {
+        const bool prior = m_telemetryFeatureViewAction->blockSignals(true);
+        m_telemetryFeatureViewAction->setChecked(m_telemetryFeatureEnabled);
+        m_telemetryFeatureViewAction->blockSignals(prior);
+    }
 
     const bool hadTransport = (m_transport != nullptr);
     if (!m_telemetryFeatureEnabled)
@@ -1476,6 +1678,7 @@ void MainWindow::OnAddReplayBookmark()
     bookmark.kind = sd::transport::PlaybackMarkerKind::Generic;
     bookmark.label = QString("Bookmark %1").arg(FormatReplayTimeUs(cursorUs));
     m_userReplayBookmarks.push_back(bookmark);
+    PersistUserReplayBookmarks();
     UpdatePlaybackUiState();
 }
 
@@ -1487,6 +1690,7 @@ void MainWindow::OnClearReplayBookmarks()
     }
 
     m_userReplayBookmarks.clear();
+    PersistUserReplayBookmarks();
     UpdatePlaybackUiState();
 }
 
@@ -1512,11 +1716,6 @@ void MainWindow::ApplyTransportMenuChecks()
     if (m_ntUseTeamAction != nullptr)
     {
         m_ntUseTeamAction->setChecked(m_connectionConfig.ntUseTeam);
-    }
-
-    if (m_telemetryFeatureAction != nullptr)
-    {
-        m_telemetryFeatureAction->setChecked(m_telemetryFeatureEnabled);
     }
 
     if (m_useReplayTransportAction != nullptr)
@@ -1704,9 +1903,37 @@ void MainWindow::UpdatePlaybackUiState()
         m_telemetryControlsPanel->setVisible(m_telemetryFeatureEnabled);
     }
 
+    const bool allowMarkerDockAction = m_telemetryFeatureEnabled && replayMode;
+    if (m_replayMarkersViewAction != nullptr)
+    {
+        m_replayMarkersViewAction->setEnabled(allowMarkerDockAction);
+    }
+
     if (m_replayMarkerDock != nullptr)
     {
-        m_replayMarkerDock->setVisible(m_telemetryFeatureEnabled && replayMode);
+        const bool showDockByContext = m_telemetryFeatureEnabled && replayMode;
+        const bool preferVisible = m_replayMarkersPreferredVisible;
+        m_syncingReplayMarkerDockVisibility = true;
+        m_replayMarkerDock->setEnabled(showDockByContext);
+        if (!showDockByContext)
+        {
+            m_replayMarkerDock->hide();
+        }
+        else if (preferVisible)
+        {
+            m_replayMarkerDock->show();
+        }
+        else
+        {
+            m_replayMarkerDock->hide();
+        }
+        if (m_replayMarkersViewAction != nullptr)
+        {
+            const bool prior = m_replayMarkersViewAction->blockSignals(true);
+            m_replayMarkersViewAction->setChecked(m_replayMarkersPreferredVisible);
+            m_replayMarkersViewAction->blockSignals(prior);
+        }
+        m_syncingReplayMarkerDockVisibility = false;
     }
 
     if (m_playbackTimeline != nullptr)
@@ -1724,6 +1951,22 @@ void MainWindow::UpdatePlaybackUiState()
                 m_playbackTimeline->SetWindowUs(0, durationUs);
             }
             m_playbackTimeline->SetCursorUs(cursorUs);
+
+            const std::int64_t windowStartUs = m_playbackTimeline->GetWindowStartUs();
+            const std::int64_t windowEndUs = m_playbackTimeline->GetWindowEndUs();
+            const std::int64_t spanUs = std::max<std::int64_t>(1, windowEndUs - windowStartUs);
+            const std::int64_t thresholdUs = windowStartUs + static_cast<std::int64_t>(0.85 * static_cast<double>(spanUs));
+            if (cursorUs > thresholdUs)
+            {
+                std::int64_t newStartUs = cursorUs - static_cast<std::int64_t>(0.85 * static_cast<double>(spanUs));
+                std::int64_t newEndUs = newStartUs + spanUs;
+                if (durationUs > 0 && newEndUs > durationUs)
+                {
+                    newEndUs = durationUs;
+                    newStartUs = std::max<std::int64_t>(0, newEndUs - spanUs);
+                }
+                m_playbackTimeline->SetWindowUs(newStartUs, newEndUs);
+            }
 
             std::vector<sd::widgets::TimelineMarker> timelineMarkers;
             timelineMarkers.reserve(m_replayMarkerTimesUs.size());
@@ -1806,7 +2049,11 @@ void MainWindow::RefreshReplayMarkerList(std::int64_t cursorUs)
     }
 
     m_syncingMarkerSelection = true;
-    m_replayMarkerList->clear();
+    m_replayMarkerList->setUpdatesEnabled(false);
+    while (m_replayMarkerList->count() > 0)
+    {
+        delete m_replayMarkerList->takeItem(0);
+    }
 
     int selectedRow = -1;
     for (std::size_t i = 0; i < m_replayMarkers.size(); ++i)
@@ -1816,6 +2063,8 @@ void MainWindow::RefreshReplayMarkerList(std::int64_t cursorUs)
         const QString itemText = QString("%1  [%2]  %3").arg(FormatReplayTimeUs(marker.timestampUs), MarkerKindLabel(marker.kind), labelText);
         auto* item = new QListWidgetItem(itemText, m_replayMarkerList);
         item->setData(Qt::UserRole, QVariant::fromValue<qlonglong>(marker.timestampUs));
+        item->setFlags((item->flags() | Qt::ItemIsEnabled | Qt::ItemIsSelectable) & ~Qt::ItemIsEditable);
+        item->setToolTip("Jump replay cursor to this marker");
         if (marker.timestampUs <= cursorUs)
         {
             selectedRow = static_cast<int>(i);
@@ -1832,6 +2081,7 @@ void MainWindow::RefreshReplayMarkerList(std::int64_t cursorUs)
     }
 
     m_replayMarkerList->setEnabled(!m_replayMarkers.empty());
+    m_replayMarkerList->setUpdatesEnabled(true);
 
     RefreshReplaySummaryLabel();
 

@@ -114,11 +114,17 @@
     - timeline now renders anomaly markers as a distinct marker kind
     - marker dock now shows visible-window summary stats (marker count, anomaly count, span)
     - added bookmark cleanup control (`Bx`) and summary now includes bookmark count in visible window
+  - Replay marker UX/persistence polish is in-progress and now includes:
+    - menu cleanup: moved `Enable telemetry recording/playback UI` to `View` and moved `Replay: Open session file...` to `File`
+    - replay marker dock context menu (`Float`, `Dock Right`, `Dock Left`) for reliable docking workflow
+    - marker list interaction hardening and timeline auto-follow while zoomed playback advances
+    - bookmark persistence across sessions (`replay/userBookmarks` in `QSettings`)
+    - replay marker dock visibility preference persistence now working reliably (`replay/markersVisible`) after deterministic sync-guard updates
   - Playback timeline regression coverage now includes:
     - cursor/window clamp behavior
     - tick-step adaptation across zoom spans
     - readable time/span label formatting
-  - Next planned implementation slice: Iteration D polish (bookmark management UX + targeted replay-analysis tests)
+  - Next planned implementation slice: continue operator-manual validation pass, then add targeted persistence harness tests for replay marker visibility state
 
 ## Known constraints / active considerations
 
