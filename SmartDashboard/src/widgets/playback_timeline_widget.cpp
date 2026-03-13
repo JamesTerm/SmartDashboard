@@ -32,6 +32,8 @@ namespace sd::widgets
                     return QColor(235, 94, 94);
                 case TimelineMarkerKind::Stale:
                     return QColor(242, 201, 76);
+                case TimelineMarkerKind::Anomaly:
+                    return QColor(255, 140, 80);
                 case TimelineMarkerKind::Generic:
                 default:
                     return QColor(155, 155, 155);

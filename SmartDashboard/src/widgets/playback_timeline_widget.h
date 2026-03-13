@@ -13,6 +13,7 @@ namespace sd::widgets
         Connect,
         Disconnect,
         Stale,
+        Anomaly,
         Generic
     };
 

@@ -108,11 +108,16 @@
     - clicking/activating a marker list row seeks replay to that marker timestamp
     - marker list selection auto-follows replay cursor to nearest prior marker
     - keyboard stepping in replay mode: `Left/Right` = ±100 ms, `Shift+Left/Shift+Right` = ±1 s
+  - Iteration D (analysis helpers) first slice is now implemented:
+    - added user bookmark action (`B+`) to capture timeline points during replay analysis
+    - added anomaly marker classification in replay transport (`anomaly` events and low-voltage/brownout-style data heuristics)
+    - timeline now renders anomaly markers as a distinct marker kind
+    - marker dock now shows visible-window summary stats (marker count, anomaly count, span)
   - Playback timeline regression coverage now includes:
     - cursor/window clamp behavior
     - tick-step adaptation across zoom spans
     - readable time/span label formatting
-  - Next planned implementation slice: Iteration D (analysis helpers: bookmarks/anomalies/selection stats)
+  - Next planned implementation slice: Iteration D polish (bookmark management UX + targeted replay-analysis tests)
 
 ## Known constraints / active considerations
 

@@ -143,6 +143,21 @@ Curated milestone history for this repository.
   - built `SmartDashboardApp`
   - existing playback timeline tests continue to pass
 
+## 2026-03-12 - Replay parity iteration D (analysis helpers first slice)
+
+- Implemented first analysis-helper slice focused on practical replay forensics workflow:
+  - added bookmark capture action in replay controls (`B+`) to create user markers at current cursor time
+  - replay marker stream now includes anomaly marker classification:
+    - explicit `anomaly` flags in replay events are converted to anomaly markers
+    - low-voltage/brownout-style heuristics add inferred anomaly markers for relevant numeric signals
+  - timeline marker model/rendering extended with dedicated anomaly kind and distinct visual color
+  - replay marker dock adds visible-window summary stats (marker count, anomaly count, window span)
+- Preserved and integrated previous Iteration B/C workflows:
+  - marker jump controls, marker list click-to-seek, keyboard stepping, and auto-follow selection
+- Validation:
+  - built `SmartDashboardApp`
+  - playback timeline regression tests pass after D-slice changes
+
 ## 2026-03-11 - Line-plot smoothing, direct stream cadence tuning, and direct-label compaction
 
 - Improved line-plot smooth-scrolling behavior in `SmartDashboard/src/widgets/line_plot_widget.cpp`:

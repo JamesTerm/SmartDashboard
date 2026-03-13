@@ -63,6 +63,10 @@ namespace sd::transport
             {
                 return PlaybackMarkerKind::Stale;
             }
+            if (normalized.contains("anomaly") || normalized.contains("brownout") || normalized.contains("outlier"))
+            {
+                return PlaybackMarkerKind::Anomaly;
+            }
 
             return PlaybackMarkerKind::Generic;
         }
@@ -1051,6 +1055,8 @@ namespace sd::transport
                 }
 
                 std::vector<ReplayEvent> loaded;
+                m_pendingAutoMarkers.clear();
+                m_lastAutoMarkerByKey.clear();
                 loaded.reserve(4096);
                 while (!file.atEnd())
                 {
@@ -1092,6 +1098,19 @@ namespace sd::transport
                         m_markers.push_back(event.marker);
                     }
                 }
+                for (const PlaybackMarker& marker : m_pendingAutoMarkers)
+                {
+                    m_markers.push_back(marker);
+                }
+                std::sort(
+                    m_markers.begin(),
+                    m_markers.end(),
+                    [](const PlaybackMarker& lhs, const PlaybackMarker& rhs)
+                    {
+                        return lhs.timestampUs < rhs.timestampUs;
+                    }
+                );
+                m_pendingAutoMarkers.clear();
                 BuildCheckpointsLocked();
                 return true;
             }
@@ -1159,6 +1178,46 @@ namespace sd::transport
                 else
                 {
                     event.update.value = object.value("value").toString();
+                }
+
+                bool addAnomalyMarker = false;
+                QString anomalyLabel;
+
+                if (object.value("anomaly").toBool(false))
+                {
+                    addAnomalyMarker = true;
+                    anomalyLabel = QString("Anomaly: %1").arg(event.update.key);
+                }
+                else if (event.update.valueType == static_cast<int>(sd::direct::ValueType::Double))
+                {
+                    const QString keyLower = event.update.key.toLower();
+                    const bool isBrownoutSignal =
+                        keyLower.contains("brownout")
+                        || keyLower.contains("battery")
+                        || keyLower.contains("voltage");
+                    const double numericValue = event.update.value.toDouble();
+                    if (isBrownoutSignal && numericValue > 0.0 && numericValue < 7.0)
+                    {
+                        addAnomalyMarker = true;
+                        anomalyLabel = QString("Low voltage: %1 = %2V").arg(event.update.key).arg(numericValue, 0, 'f', 2);
+                    }
+                }
+
+                if (addAnomalyMarker)
+                {
+                    const std::string key = event.update.key.toStdString();
+                    constexpr std::int64_t minSpacingUs = 1000000;
+                    const auto it = m_lastAutoMarkerByKey.find(key);
+                    const bool isSpaced = (it == m_lastAutoMarkerByKey.end()) || ((event.timestampUs - it->second) >= minSpacingUs);
+                    if (isSpaced)
+                    {
+                        PlaybackMarker marker;
+                        marker.timestampUs = event.timestampUs;
+                        marker.kind = PlaybackMarkerKind::Anomaly;
+                        marker.label = anomalyLabel;
+                        m_pendingAutoMarkers.push_back(std::move(marker));
+                        m_lastAutoMarkerByKey[key] = event.timestampUs;
+                    }
                 }
 
                 return !event.update.key.isEmpty();
@@ -1329,6 +1388,8 @@ namespace sd::transport
             std::size_t m_nextEventIndex = 0;
             std::vector<ReplayEvent> m_events;
             std::vector<PlaybackMarker> m_markers;
+            std::vector<PlaybackMarker> m_pendingAutoMarkers;
+            std::map<std::string, std::int64_t> m_lastAutoMarkerByKey;
             std::vector<Checkpoint> m_checkpoints;
             std::thread m_worker;
             VariableUpdateCallback m_onVariableUpdate;

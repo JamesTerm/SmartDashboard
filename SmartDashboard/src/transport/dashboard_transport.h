@@ -48,6 +48,7 @@ namespace sd::transport
         Connect,
         Disconnect,
         Stale,
+        Anomaly,
         Generic
     };
 
