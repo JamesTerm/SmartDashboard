@@ -367,6 +367,16 @@ MainWindow::MainWindow(QWidget* parent)
     );
     playbackLayout->addWidget(m_addBookmarkButton);
 
+    m_clearBookmarksButton = new QToolButton(m_telemetryControlsPanel);
+    m_clearBookmarksButton->setText("Bx");
+    m_clearBookmarksButton->setToolTip("Clear user bookmarks");
+    m_clearBookmarksButton->setFixedSize(28, 24);
+    m_clearBookmarksButton->setStyleSheet(
+        "QToolButton { color: #d98f8f; font-weight: 700; }"
+        "QToolButton:disabled { color: #5a5a5a; }"
+    );
+    playbackLayout->addWidget(m_clearBookmarksButton);
+
     m_playbackRateCombo = new QComboBox(m_telemetryControlsPanel);
     m_playbackRateCombo->addItem("0.25x", 0.25);
     m_playbackRateCombo->addItem("0.5x", 0.5);
@@ -382,6 +392,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(m_prevMarkerButton, &QToolButton::clicked, this, &MainWindow::OnPlaybackPreviousMarker);
     connect(m_nextMarkerButton, &QToolButton::clicked, this, &MainWindow::OnPlaybackNextMarker);
     connect(m_addBookmarkButton, &QToolButton::clicked, this, &MainWindow::OnAddReplayBookmark);
+    connect(m_clearBookmarksButton, &QToolButton::clicked, this, &MainWindow::OnClearReplayBookmarks);
     connect(m_playbackRateCombo, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::OnPlaybackRateChanged);
 
     m_playbackTimeline = new sd::widgets::PlaybackTimelineWidget(this);
@@ -1468,6 +1479,17 @@ void MainWindow::OnAddReplayBookmark()
     UpdatePlaybackUiState();
 }
 
+void MainWindow::OnClearReplayBookmarks()
+{
+    if (m_userReplayBookmarks.empty())
+    {
+        return;
+    }
+
+    m_userReplayBookmarks.clear();
+    UpdatePlaybackUiState();
+}
+
 void MainWindow::ApplyTransportMenuChecks()
 {
     const bool replayMode = m_connectionConfig.kind == sd::transport::TransportKind::Replay;
@@ -1653,6 +1675,11 @@ void MainWindow::UpdatePlaybackUiState()
         m_addBookmarkButton->setEnabled(hasPlayback);
     }
 
+    if (m_clearBookmarksButton != nullptr)
+    {
+        m_clearBookmarksButton->setEnabled(hasPlayback && !m_userReplayBookmarks.empty());
+    }
+
     if (hasPlayback)
     {
         RefreshReplayMarkers();
@@ -1806,40 +1833,54 @@ void MainWindow::RefreshReplayMarkerList(std::int64_t cursorUs)
 
     m_replayMarkerList->setEnabled(!m_replayMarkers.empty());
 
-    if (m_replaySelectionSummaryLabel != nullptr)
-    {
-        std::int64_t windowStartUs = 0;
-        std::int64_t windowEndUs = 0;
-        if (m_playbackTimeline != nullptr)
-        {
-            windowStartUs = m_playbackTimeline->GetWindowStartUs();
-            windowEndUs = m_playbackTimeline->GetWindowEndUs();
-        }
-
-        int markerCount = 0;
-        int anomalyCount = 0;
-        for (const sd::transport::PlaybackMarker& marker : m_replayMarkers)
-        {
-            if (marker.timestampUs >= windowStartUs && marker.timestampUs <= windowEndUs)
-            {
-                ++markerCount;
-                if (marker.kind == sd::transport::PlaybackMarkerKind::Anomaly)
-                {
-                    ++anomalyCount;
-                }
-            }
-        }
-
-        const std::int64_t spanUs = std::max<std::int64_t>(0, windowEndUs - windowStartUs);
-        m_replaySelectionSummaryLabel->setText(
-            QString("Window: %1 markers (%2 anomalies), span=%3")
-                .arg(markerCount)
-                .arg(anomalyCount)
-                .arg(FormatReplaySpanUs(spanUs))
-        );
-    }
+    RefreshReplaySummaryLabel();
 
     m_syncingMarkerSelection = false;
+}
+
+void MainWindow::RefreshReplaySummaryLabel()
+{
+    if (m_replaySelectionSummaryLabel == nullptr)
+    {
+        return;
+    }
+
+    std::int64_t windowStartUs = 0;
+    std::int64_t windowEndUs = 0;
+    if (m_playbackTimeline != nullptr)
+    {
+        windowStartUs = m_playbackTimeline->GetWindowStartUs();
+        windowEndUs = m_playbackTimeline->GetWindowEndUs();
+    }
+
+    int markerCount = 0;
+    int anomalyCount = 0;
+    int bookmarkCount = 0;
+    for (const sd::transport::PlaybackMarker& marker : m_replayMarkers)
+    {
+        if (marker.timestampUs >= windowStartUs && marker.timestampUs <= windowEndUs)
+        {
+            ++markerCount;
+            if (marker.kind == sd::transport::PlaybackMarkerKind::Anomaly)
+            {
+                ++anomalyCount;
+            }
+            const QString labelLower = marker.label.toLower();
+            if (labelLower.startsWith("bookmark "))
+            {
+                ++bookmarkCount;
+            }
+        }
+    }
+
+    const std::int64_t spanUs = std::max<std::int64_t>(0, windowEndUs - windowStartUs);
+    m_replaySelectionSummaryLabel->setText(
+        QString("Window: %1 markers (%2 anomalies, %3 bookmarks), span=%4")
+            .arg(markerCount)
+            .arg(anomalyCount)
+            .arg(bookmarkCount)
+            .arg(FormatReplaySpanUs(spanUs))
+    );
 }
 
 void MainWindow::StepPlaybackByUs(std::int64_t deltaUs)

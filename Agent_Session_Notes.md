@@ -113,6 +113,7 @@
     - added anomaly marker classification in replay transport (`anomaly` events and low-voltage/brownout-style data heuristics)
     - timeline now renders anomaly markers as a distinct marker kind
     - marker dock now shows visible-window summary stats (marker count, anomaly count, span)
+    - added bookmark cleanup control (`Bx`) and summary now includes bookmark count in visible window
   - Playback timeline regression coverage now includes:
     - cursor/window clamp behavior
     - tick-step adaptation across zoom spans

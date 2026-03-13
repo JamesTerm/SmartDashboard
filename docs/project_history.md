@@ -147,11 +147,12 @@ Curated milestone history for this repository.
 
 - Implemented first analysis-helper slice focused on practical replay forensics workflow:
   - added bookmark capture action in replay controls (`B+`) to create user markers at current cursor time
+  - added bookmark clear action (`Bx`) to reset user-added bookmarks quickly during review loops
   - replay marker stream now includes anomaly marker classification:
     - explicit `anomaly` flags in replay events are converted to anomaly markers
     - low-voltage/brownout-style heuristics add inferred anomaly markers for relevant numeric signals
   - timeline marker model/rendering extended with dedicated anomaly kind and distinct visual color
-  - replay marker dock adds visible-window summary stats (marker count, anomaly count, window span)
+  - replay marker dock adds visible-window summary stats (marker count, anomaly count, bookmark count, window span)
 - Preserved and integrated previous Iteration B/C workflows:
   - marker jump controls, marker list click-to-seek, keyboard stepping, and auto-follow selection
 - Validation:

@@ -86,6 +86,7 @@ private slots:
     void OnPlaybackNextMarker();
     void OnReplayMarkerActivated(QListWidgetItem* item);
     void OnAddReplayBookmark();
+    void OnClearReplayBookmarks();
 
 private:
     using TileMap = std::unordered_map<std::string, sd::widgets::VariableTile*>;
@@ -116,6 +117,7 @@ private:
     void UpdatePlaybackUiState();
     void RefreshReplayMarkers();
     void RefreshReplayMarkerList(std::int64_t cursorUs);
+    void RefreshReplaySummaryLabel();
     void StepPlaybackByUs(std::int64_t deltaUs);
     void StartSessionRecording();
     void StopSessionRecording();
@@ -145,6 +147,7 @@ private:
     QToolButton* m_prevMarkerButton = nullptr;
     QToolButton* m_nextMarkerButton = nullptr;
     QToolButton* m_addBookmarkButton = nullptr;
+    QToolButton* m_clearBookmarksButton = nullptr;
     QComboBox* m_playbackRateCombo = nullptr;
     QDockWidget* m_replayMarkerDock = nullptr;
     QListWidget* m_replayMarkerList = nullptr;
