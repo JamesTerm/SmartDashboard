@@ -3,6 +3,7 @@
 - Edit this file for short, high-signal context that helps the next session start quickly.
 - Keep this file lean; move long milestone history to `docs/project_history.md`.
 - Commit-note convention: when the user says "update notes", keep this file to handoff-critical context only; put durable feature/change history in `docs/project_history.md`.
+- `docs/project_history.md` ordering rule: keep milestone sections in descending chronological order (newest first) so current changes are always at the top.
 
 ## Workflow note
 
