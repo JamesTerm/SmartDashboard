@@ -1,21 +1,37 @@
 # Replay Features User Manual
 
-This guide explains how to use SmartDashboard replay features for post-run troubleshooting.
+This guide is the training reference for SmartDashboard replay workflows.
 
 ## What replay is for
 
-Replay mode lets you inspect telemetry after a run or match using a shared timeline cursor across all widgets.
+Replay mode lets you inspect telemetry after a run or match using one shared timeline cursor across all widgets.
 
 Use replay to answer questions like:
 
-- What happened right before a brownout?
+- What happened right before a brownout or disconnect?
 - Did command and telemetry values diverge before an incident?
-- Did connection state changes line up with control issues?
+- Did connection-state transitions line up with control issues?
 
 ## Prerequisites
 
-- A recorded replay session file (JSONL capture/replay file).
-- Dashboard layout with widgets already mapped to relevant telemetry keys.
+- A recorded replay session file (`.json`).
+- Format note: replay files are newline-delimited JSON events (JSONL-style content) stored with a `.json` extension.
+- A dashboard layout with widgets mapped to the keys you want to analyze.
+
+## Why there are two replay-related JSON formats
+
+You may see two valid telemetry file shapes in this project:
+
+- **Replay event stream format** (produced by SmartDashboard recording):
+  - one JSON event per line
+  - event-centric fields like `eventKind`, `timestampUs`, `key`, `value`
+  - optimized for timeline replay controls (`play`, `seek`, markers, connection-state events)
+- **Capture session format** (produced by `SmartDashboardCaptureCli`):
+  - one top-level JSON object with `metadata` and `signals[]`
+  - each signal has a `samples[]` series with `t_us`
+  - optimized for automated harness analysis, A/B comparisons, and metadata tagging
+
+Both are now accepted by Replay transport. They exist because they were designed for different workflows (operator replay vs. automated test-harness analysis).
 
 ## Opening replay mode
 
@@ -25,47 +41,109 @@ Use replay to answer questions like:
 
 Notes:
 
-- If a previous replay file is persisted, switching to replay may auto-start with that file.
-- In replay mode, status text shows `Replay` and file context appears in window title.
+- If a replay file path is already saved, replay can auto-start when replay transport is selected.
+- In replay mode, status text shows `Replay`; file context is shown in the window title.
 
-## Replay controls
+## Control reference
 
-- `Play/Pause` button: toggles replay movement.
-- `|◀` rewind button: returns cursor to start and pauses.
-- Speed selector: choose replay speed (`0.25x`, `0.5x`, `1x`, `2x`).
+Replay controls live in the status area.
 
-## Timeline interactions
+- `Play/Pause` (`▶` / `⏸`): toggles replay movement.
+- `|◀`: rewind to start and pause.
+- `⏮` / `⏭`: jump to previous/next marker.
+- `B+`: add a user bookmark at current cursor time.
+- `Bx`: clear all user bookmarks for this session.
+- Speed selector: `0.25x`, `0.5x`, `1x`, `2x`.
 
-The timeline is the horizontal bar in the status area.
+## Timeline reference
+
+Timeline interactions:
 
 - Left-click or left-drag: scrub cursor.
-- Mouse wheel: zoom in/out on timeline.
-- Right-drag: pan visible timeline window.
+- Mouse wheel: zoom in/out.
+- Right-drag: pan visible window.
 
-Current implementation note:
+Timeline readability features:
 
-- Timeline visuals are intentionally minimal in this phase (track + cursor), but interactions are fully functional.
+- Adaptive tick marks and time labels scale with zoom.
+- Cursor readout (`t=...`) and visible-window span readout (`window=...`).
+- Overview strip shows full replay duration and highlighted current zoom window.
 
-## Typical troubleshooting workflow
+Marker rendering:
 
-1. Start broad: view full run and scrub near incident time.
-2. Zoom in: use wheel to narrow to a short window.
-3. Fine inspect: left-drag cursor through critical moments.
-4. Correlate: verify all relevant widgets at same timestamp.
-5. Rewind and replay at slower speed for confirmation.
+- Marker lines are shown in both overview and detailed track.
+- Marker kinds include connect, disconnect, stale, anomaly, and generic markers/bookmarks.
+
+## Marker list panel
+
+The `Replay Markers` dock provides click-to-seek and fast scanning.
+
+- Each row shows timestamp, marker kind, and label.
+- Click or activate a row to seek to that timestamp.
+- Selection auto-follows replay cursor to nearest marker at-or-before current time.
+- Summary line shows visible-window counts:
+  - total markers
+  - anomaly markers
+  - bookmarks
+  - visible window span
+
+## Keyboard navigation
+
+In replay mode:
+
+- `Left` / `Right`: step cursor by 100 ms.
+- `Shift+Left` / `Shift+Right`: step cursor by 1 s.
+
+Use this for frame-like inspection when zoomed into short time windows.
+
+## Analysis helpers
+
+### Bookmarks
+
+- Use `B+` at important moments (driver note, impact event, unusual sensor behavior).
+- Bookmark creation uses a short dedupe window to avoid near-duplicate spam.
+- Use `Bx` to reset bookmarks and run a fresh analysis pass.
+
+### Anomaly markers
+
+Replay can surface anomaly markers from:
+
+- explicit replay event flags (`anomaly=true`)
+- inferred low-voltage/brownout-style numeric conditions on relevant keys
+
+These markers help you jump directly to likely incident windows.
+
+## Recommended training walkthrough (15 minutes)
+
+1. Load a known replay and press play at `1x`.
+2. Pause near an incident, then use wheel zoom to narrow to a short window.
+3. Use `Left/Right` and `Shift+Left/Right` to step precisely.
+4. Add 2-3 bookmarks (`B+`) at key moments.
+5. Use `⏮` / `⏭` to move across system/anomaly markers.
+6. Use marker list click-to-seek to revisit bookmarks and anomalies.
+7. Verify summary counts change as you zoom/pan different windows.
+8. Clear bookmarks (`Bx`) and repeat once to reinforce workflow.
+
+## Practical incident workflow
+
+1. Start broad at full-run scale.
+2. Jump between markers to locate likely problem period quickly.
+3. Zoom into 2-10 second window.
+4. Step with keyboard for sub-second inspection.
+5. Add bookmarks to build a timestamped narrative.
+6. Cross-check all relevant widgets at each bookmark timestamp.
 
 ## Interpreting connection indicators
 
-For capture CLI run summaries and replay diagnostics:
+For capture/replay diagnostics:
 
-- `Connection observed during capture: true` indicates healthy connected period.
+- `Connection observed during capture: true` means there was a healthy connected interval.
 - `Connection state at capture end: Stale` can be normal near session tail.
 - `Post-stop connection state: Disconnected` is expected after shutdown.
 
-## Known limitations (current phase)
+## Current limitations
 
-- No marker glyph rendering on timeline yet.
-- No marker list panel yet.
-- No annotation/bookmark workflow yet.
+- User bookmarks are session-local (not yet persisted back to replay files).
+- Auto-anomaly detection is heuristic; treat markers as investigation hints, not final verdicts.
 
-See `docs/replay_parity_roadmap.md` for planned iterations.
+See `docs/replay_parity_roadmap.md` for planned parity follow-ups.

@@ -43,3 +43,33 @@ TEST(PlaybackTimelineWidgetTests, ClampsCursorAndWindowToDuration)
     EXPECT_EQ(timeline.GetWindowEndUs(), 10'000'000);
     EXPECT_LT(timeline.GetWindowStartUs(), timeline.GetWindowEndUs());
 }
+
+TEST(PlaybackTimelineWidgetTests, TickStepAdaptsAcrossZoomSpans)
+{
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::PlaybackTimelineWidget timeline;
+    timeline.resize(800, 72);
+    timeline.SetDurationUs(120'000'000);
+
+    const std::int64_t fineStepUs = timeline.DebugComputeTickStepUs(2'000'000);
+    const std::int64_t mediumStepUs = timeline.DebugComputeTickStepUs(12'000'000);
+    const std::int64_t broadStepUs = timeline.DebugComputeTickStepUs(120'000'000);
+
+    EXPECT_LT(fineStepUs, mediumStepUs);
+    EXPECT_LT(mediumStepUs, broadStepUs);
+}
+
+TEST(PlaybackTimelineWidgetTests, TimeAndSpanLabelsUseReadableFormats)
+{
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::PlaybackTimelineWidget timeline;
+    timeline.resize(800, 72);
+    timeline.SetDurationUs(180'000'000);
+
+    EXPECT_EQ(timeline.DebugFormatTimeLabel(0), QString("0.000s"));
+    EXPECT_EQ(timeline.DebugFormatTimeLabel(12'345'000), QString("12.345s"));
+    EXPECT_EQ(timeline.DebugFormatTimeLabel(62'345'000), QString("1:02.345"));
+    EXPECT_EQ(timeline.DebugFormatSpanLabel(2'500'000), QString("2.500s"));
+}

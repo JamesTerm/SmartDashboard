@@ -4,6 +4,26 @@ Curated milestone history for this repository.
 
 - Edit this file for durable project milestones and outcomes.
 - Keep lean handoff context in `Agent_Session_Notes.md`.
+- Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
+
+## 2026-03-13 - Replay UX persistence polish and menu/docking refinements
+
+- Applied operator-driven replay UX polish based on manual walkthrough feedback:
+  - moved telemetry feature toggle to `View` (`Enable telemetry recording/playback UI`)
+  - moved replay file-open action to `File` (`Replay: Open session file...`) so `Connection` remains transport-focused
+- Improved Replay Markers dock affordances and recoverability:
+  - added dock context menu actions (`Float`, `Dock Right`, `Dock Left`) for deterministic dock/float transitions
+  - retained close/visibility management through `View -> Replay Markers`
+- Improved replay usability details:
+  - marker list item interaction hardening for click-to-seek reliability
+  - timeline auto-follow behavior while playing in zoomed windows (cursor past ~85% pans window forward)
+- Added replay analysis persistence behaviors:
+  - user bookmarks now persist across sessions (`QSettings` key `replay/userBookmarks`)
+  - replay marker panel visibility preference now persists reliably across sessions (`QSettings` key `replay/markersVisible`), including startup/replay-context transitions
+  - aligned timeline marker rendering source with Replay Markers panel source so marker list rows and timeline glyphs represent the same merged marker set
+- Validation:
+  - built `SmartDashboardApp` after each incremental UX/persistence patch
+  - manual operator validation confirmed replay marker visibility preference now restores correctly between sessions
 
 ## 2026-03-13 - Line-plot axis stabilization follow-up and student notes
 
@@ -18,12 +38,23 @@ Curated milestone history for this repository.
   - `docs/line_plot_notes.md`
   - covers design tradeoffs, anchoring strategies, EMA smoothing rationale, hysteresis concept, and diagnostics ideas for future tuning.
 
+### Follow-up refinement (same session)
+
+- Replay file extension contract aligned in UI and recorder path:
+  - replay open dialog now filters to `.json`
+  - session recorder now emits `session_<timestamp>.json`
+  - replay manual clarifies content remains newline-delimited JSON events (JSONL-style) under `.json` extension
+- Replay loader compatibility expanded to accept both schemas:
+  - SmartDashboard replay event-stream format (line-delimited event objects)
+  - capture CLI session format (`metadata` + `signals[]` series)
+  - this resolves "loads with no time" behavior when opening harness-capture JSON directly in replay mode
+
 ## 2026-03-12 - Telemetry recording/replay slice and controls refinement
 
 - Added first telemetry recording/replay vertical slice on feature branch `feature/playback-recording-replay`.
 - Added replay transport path to dashboard transport contract (`Replay` kind + playback control APIs) so replay behaves as a transport source rather than UI-special-cased data.
 - Implemented session recorder in main window flow:
-  - live Direct/NetworkTables sessions can write newline-delimited JSON event logs under `logs/session_<timestamp>.jsonl`
+  - live Direct/NetworkTables sessions can write newline-delimited JSON event logs under `logs/session_<timestamp>.json`
   - records bool/double/string updates and connection-state events
   - uses a background writer thread to avoid blocking UI update paths
 - Implemented replay file loading and deterministic playback behavior in transport layer:
@@ -115,6 +146,62 @@ Curated milestone history for this repository.
 - Added `docs/replay_parity_roadmap.md` to define iterative replay parity goals against modern dashboard workflows.
 - Added `docs/replay_user_manual.md` to provide operator instructions for replay mode, timeline controls, and troubleshooting usage patterns.
 - Updated `README.md` and session notes to surface these docs for both student learning and practical test workflows.
+
+## 2026-03-12 - Stability checkpoint and branch transition
+
+- Merged `feature/playback-recording-replay` into local `main` after replay + capture CLI validation.
+- Created annotated stability tag: `v0.9.0-replay-foundation`.
+- Started next iteration branch: `feature/replay-iteration-a-timeline-readability`.
+- Next implementation target is Iteration A from `docs/replay_parity_roadmap.md` (timeline readability and temporal affordances).
+
+## 2026-03-12 - Replay parity iterations A+B (timeline readability, markers, jump workflow)
+
+- Implemented Iteration A timeline readability in `PlaybackTimelineWidget`:
+  - adaptive tick marks with time labels that remain readable across broad/narrow zoom windows
+  - explicit cursor timestamp readout and visible-window span readout
+  - overview strip that shows full replay duration with highlighted current window span
+- Added focused automated coverage for timeline readability behavior in `SmartDashboard/tests/playback_timeline_widget_tests.cpp`:
+  - `TickStepAdaptsAcrossZoomSpans`
+  - `TimeAndSpanLabelsUseReadableFormats`
+- Implemented Iteration B marker workflow across transport + UI:
+  - replay transport now extracts typed playback markers from `connection_state` and `marker` events (`connect`, `disconnect`, `stale`, generic)
+  - transport contract extended with marker retrieval API (`GetPlaybackMarkers`) and shared marker model types
+  - timeline renders marker glyphs in both overview and zoomed track views
+  - status bar playback controls now include previous/next marker jump actions (`⏮` / `⏭`) that seek replay cursor to adjacent markers
+- Validation:
+  - built `SmartDashboard_tests` and `SmartDashboardApp`
+  - replay timeline test suite passes after A+B changes
+
+## 2026-03-12 - Replay parity iteration C (marker list panel + keyboard stepping)
+
+- Added a replay marker list panel in the main window UI (`Replay Markers` dock):
+  - displays marker rows with formatted timestamp, marker kind, and marker label
+  - wired click/activation to seek replay cursor directly to selected marker time
+  - list selection auto-follows replay cursor by selecting nearest marker at-or-before current cursor
+- Added keyboard replay navigation in replay mode:
+  - `Left` / `Right` arrows step cursor by `100 ms`
+  - `Shift+Left` / `Shift+Right` step cursor by `1 s`
+- Marker list panel visibility now follows telemetry replay context:
+  - shown only when telemetry UI is enabled and replay transport is selected
+- Validation:
+  - built `SmartDashboardApp`
+  - existing playback timeline tests continue to pass
+
+## 2026-03-12 - Replay parity iteration D (analysis helpers first slice)
+
+- Implemented first analysis-helper slice focused on practical replay forensics workflow:
+  - added bookmark capture action in replay controls (`B+`) to create user markers at current cursor time
+  - added bookmark clear action (`Bx`) to reset user-added bookmarks quickly during review loops
+  - replay marker stream now includes anomaly marker classification:
+    - explicit `anomaly` flags in replay events are converted to anomaly markers
+    - low-voltage/brownout-style heuristics add inferred anomaly markers for relevant numeric signals
+  - timeline marker model/rendering extended with dedicated anomaly kind and distinct visual color
+  - replay marker dock adds visible-window summary stats (marker count, anomaly count, bookmark count, window span)
+- Preserved and integrated previous Iteration B/C workflows:
+  - marker jump controls, marker list click-to-seek, keyboard stepping, and auto-follow selection
+- Validation:
+  - built `SmartDashboardApp`
+  - playback timeline regression tests pass after D-slice changes
 
 ## 2026-03-11 - Line-plot smoothing, direct stream cadence tuning, and direct-label compaction
 

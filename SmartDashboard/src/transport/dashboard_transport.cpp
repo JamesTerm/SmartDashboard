@@ -4,6 +4,7 @@
 #include "sd_direct_subscriber.h"
 
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QVariant>
@@ -46,6 +47,34 @@ namespace sd::transport
                 default:
                     return ConnectionState::Disconnected;
             }
+        }
+
+        PlaybackMarkerKind ToPlaybackMarkerKindFromState(const QString& stateText)
+        {
+            const QString normalized = stateText.trimmed().toLower();
+            if (normalized == "connected" || normalized == "connect")
+            {
+                return PlaybackMarkerKind::Connect;
+            }
+            if (normalized == "disconnected" || normalized == "disconnect")
+            {
+                return PlaybackMarkerKind::Disconnect;
+            }
+            if (normalized == "stale")
+            {
+                return PlaybackMarkerKind::Stale;
+            }
+            if (normalized.contains("anomaly") || normalized.contains("brownout") || normalized.contains("outlier"))
+            {
+                return PlaybackMarkerKind::Anomaly;
+            }
+
+            return PlaybackMarkerKind::Generic;
+        }
+
+        PlaybackMarkerKind ToPlaybackMarkerKindFromMarkerType(const QString& markerType)
+        {
+            return ToPlaybackMarkerKindFromState(markerType);
         }
 
         class DirectDashboardTransport final : public IDashboardTransport
@@ -978,6 +1007,12 @@ namespace sd::transport
                 return m_playing;
             }
 
+            std::vector<PlaybackMarker> GetPlaybackMarkers() const override
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                return m_markers;
+            }
+
         private:
             enum class ReplayEventKind
             {
@@ -991,6 +1026,7 @@ namespace sd::transport
                 ReplayEventKind kind = ReplayEventKind::Data;
                 std::int64_t timestampUs = 0;
                 VariableUpdate update;
+                PlaybackMarker marker;
             };
 
             struct Checkpoint
@@ -1019,30 +1055,66 @@ namespace sd::transport
                     return false;
                 }
 
-                std::vector<ReplayEvent> loaded;
-                loaded.reserve(4096);
-                while (!file.atEnd())
+                const QByteArray raw = file.readAll();
+                if (raw.trimmed().isEmpty())
                 {
-                    const QByteArray line = file.readLine().trimmed();
-                    if (line.isEmpty())
-                    {
-                        continue;
-                    }
+                    return false;
+                }
 
-                    QJsonParseError parseError;
-                    const QJsonDocument doc = QJsonDocument::fromJson(line, &parseError);
-                    if (parseError.error != QJsonParseError::NoError || !doc.isObject())
-                    {
-                        continue;
-                    }
+                std::vector<ReplayEvent> loaded;
+                m_pendingAutoMarkers.clear();
+                m_lastAutoMarkerByKey.clear();
+                loaded.reserve(4096);
 
-                    ReplayEvent event;
-                    if (!ParseReplayEvent(doc.object(), event))
+                // First try full-document JSON formats. Capture CLI outputs a
+                // single JSON object with metadata/signals, while replay logs may
+                // also be stored as a single JSON event object.
+                QJsonParseError fullDocError;
+                const QJsonDocument fullDoc = QJsonDocument::fromJson(raw, &fullDocError);
+                if (fullDocError.error == QJsonParseError::NoError && fullDoc.isObject())
+                {
+                    const QJsonObject root = fullDoc.object();
+                    if (TryParseCaptureSession(root, loaded))
                     {
-                        continue;
+                        // parsed via capture schema
                     }
+                    else
+                    {
+                        ReplayEvent event;
+                        if (ParseReplayEvent(root, event))
+                        {
+                            loaded.push_back(std::move(event));
+                        }
+                    }
+                }
 
-                    loaded.push_back(std::move(event));
+                // Fallback: line-delimited JSON replay events.
+                if (loaded.empty())
+                {
+                    const QList<QByteArray> lines = raw.split('\n');
+                    for (const QByteArray& rawLine : lines)
+                    {
+                        const QByteArray line = rawLine.trimmed();
+                        if (line.isEmpty())
+                        {
+                            continue;
+                        }
+
+                        QJsonParseError parseError;
+                        const QJsonDocument doc = QJsonDocument::fromJson(line, &parseError);
+                        if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+                        {
+                            continue;
+                        }
+
+                        ReplayEvent event;
+                        if (!ParseReplayEvent(doc.object(), event))
+                        {
+                            continue;
+                        }
+
+                        loaded.push_back(std::move(event));
+                    }
                 }
 
                 if (loaded.empty())
@@ -1050,11 +1122,109 @@ namespace sd::transport
                     return false;
                 }
 
+                std::sort(
+                    loaded.begin(),
+                    loaded.end(),
+                    [](const ReplayEvent& lhs, const ReplayEvent& rhs)
+                    {
+                        return lhs.timestampUs < rhs.timestampUs;
+                    }
+                );
+
                 std::lock_guard<std::mutex> lock(m_mutex);
                 m_events = std::move(loaded);
                 m_durationUs = std::max<std::int64_t>(0, m_events.back().timestampUs);
+                m_markers.clear();
+                for (const ReplayEvent& event : m_events)
+                {
+                    if (event.kind == ReplayEventKind::ConnectionState || event.kind == ReplayEventKind::Marker)
+                    {
+                        m_markers.push_back(event.marker);
+                    }
+                }
+                for (const PlaybackMarker& marker : m_pendingAutoMarkers)
+                {
+                    m_markers.push_back(marker);
+                }
+                std::sort(
+                    m_markers.begin(),
+                    m_markers.end(),
+                    [](const PlaybackMarker& lhs, const PlaybackMarker& rhs)
+                    {
+                        return lhs.timestampUs < rhs.timestampUs;
+                    }
+                );
+                m_pendingAutoMarkers.clear();
                 BuildCheckpointsLocked();
                 return true;
+            }
+
+            bool TryParseCaptureSession(const QJsonObject& root, std::vector<ReplayEvent>& loaded)
+            {
+                if (!root.contains("signals") || !root.value("signals").isArray())
+                {
+                    return false;
+                }
+
+                const QJsonArray signalArray = root.value("signals").toArray();
+                if (signalArray.isEmpty())
+                {
+                    return false;
+                }
+
+                std::unordered_map<std::string, std::uint64_t> seqByKey;
+                for (const QJsonValue& signalValue : signalArray)
+                {
+                    if (!signalValue.isObject())
+                    {
+                        continue;
+                    }
+
+                    const QJsonObject signal = signalValue.toObject();
+                    const QString key = signal.value("key").toString();
+                    const QString type = signal.value("type").toString().trimmed().toLower();
+                    const QJsonArray samples = signal.value("samples").toArray();
+                    if (key.isEmpty() || samples.isEmpty())
+                    {
+                        continue;
+                    }
+
+                    const std::string keyUtf8 = key.toStdString();
+                    for (const QJsonValue& sampleValue : samples)
+                    {
+                        if (!sampleValue.isObject())
+                        {
+                            continue;
+                        }
+
+                        const QJsonObject sample = sampleValue.toObject();
+                        ReplayEvent event;
+                        event.kind = ReplayEventKind::Data;
+                        event.timestampUs = sample.value("t_us").toVariant().toLongLong();
+                        event.update.key = key;
+                        event.update.seq = ++seqByKey[keyUtf8];
+
+                        if (type == "bool")
+                        {
+                            event.update.valueType = static_cast<int>(sd::direct::ValueType::Bool);
+                            event.update.value = sample.value("value").toBool();
+                        }
+                        else if (type == "double")
+                        {
+                            event.update.valueType = static_cast<int>(sd::direct::ValueType::Double);
+                            event.update.value = sample.value("value").toDouble();
+                        }
+                        else
+                        {
+                            event.update.valueType = static_cast<int>(sd::direct::ValueType::String);
+                            event.update.value = sample.value("value").toVariant().toString();
+                        }
+
+                        loaded.push_back(std::move(event));
+                    }
+                }
+
+                return !loaded.empty();
             }
 
             bool ParseReplayEvent(const QJsonObject& object, ReplayEvent& event)
@@ -1065,12 +1235,21 @@ namespace sd::transport
                 if (kind == "connection_state")
                 {
                     event.kind = ReplayEventKind::ConnectionState;
+                    const QString stateText = object.value("state").toString("Disconnected");
+                    event.marker.timestampUs = event.timestampUs;
+                    event.marker.kind = ToPlaybackMarkerKindFromState(stateText);
+                    event.marker.label = stateText;
                     return true;
                 }
 
                 if (kind == "marker")
                 {
                     event.kind = ReplayEventKind::Marker;
+                    const QString markerType = object.value("markerType").toString(object.value("type").toString("marker"));
+                    const QString markerLabel = object.value("label").toString(markerType);
+                    event.marker.timestampUs = event.timestampUs;
+                    event.marker.kind = ToPlaybackMarkerKindFromMarkerType(markerType);
+                    event.marker.label = markerLabel;
                     return true;
                 }
 
@@ -1111,6 +1290,46 @@ namespace sd::transport
                 else
                 {
                     event.update.value = object.value("value").toString();
+                }
+
+                bool addAnomalyMarker = false;
+                QString anomalyLabel;
+
+                if (object.value("anomaly").toBool(false))
+                {
+                    addAnomalyMarker = true;
+                    anomalyLabel = QString("Anomaly: %1").arg(event.update.key);
+                }
+                else if (event.update.valueType == static_cast<int>(sd::direct::ValueType::Double))
+                {
+                    const QString keyLower = event.update.key.toLower();
+                    const bool isBrownoutSignal =
+                        keyLower.contains("brownout")
+                        || keyLower.contains("battery")
+                        || keyLower.contains("voltage");
+                    const double numericValue = event.update.value.toDouble();
+                    if (isBrownoutSignal && numericValue > 0.0 && numericValue < 7.0)
+                    {
+                        addAnomalyMarker = true;
+                        anomalyLabel = QString("Low voltage: %1 = %2V").arg(event.update.key).arg(numericValue, 0, 'f', 2);
+                    }
+                }
+
+                if (addAnomalyMarker)
+                {
+                    const std::string key = event.update.key.toStdString();
+                    constexpr std::int64_t minSpacingUs = 1000000;
+                    const auto it = m_lastAutoMarkerByKey.find(key);
+                    const bool isSpaced = (it == m_lastAutoMarkerByKey.end()) || ((event.timestampUs - it->second) >= minSpacingUs);
+                    if (isSpaced)
+                    {
+                        PlaybackMarker marker;
+                        marker.timestampUs = event.timestampUs;
+                        marker.kind = PlaybackMarkerKind::Anomaly;
+                        marker.label = anomalyLabel;
+                        m_pendingAutoMarkers.push_back(std::move(marker));
+                        m_lastAutoMarkerByKey[key] = event.timestampUs;
+                    }
                 }
 
                 return !event.update.key.isEmpty();
@@ -1280,6 +1499,9 @@ namespace sd::transport
             std::int64_t m_lastTickUs = 0;
             std::size_t m_nextEventIndex = 0;
             std::vector<ReplayEvent> m_events;
+            std::vector<PlaybackMarker> m_markers;
+            std::vector<PlaybackMarker> m_pendingAutoMarkers;
+            std::map<std::string, std::int64_t> m_lastAutoMarkerByKey;
             std::vector<Checkpoint> m_checkpoints;
             std::thread m_worker;
             VariableUpdateCallback m_onVariableUpdate;

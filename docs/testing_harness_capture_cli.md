@@ -54,6 +54,19 @@ Preferred/optional:
 - Writes metadata and signal-series data in stable JSON schema.
 - Uses temp-file + rename for overwrite mode to avoid truncated output on normal completion.
 
+## Format relationship to Replay mode
+
+`SmartDashboardCaptureCli` intentionally writes a capture-session schema (top-level `metadata` + `signals[]`).
+
+This differs from SmartDashboard's built-in recorder, which writes replay-event stream lines (`eventKind` + `timestampUs` per line).
+
+Why both exist:
+
+- capture-session format is better for automation pipelines and post-run statistical analysis
+- replay-event stream format is better for interactive timeline playback semantics
+
+Replay transport supports both formats, so capture CLI output can still be loaded directly for visual replay.
+
 ### Connection troubleshooting for empty captures
 
 If files are valid JSON but signals are empty, the most common issue is direct channel name mismatch.

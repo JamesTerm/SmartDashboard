@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <vector>
 
 namespace sd::transport
 {
@@ -40,6 +41,22 @@ namespace sd::transport
         int valueType = 0;
         QVariant value;
         std::uint64_t seq = 0;
+    };
+
+    enum class PlaybackMarkerKind
+    {
+        Connect,
+        Disconnect,
+        Stale,
+        Anomaly,
+        Generic
+    };
+
+    struct PlaybackMarker
+    {
+        std::int64_t timestampUs = 0;
+        PlaybackMarkerKind kind = PlaybackMarkerKind::Generic;
+        QString label;
     };
 
     using VariableUpdateCallback = std::function<void(const VariableUpdate&)>;
@@ -93,6 +110,11 @@ namespace sd::transport
         virtual bool IsPlaybackPlaying() const
         {
             return false;
+        }
+
+        virtual std::vector<PlaybackMarker> GetPlaybackMarkers() const
+        {
+            return {};
         }
     };
 

@@ -87,6 +87,7 @@ if(BUILD_TESTING)
     )
 
     target_compile_features(SmartDashboard_tests PRIVATE cxx_std_20)
+    target_compile_definitions(SmartDashboard_tests PRIVATE SMARTDASHBOARD_TESTS=1)
 
     include(GoogleTest)
     gtest_discover_tests(SmartDashboard_tests)

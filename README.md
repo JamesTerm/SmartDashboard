@@ -63,6 +63,19 @@ Future consideration (not implemented yet):
 - `docs/replay_user_manual.md` - operator-focused replay feature usage guide
 - `Agent_Session_Notes.md` - lean next-session handoff context
 
+## Replay Training
+
+Use `docs/replay_user_manual.md` as the single training document for replay workflows.
+
+It includes:
+
+- replay mode setup and control reference
+- timeline usage (scrub/zoom/pan) and readability cues
+- marker workflows (`⏮` / `⏭`, marker list click-to-seek)
+- keyboard stepping (`Left/Right`, `Shift+Left/Right`)
+- analysis helpers (`B+` bookmark add, `Bx` bookmark clear, anomaly markers)
+- guided training walkthrough and incident-analysis flow
+
 ## Development Approach
 
 Development in this repository is intentionally iterative and validation-driven:
