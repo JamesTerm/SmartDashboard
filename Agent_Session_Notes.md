@@ -129,11 +129,16 @@
     - bookmark persistence across sessions (`replay/userBookmarks` in `QSettings`)
     - replay marker dock visibility preference persistence now working reliably (`replay/markersVisible`) after deterministic sync-guard updates
     - timeline marker rendering now uses the same merged marker set as the Replay Markers list, so list/timeline stay in sync
+  - Dockable replay workspace iteration 1 is now implemented on `feature/replay-dockable-workspace`:
+    - replay controls and replay timeline are now dockable/floatable panels with View menu toggles
+    - replay controls/timeline now have right-click context menus matching Replay Markers (`Float`, `Dock Left`, `Dock Right`, `Dock Bottom`)
+    - selecting `Dock Bottom` on either controls or timeline restores default bottom side-by-side split for both panels
+    - visibility preferences for controls/timeline are persisted via `QSettings` (`replay/controlsVisible`, `replay/timelineVisible`)
   - Playback timeline regression coverage now includes:
     - cursor/window clamp behavior
     - tick-step adaptation across zoom spans
     - readable time/span label formatting
-  - Finalization status: manual validation pass completed for this feature slice; run final build/test sweep and merge branch to `main`
+  - Next planned implementation slice: dockable workspace iteration 2 (timeline header/readout polish and broader replay panel ergonomics)
 
 ## Known constraints / active considerations
 

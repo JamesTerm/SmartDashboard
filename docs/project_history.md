@@ -6,6 +6,30 @@ Curated milestone history for this repository.
 - Keep lean handoff context in `Agent_Session_Notes.md`.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 
+## 2026-03-14 - Dockable replay workspace iteration 1 (controls + timeline panels)
+
+- Added dockable replay workspace panels for parity with Replay Markers workflow:
+  - `Replay Controls` moved into its own `QDockWidget`
+  - `Replay Timeline` moved into its own `QDockWidget`
+  - both docks support move/float/close behavior and persist visibility preferences
+- Added `View` menu controls for replay workspace composition:
+  - `Replay Controls`
+  - `Replay Timeline`
+  - existing `Replay Markers`
+- Added context-menu docking controls for consistency across replay panels:
+  - `Float`
+  - `Dock Left`
+  - `Dock Right`
+  - `Dock Bottom`
+- Added bottom-dock default-layout restore behavior:
+  - choosing `Dock Bottom` on controls or timeline re-docks both panels to bottom and restores side-by-side horizontal split
+- Persistence and UX alignment:
+  - added `QSettings` visibility keys for controls/timeline (`replay/controlsVisible`, `replay/timelineVisible`)
+  - retained deterministic marker-panel visibility persistence and bookmark persistence from previous iteration work
+- Validation:
+  - built `SmartDashboardApp`
+  - manual UX verification confirms dock/float cycling and bottom-layout restore behavior
+
 ## 2026-03-13 - Replay UX persistence polish and menu/docking refinements
 
 - Applied operator-driven replay UX polish based on manual walkthrough feedback:
