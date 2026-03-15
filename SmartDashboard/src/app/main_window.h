@@ -120,6 +120,8 @@ private:
     void RefreshReplaySummaryLabel();
     void LoadUserReplayBookmarks();
     void PersistUserReplayBookmarks() const;
+    void RestoreDefaultReplayWorkspaceLayout();
+    void UpdateReplayDockHeightLock();
     void StepPlaybackByUs(std::int64_t deltaUs);
     void StartSessionRecording();
     void StopSessionRecording();
@@ -129,6 +131,8 @@ private:
 
     QWidget* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
+    QLabel* m_playbackCursorStatusLabel = nullptr;
+    QLabel* m_playbackWindowStatusLabel = nullptr;
     QAction* m_editableAction = nullptr;
     QAction* m_snapToGridAction = nullptr;
     QAction* m_moveModeAction = nullptr;
@@ -140,6 +144,8 @@ private:
     QAction* m_useNetworkTablesTransportAction = nullptr;
     QAction* m_useReplayTransportAction = nullptr;
     QAction* m_telemetryFeatureViewAction = nullptr;
+    QAction* m_replayControlsViewAction = nullptr;
+    QAction* m_replayTimelineViewAction = nullptr;
     QAction* m_replayMarkersViewAction = nullptr;
     QAction* m_ntUseTeamAction = nullptr;
     QAction* m_openReplayFileAction = nullptr;
@@ -152,6 +158,8 @@ private:
     QToolButton* m_addBookmarkButton = nullptr;
     QToolButton* m_clearBookmarksButton = nullptr;
     QComboBox* m_playbackRateCombo = nullptr;
+    QDockWidget* m_replayControlsDock = nullptr;
+    QDockWidget* m_replayTimelineDock = nullptr;
     QDockWidget* m_replayMarkerDock = nullptr;
     QListWidget* m_replayMarkerList = nullptr;
     QLabel* m_replaySelectionSummaryLabel = nullptr;
@@ -187,7 +195,11 @@ private:
     std::vector<sd::transport::PlaybackMarker> m_replayMarkers;
     std::vector<sd::transport::PlaybackMarker> m_userReplayBookmarks;
     std::vector<std::int64_t> m_replayMarkerTimesUs;
+    bool m_replayControlsPreferredVisible = true;
+    bool m_replayTimelinePreferredVisible = true;
     bool m_replayMarkersPreferredVisible = true;
+    bool m_syncingReplayControlsDockVisibility = false;
+    bool m_syncingReplayTimelineDockVisibility = false;
     bool m_syncingReplayMarkerDockVisibility = false;
     bool m_syncingMarkerSelection = false;
 };

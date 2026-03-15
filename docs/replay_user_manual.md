@@ -54,6 +54,9 @@ Replay controls live in the status area.
 - `B+`: add a user bookmark at current cursor time.
 - `Bx`: clear all user bookmarks for this session.
 - Speed selector: `0.25x`, `0.5x`, `1x`, `2x`.
+- Status bar replay readouts:
+  - `t=...` shows current replay cursor time
+  - `window=...` shows current visible timeline window span
 
 ## Timeline reference
 
@@ -66,8 +69,11 @@ Timeline interactions:
 Timeline readability features:
 
 - Adaptive tick marks and time labels scale with zoom.
-- Cursor readout (`t=...`) and visible-window span readout (`window=...`).
 - Overview strip shows full replay duration and highlighted current zoom window.
+
+Note:
+
+- Cursor/window readouts are displayed on the status bar to keep timeline panel height compact.
 
 Marker rendering:
 
@@ -86,6 +92,19 @@ The `Replay Markers` dock provides click-to-seek and fast scanning.
   - anomaly markers
   - bookmarks
   - visible window span
+
+## Dockable replay workspace
+
+Replay analysis panels can be arranged per operator preference.
+
+- Panels:
+  - `Replay Controls`
+  - `Replay Timeline`
+  - `Replay Markers`
+- Show/hide from `View` menu.
+- Right-click panel title bars for `Float`, `Dock Left`, `Dock Right`, `Dock Bottom`.
+- `Reset Replay Layout` returns controls + timeline to default bottom side-by-side layout.
+- Panel visibility is persisted between sessions.
 
 ## Keyboard navigation
 

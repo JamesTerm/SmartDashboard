@@ -6,6 +6,47 @@ Curated milestone history for this repository.
 - Keep lean handoff context in `Agent_Session_Notes.md`.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 
+## 2026-03-14 - Dockable replay workspace iteration 1 (controls + timeline panels)
+
+- Added dockable replay workspace panels for parity with Replay Markers workflow:
+  - `Replay Controls` moved into its own `QDockWidget`
+  - `Replay Timeline` moved into its own `QDockWidget`
+  - both docks support move/float/close behavior and persist visibility preferences
+- Added `View` menu controls for replay workspace composition:
+  - `Replay Controls`
+  - `Replay Timeline`
+  - existing `Replay Markers`
+- Added context-menu docking controls for consistency across replay panels:
+  - `Float`
+  - `Dock Left`
+  - `Dock Right`
+  - `Dock Bottom`
+- Added bottom-dock default-layout restore behavior:
+  - choosing `Dock Bottom` on controls or timeline re-docks both panels to bottom and restores side-by-side horizontal split
+- Persistence and UX alignment:
+  - added `QSettings` visibility keys for controls/timeline (`replay/controlsVisible`, `replay/timelineVisible`)
+  - retained deterministic marker-panel visibility persistence and bookmark persistence from previous iteration work
+- Validation:
+  - built `SmartDashboardApp`
+  - manual UX verification confirms dock/float cycling and bottom-layout restore behavior
+
+### Follow-up refinement (same branch/session)
+
+- Added replay workspace recovery affordance:
+  - `Reset Replay Layout` action in replay controls/timeline context menus
+  - restores controls + timeline to default bottom side-by-side arrangement and re-enables both panels
+- Applied persistence hardening parity for controls/timeline panel visibility:
+  - aligned persistence/sync behavior with replay-markers deterministic guard model to avoid context-transition clobbering
+- Applied controls panel alignment polish:
+  - controls row remains top-anchored when floating/stretched to reduce vertical dead-space perception
+- Finalized timeline/readout simplification + docked sizing tune:
+  - moved replay readouts (`t=`, `window=`) to status bar labels instead of timeline canvas text
+  - retained floating timeline ergonomics while reducing docked vertical pressure
+  - tuned docked replay height lock ratio to `44/86` (controls/timeline) and wired reset-layout path to same ratio
+- Validation:
+  - built `SmartDashboardApp`
+  - manual operator verification confirmed desired docked replay layout and reset behavior
+
 ## 2026-03-13 - Replay UX persistence polish and menu/docking refinements
 
 - Applied operator-driven replay UX polish based on manual walkthrough feedback:

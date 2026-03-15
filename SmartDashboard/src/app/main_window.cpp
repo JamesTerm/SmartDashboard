@@ -83,6 +83,23 @@ namespace
         return QString("%1s").arg(static_cast<double>(std::max<std::int64_t>(0, spanUs)) / 1000000.0, 0, 'f', 3);
     }
 
+    void SetTimelineDockMode(sd::widgets::PlaybackTimelineWidget* timeline, bool floating)
+    {
+        if (timeline == nullptr)
+        {
+            return;
+        }
+
+        if (floating)
+        {
+            timeline->setMinimumHeight(58);
+        }
+        else
+        {
+            timeline->setMinimumHeight(42);
+        }
+    }
+
     sd::widgets::VariableType ToVariableType(int valueType)
     {
         switch (valueType)
@@ -280,8 +297,26 @@ MainWindow::MainWindow(QWidget* parent)
     m_replayMarkersViewAction->setChecked(true);
     m_replayMarkersViewAction->setEnabled(false);
 
+    m_replayControlsViewAction = viewMenu->addAction("Replay Controls");
+    m_replayControlsViewAction->setCheckable(true);
+    m_replayControlsViewAction->setChecked(true);
+    m_replayControlsViewAction->setEnabled(false);
+
+    m_replayTimelineViewAction = viewMenu->addAction("Replay Timeline");
+    m_replayTimelineViewAction->setCheckable(true);
+    m_replayTimelineViewAction->setChecked(true);
+    m_replayTimelineViewAction->setEnabled(false);
+
     m_statusLabel = new QLabel("State: Disconnected", this);
     statusBar()->addPermanentWidget(m_statusLabel);
+
+    m_playbackCursorStatusLabel = new QLabel("t=0.000s", this);
+    m_playbackCursorStatusLabel->setStyleSheet("QLabel { color: #b8b8b8; }");
+    statusBar()->addPermanentWidget(m_playbackCursorStatusLabel);
+
+    m_playbackWindowStatusLabel = new QLabel("window=0.000s", this);
+    m_playbackWindowStatusLabel->setStyleSheet("QLabel { color: #9aa4b2; }");
+    statusBar()->addPermanentWidget(m_playbackWindowStatusLabel);
 
     QMenu* connectionMenu = menuBar()->addMenu("&Connection");
     m_connectTransportAction = connectionMenu->addAction("Connect");
@@ -313,6 +348,7 @@ MainWindow::MainWindow(QWidget* parent)
     auto* playbackLayout = new QHBoxLayout(m_telemetryControlsPanel);
     playbackLayout->setContentsMargins(0, 0, 0, 0);
     playbackLayout->setSpacing(6);
+    playbackLayout->setAlignment(Qt::AlignLeft | Qt::AlignTop);
 
     auto* playbackLabel = new QLabel("Telemetry", m_telemetryControlsPanel);
     playbackLayout->addWidget(playbackLabel);
@@ -394,7 +430,20 @@ MainWindow::MainWindow(QWidget* parent)
     m_playbackRateCombo->setCurrentIndex(2);
     playbackLayout->addWidget(m_playbackRateCombo);
 
-    statusBar()->addPermanentWidget(m_telemetryControlsPanel);
+    m_replayControlsDock = new QDockWidget("Replay Controls", this);
+    m_replayControlsDock->setObjectName("replayControlsDock");
+    m_replayControlsDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea | Qt::BottomDockWidgetArea);
+    m_replayControlsDock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
+    m_replayControlsDock->setContextMenuPolicy(Qt::CustomContextMenu);
+
+    auto* replayControlsHost = new QWidget(m_replayControlsDock);
+    auto* replayControlsHostLayout = new QVBoxLayout(replayControlsHost);
+    replayControlsHostLayout->setContentsMargins(0, 0, 0, 0);
+    replayControlsHostLayout->setSpacing(0);
+    replayControlsHostLayout->addWidget(m_telemetryControlsPanel, 0, Qt::AlignTop);
+    replayControlsHostLayout->addStretch(1);
+    m_replayControlsDock->setWidget(replayControlsHost);
+    addDockWidget(Qt::BottomDockWidgetArea, m_replayControlsDock);
     connect(m_recordButton, &QPushButton::toggled, this, &MainWindow::OnRecordToggled);
     connect(m_rewindButton, &QToolButton::clicked, this, &MainWindow::OnPlaybackRewindToStart);
     connect(m_playPauseButton, &QToolButton::clicked, this, &MainWindow::OnPlaybackPlayPause);
@@ -407,8 +456,260 @@ MainWindow::MainWindow(QWidget* parent)
     m_playbackTimeline = new sd::widgets::PlaybackTimelineWidget(this);
     m_playbackTimeline->setMinimumWidth(260);
     m_playbackTimeline->setToolTip("Telemetry timeline (left-drag scrub, wheel zoom, right-drag pan)");
-    statusBar()->addPermanentWidget(m_playbackTimeline, 1);
+    m_replayTimelineDock = new QDockWidget("Replay Timeline", this);
+    m_replayTimelineDock->setObjectName("replayTimelineDock");
+    m_replayTimelineDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea | Qt::BottomDockWidgetArea);
+    m_replayTimelineDock->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable | QDockWidget::DockWidgetClosable);
+    m_replayTimelineDock->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_replayTimelineDock->setWidget(m_playbackTimeline);
+    addDockWidget(Qt::BottomDockWidgetArea, m_replayTimelineDock);
+    splitDockWidget(m_replayControlsDock, m_replayTimelineDock, Qt::Horizontal);
+    UpdateReplayDockHeightLock();
     connect(m_playbackTimeline, &sd::widgets::PlaybackTimelineWidget::CursorScrubbedUs, this, &MainWindow::OnPlaybackCursorScrubbed);
+
+    connect(
+        m_replayControlsDock,
+        &QWidget::customContextMenuRequested,
+        this,
+        [this](const QPoint& pos)
+        {
+            if (m_replayControlsDock == nullptr)
+            {
+                return;
+            }
+
+            QMenu menu(this);
+            QAction* floatAction = menu.addAction("Float");
+            floatAction->setCheckable(true);
+            floatAction->setChecked(m_replayControlsDock->isFloating());
+
+            menu.addSeparator();
+            QAction* dockRightAction = menu.addAction("Dock Right");
+            QAction* dockLeftAction = menu.addAction("Dock Left");
+            QAction* dockBottomAction = menu.addAction("Dock Bottom");
+            menu.addSeparator();
+            QAction* resetAction = menu.addAction("Reset Replay Layout");
+
+            QAction* chosen = menu.exec(m_replayControlsDock->mapToGlobal(pos));
+            if (chosen == nullptr)
+            {
+                return;
+            }
+
+            if (chosen == resetAction)
+            {
+                RestoreDefaultReplayWorkspaceLayout();
+                return;
+            }
+
+            if (chosen == floatAction)
+            {
+                m_replayControlsDock->setFloating(!m_replayControlsDock->isFloating());
+                m_replayControlsDock->show();
+                return;
+            }
+
+            m_replayControlsDock->setFloating(false);
+            if (chosen == dockRightAction)
+            {
+                addDockWidget(Qt::RightDockWidgetArea, m_replayControlsDock);
+            }
+            else if (chosen == dockLeftAction)
+            {
+                addDockWidget(Qt::LeftDockWidgetArea, m_replayControlsDock);
+            }
+            else if (chosen == dockBottomAction)
+            {
+                addDockWidget(Qt::BottomDockWidgetArea, m_replayControlsDock);
+                if (m_replayTimelineDock != nullptr)
+                {
+                    m_replayTimelineDock->setFloating(false);
+                    addDockWidget(Qt::BottomDockWidgetArea, m_replayTimelineDock);
+                    splitDockWidget(m_replayControlsDock, m_replayTimelineDock, Qt::Horizontal);
+                }
+            }
+            m_replayControlsDock->show();
+            UpdateReplayDockHeightLock();
+        }
+    );
+
+    connect(
+        m_replayTimelineDock,
+        &QWidget::customContextMenuRequested,
+        this,
+        [this](const QPoint& pos)
+        {
+            if (m_replayTimelineDock == nullptr)
+            {
+                return;
+            }
+
+            QMenu menu(this);
+            QAction* floatAction = menu.addAction("Float");
+            floatAction->setCheckable(true);
+            floatAction->setChecked(m_replayTimelineDock->isFloating());
+
+            menu.addSeparator();
+            QAction* dockRightAction = menu.addAction("Dock Right");
+            QAction* dockLeftAction = menu.addAction("Dock Left");
+            QAction* dockBottomAction = menu.addAction("Dock Bottom");
+            menu.addSeparator();
+            QAction* resetAction = menu.addAction("Reset Replay Layout");
+
+            QAction* chosen = menu.exec(m_replayTimelineDock->mapToGlobal(pos));
+            if (chosen == nullptr)
+            {
+                return;
+            }
+
+            if (chosen == resetAction)
+            {
+                RestoreDefaultReplayWorkspaceLayout();
+                return;
+            }
+
+            if (chosen == floatAction)
+            {
+                m_replayTimelineDock->setFloating(!m_replayTimelineDock->isFloating());
+                m_replayTimelineDock->show();
+                return;
+            }
+
+            m_replayTimelineDock->setFloating(false);
+            if (chosen == dockRightAction)
+            {
+                addDockWidget(Qt::RightDockWidgetArea, m_replayTimelineDock);
+            }
+            else if (chosen == dockLeftAction)
+            {
+                addDockWidget(Qt::LeftDockWidgetArea, m_replayTimelineDock);
+            }
+            else if (chosen == dockBottomAction)
+            {
+                addDockWidget(Qt::BottomDockWidgetArea, m_replayTimelineDock);
+                if (m_replayControlsDock != nullptr)
+                {
+                    m_replayControlsDock->setFloating(false);
+                    addDockWidget(Qt::BottomDockWidgetArea, m_replayControlsDock);
+                    splitDockWidget(m_replayControlsDock, m_replayTimelineDock, Qt::Horizontal);
+                }
+            }
+            m_replayTimelineDock->show();
+            UpdateReplayDockHeightLock();
+        }
+    );
+
+    connect(
+        m_replayControlsDock,
+        &QDockWidget::visibilityChanged,
+        this,
+        [this](bool visible)
+        {
+            if (m_syncingReplayControlsDockVisibility)
+            {
+                return;
+            }
+
+            if (!QCoreApplication::closingDown()
+                && isVisible()
+                && m_replayControlsViewAction != nullptr
+                && m_replayControlsViewAction->isEnabled())
+            {
+                m_replayControlsPreferredVisible = visible;
+                QSettings settings("SmartDashboard", "SmartDashboardApp");
+                settings.setValue("replay/controlsVisible", m_replayControlsPreferredVisible);
+            }
+
+            if (m_replayControlsViewAction != nullptr)
+            {
+                const bool prior = m_replayControlsViewAction->blockSignals(true);
+                m_replayControlsViewAction->setChecked(visible);
+                m_replayControlsViewAction->blockSignals(prior);
+            }
+        }
+    );
+    connect(
+        m_replayTimelineDock,
+        &QDockWidget::visibilityChanged,
+        this,
+        [this](bool visible)
+        {
+            if (m_syncingReplayTimelineDockVisibility)
+            {
+                return;
+            }
+
+            if (!QCoreApplication::closingDown()
+                && isVisible()
+                && m_replayTimelineViewAction != nullptr
+                && m_replayTimelineViewAction->isEnabled())
+            {
+                m_replayTimelinePreferredVisible = visible;
+                QSettings settings("SmartDashboard", "SmartDashboardApp");
+                settings.setValue("replay/timelineVisible", m_replayTimelinePreferredVisible);
+            }
+
+            if (m_replayTimelineViewAction != nullptr)
+            {
+                const bool prior = m_replayTimelineViewAction->blockSignals(true);
+                m_replayTimelineViewAction->setChecked(visible);
+                m_replayTimelineViewAction->blockSignals(prior);
+            }
+        }
+    );
+    connect(
+        m_replayTimelineDock,
+        &QDockWidget::topLevelChanged,
+        this,
+        [this](bool topLevel)
+        {
+            SetTimelineDockMode(m_playbackTimeline, topLevel);
+            UpdateReplayDockHeightLock();
+        }
+    );
+    connect(
+        m_replayControlsDock,
+        &QDockWidget::topLevelChanged,
+        this,
+        [this](bool)
+        {
+            UpdateReplayDockHeightLock();
+        }
+    );
+    connect(
+        m_replayControlsViewAction,
+        &QAction::toggled,
+        this,
+        [this](bool checked)
+        {
+            m_replayControlsPreferredVisible = checked;
+            QSettings settings("SmartDashboard", "SmartDashboardApp");
+            settings.setValue("replay/controlsVisible", m_replayControlsPreferredVisible);
+            if (m_replayControlsDock != nullptr)
+            {
+                m_syncingReplayControlsDockVisibility = true;
+                m_replayControlsDock->setVisible(checked);
+                m_syncingReplayControlsDockVisibility = false;
+            }
+        }
+    );
+    connect(
+        m_replayTimelineViewAction,
+        &QAction::toggled,
+        this,
+        [this](bool checked)
+        {
+            m_replayTimelinePreferredVisible = checked;
+            QSettings settings("SmartDashboard", "SmartDashboardApp");
+            settings.setValue("replay/timelineVisible", m_replayTimelinePreferredVisible);
+            if (m_replayTimelineDock != nullptr)
+            {
+                m_syncingReplayTimelineDockVisibility = true;
+                m_replayTimelineDock->setVisible(checked);
+                m_syncingReplayTimelineDockVisibility = false;
+            }
+        }
+    );
 
     m_replayMarkerDock = new QDockWidget("Replay Markers", this);
     m_replayMarkerDock->setObjectName("replayMarkerDock");
@@ -556,6 +857,8 @@ MainWindow::MainWindow(QWidget* parent)
     m_connectionConfig.replayFilePath = settings.value("connection/replayFilePath").toString();
     m_telemetryFeatureEnabled = settings.value("telemetry/enabled", true).toBool();
     m_recordRequested = settings.value("telemetry/recordEnabled", false).toBool();
+    m_replayControlsPreferredVisible = settings.value("replay/controlsVisible", true).toBool();
+    m_replayTimelinePreferredVisible = settings.value("replay/timelineVisible", true).toBool();
     m_replayMarkersPreferredVisible = settings.value("replay/markersVisible", true).toBool();
     if (m_telemetryFeatureViewAction != nullptr)
     {
@@ -566,10 +869,22 @@ MainWindow::MainWindow(QWidget* parent)
         m_replayMarkersViewAction->setChecked(m_replayMarkersPreferredVisible);
         m_replayMarkersViewAction->setEnabled(false);
     }
+    if (m_replayControlsViewAction != nullptr)
+    {
+        m_replayControlsViewAction->setChecked(m_replayControlsPreferredVisible);
+        m_replayControlsViewAction->setEnabled(false);
+    }
+    if (m_replayTimelineViewAction != nullptr)
+    {
+        m_replayTimelineViewAction->setChecked(m_replayTimelinePreferredVisible);
+        m_replayTimelineViewAction->setEnabled(false);
+    }
     if (m_recordButton != nullptr)
     {
         m_recordButton->setChecked(m_recordRequested);
     }
+
+    SetTimelineDockMode(m_playbackTimeline, m_replayTimelineDock != nullptr && m_replayTimelineDock->isFloating());
 
     LoadUserReplayBookmarks();
     ApplyTransportMenuChecks();
@@ -1040,9 +1355,75 @@ void MainWindow::SaveWindowGeometry() const
     QSettings settings("SmartDashboard", "SmartDashboardApp");
     settings.setValue("window/geometry", saveGeometry());
     settings.setValue("window/state", saveState());
+    settings.setValue("replay/controlsVisible", m_replayControlsPreferredVisible);
+    settings.setValue("replay/timelineVisible", m_replayTimelinePreferredVisible);
     settings.setValue("replay/markersVisible", m_replayMarkersPreferredVisible);
 
     PersistUserReplayBookmarks();
+}
+
+void MainWindow::RestoreDefaultReplayWorkspaceLayout()
+{
+    if (m_replayControlsDock == nullptr || m_replayTimelineDock == nullptr)
+    {
+        return;
+    }
+
+    m_replayControlsPreferredVisible = true;
+    m_replayTimelinePreferredVisible = true;
+
+    m_syncingReplayControlsDockVisibility = true;
+    m_syncingReplayTimelineDockVisibility = true;
+
+    m_replayControlsDock->setFloating(false);
+    m_replayTimelineDock->setFloating(false);
+    addDockWidget(Qt::BottomDockWidgetArea, m_replayControlsDock);
+    addDockWidget(Qt::BottomDockWidgetArea, m_replayTimelineDock);
+    splitDockWidget(m_replayControlsDock, m_replayTimelineDock, Qt::Horizontal);
+    m_replayControlsDock->show();
+    m_replayTimelineDock->show();
+
+    m_syncingReplayControlsDockVisibility = false;
+    m_syncingReplayTimelineDockVisibility = false;
+
+    if (m_replayControlsViewAction != nullptr)
+    {
+        const bool prior = m_replayControlsViewAction->blockSignals(true);
+        m_replayControlsViewAction->setChecked(true);
+        m_replayControlsViewAction->blockSignals(prior);
+    }
+    if (m_replayTimelineViewAction != nullptr)
+    {
+        const bool prior = m_replayTimelineViewAction->blockSignals(true);
+        m_replayTimelineViewAction->setChecked(true);
+        m_replayTimelineViewAction->blockSignals(prior);
+    }
+
+    QSettings settings("SmartDashboard", "SmartDashboardApp");
+    settings.setValue("replay/controlsVisible", true);
+    settings.setValue("replay/timelineVisible", true);
+
+    SetTimelineDockMode(m_playbackTimeline, false);
+    UpdateReplayDockHeightLock();
+}
+
+void MainWindow::UpdateReplayDockHeightLock()
+{
+    if (m_replayControlsDock == nullptr || m_replayTimelineDock == nullptr)
+    {
+        return;
+    }
+
+    const bool controlsDocked = !m_replayControlsDock->isFloating();
+    const bool timelineDocked = !m_replayTimelineDock->isFloating();
+    if (controlsDocked && timelineDocked)
+    {
+        QList<QDockWidget*> bottomReplayDocks;
+        bottomReplayDocks << m_replayControlsDock << m_replayTimelineDock;
+        QList<int> bottomSizes;
+        bottomSizes << 44 << 86;
+        resizeDocks(bottomReplayDocks, bottomSizes, Qt::Vertical);
+    }
 }
 
 void MainWindow::OnControlBoolEdited(const QString& key, bool value)
@@ -1900,20 +2281,79 @@ void MainWindow::UpdatePlaybackUiState()
         m_nextMarkerButton->setEnabled(hasMarkers);
     }
 
-    if (m_telemetryControlsPanel != nullptr)
-    {
-        m_telemetryControlsPanel->setVisible(m_telemetryFeatureEnabled);
-    }
+    const bool dockContextVisible = m_telemetryFeatureEnabled && replayMode;
 
-    const bool allowMarkerDockAction = m_telemetryFeatureEnabled && replayMode;
+    const bool allowMarkerDockAction = dockContextVisible;
     if (m_replayMarkersViewAction != nullptr)
     {
         m_replayMarkersViewAction->setEnabled(allowMarkerDockAction);
     }
 
+    if (m_replayControlsViewAction != nullptr)
+    {
+        m_replayControlsViewAction->setEnabled(dockContextVisible);
+    }
+
+    if (m_replayTimelineViewAction != nullptr)
+    {
+        m_replayTimelineViewAction->setEnabled(dockContextVisible);
+    }
+
+    if (m_replayControlsDock != nullptr)
+    {
+        m_syncingReplayControlsDockVisibility = true;
+        m_replayControlsDock->setEnabled(dockContextVisible);
+        if (!dockContextVisible)
+        {
+            m_replayControlsDock->hide();
+        }
+        else if (m_replayControlsPreferredVisible)
+        {
+            m_replayControlsDock->show();
+        }
+        else
+        {
+            m_replayControlsDock->hide();
+        }
+        m_syncingReplayControlsDockVisibility = false;
+        if (m_replayControlsViewAction != nullptr)
+        {
+            const bool prior = m_replayControlsViewAction->blockSignals(true);
+            m_replayControlsViewAction->setChecked(m_replayControlsPreferredVisible);
+            m_replayControlsViewAction->blockSignals(prior);
+        }
+    }
+
+    if (m_replayTimelineDock != nullptr)
+    {
+        m_syncingReplayTimelineDockVisibility = true;
+        m_replayTimelineDock->setEnabled(dockContextVisible);
+        if (!dockContextVisible)
+        {
+            m_replayTimelineDock->hide();
+        }
+        else if (m_replayTimelinePreferredVisible)
+        {
+            m_replayTimelineDock->show();
+        }
+        else
+        {
+            m_replayTimelineDock->hide();
+        }
+        m_syncingReplayTimelineDockVisibility = false;
+        if (m_replayTimelineViewAction != nullptr)
+        {
+            const bool prior = m_replayTimelineViewAction->blockSignals(true);
+            m_replayTimelineViewAction->setChecked(m_replayTimelinePreferredVisible);
+            m_replayTimelineViewAction->blockSignals(prior);
+        }
+    }
+
+    UpdateReplayDockHeightLock();
+
     if (m_replayMarkerDock != nullptr)
     {
-        const bool showDockByContext = m_telemetryFeatureEnabled && replayMode;
+        const bool showDockByContext = dockContextVisible;
         const bool preferVisible = m_replayMarkersPreferredVisible;
         m_syncingReplayMarkerDockVisibility = true;
         m_replayMarkerDock->setEnabled(showDockByContext);
@@ -1940,7 +2380,6 @@ void MainWindow::UpdatePlaybackUiState()
 
     if (m_playbackTimeline != nullptr)
     {
-        m_playbackTimeline->setVisible(m_telemetryFeatureEnabled);
         m_playbackTimeline->setEnabled(hasPlayback);
         m_playbackTimeline->setWindowOpacity(hasPlayback ? 1.0 : 0.45);
         if (hasPlayback)
@@ -2000,6 +2439,19 @@ void MainWindow::UpdatePlaybackUiState()
             }
             m_playbackTimeline->SetMarkers(timelineMarkers);
             RefreshReplayMarkerList(cursorUs);
+
+            const std::int64_t activeWindowSpanUs =
+                std::max<std::int64_t>(1, m_playbackTimeline->GetWindowEndUs() - m_playbackTimeline->GetWindowStartUs());
+            if (m_playbackCursorStatusLabel != nullptr)
+            {
+                m_playbackCursorStatusLabel->setText(QString("t=%1").arg(static_cast<double>(cursorUs) / 1000000.0, 0, 'f', 3));
+            }
+            if (m_playbackWindowStatusLabel != nullptr)
+            {
+                m_playbackWindowStatusLabel->setText(
+                    QString("window=%1").arg(static_cast<double>(activeWindowSpanUs) / 1000000.0, 0, 'f', 3)
+                );
+            }
         }
         else
         {
@@ -2008,7 +2460,25 @@ void MainWindow::UpdatePlaybackUiState()
             m_playbackTimeline->SetWindowUs(0, 0);
             m_playbackTimeline->SetMarkers({});
             RefreshReplayMarkerList(0);
+
+            if (m_playbackCursorStatusLabel != nullptr)
+            {
+                m_playbackCursorStatusLabel->setText("t=0.000s");
+            }
+            if (m_playbackWindowStatusLabel != nullptr)
+            {
+                m_playbackWindowStatusLabel->setText("window=0.000s");
+            }
         }
+    }
+
+    if (m_playbackCursorStatusLabel != nullptr)
+    {
+        m_playbackCursorStatusLabel->setVisible(m_telemetryFeatureEnabled);
+    }
+    if (m_playbackWindowStatusLabel != nullptr)
+    {
+        m_playbackWindowStatusLabel->setVisible(m_telemetryFeatureEnabled);
     }
 }
 

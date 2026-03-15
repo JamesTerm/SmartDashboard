@@ -129,11 +129,22 @@
     - bookmark persistence across sessions (`replay/userBookmarks` in `QSettings`)
     - replay marker dock visibility preference persistence now working reliably (`replay/markersVisible`) after deterministic sync-guard updates
     - timeline marker rendering now uses the same merged marker set as the Replay Markers list, so list/timeline stay in sync
+  - Dockable replay workspace iteration 1 is now implemented on `feature/replay-dockable-workspace`:
+    - replay controls and replay timeline are now dockable/floatable panels with View menu toggles
+    - replay controls/timeline now have right-click context menus matching Replay Markers (`Float`, `Dock Left`, `Dock Right`, `Dock Bottom`)
+    - selecting `Dock Bottom` on either controls or timeline restores default bottom side-by-side split for both panels
+    - visibility preferences for controls/timeline are persisted via `QSettings` (`replay/controlsVisible`, `replay/timelineVisible`)
+  - Dockable workspace iteration 2 polish is partially implemented:
+    - added `Reset Replay Layout` action to replay controls/timeline context menus
+    - replay controls row is top-anchored in floating mode to avoid centered empty vertical space
+    - controls/timeline visibility persistence now uses the same deterministic guard pattern used for replay markers
+    - timeline readouts (`t=`, `window=`) are now moved to status bar labels to reduce timeline panel vertical pressure
+    - docked replay panel height lock now uses tuned ratio `44/86` (controls/timeline), including reset-layout path
   - Playback timeline regression coverage now includes:
     - cursor/window clamp behavior
     - tick-step adaptation across zoom spans
     - readable time/span label formatting
-  - Finalization status: manual validation pass completed for this feature slice; run final build/test sweep and merge branch to `main`
+  - Finalization status: dockable replay workspace iteration is validated and ready for merge to `main`
 
 ## Known constraints / active considerations
 

@@ -45,6 +45,7 @@ These are high-value but not required for initial parity.
 - Auto anomaly markers (brownout threshold, comm drop heuristics).
 - Selection window statistics (min/max/avg over selected range).
 - Export/share helpers for incident review snapshots.
+- Dockable replay workspace panels (controls/timeline/markers with persistent panel composition).
 
 Status: future iteration set.
 
@@ -124,3 +125,17 @@ When evaluating parity, compare workflows, not exact visuals:
 - number of interactions required to move from full-match view to sub-second detail
 
 If those are competitive, UI appearance can evolve without blocking functionality parity.
+
+## Dockable workspace note (2026-03-14)
+
+Iteration-1 implementation is now in progress/completed on branch `feature/replay-dockable-workspace`:
+
+- replay controls and replay timeline are now panelized as dock widgets
+- panel visibility can be toggled from `View`
+- panel context menus support `Float`, `Dock Left`, `Dock Right`, and `Dock Bottom`
+- choosing `Dock Bottom` restores default side-by-side bottom replay layout
+
+Planned iteration-2 follow-up:
+
+- timeline/header readout layout polish for floating panels
+- cross-panel ergonomics and persistence validation under repeated dock/float workflows
