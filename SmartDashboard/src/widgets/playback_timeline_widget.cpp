@@ -46,7 +46,7 @@ namespace sd::widgets
     PlaybackTimelineWidget::PlaybackTimelineWidget(QWidget* parent)
         : QWidget(parent)
     {
-        setMinimumHeight(54);
+        setMinimumHeight(72);
         setMouseTracking(true);
     }
 
@@ -156,6 +156,8 @@ namespace sd::widgets
         }
 
         painter.fillRect(trackRect, QColor(55, 55, 55));
+        QFontMetrics metrics = painter.fontMetrics();
+        const int readoutBaselineY = trackRect.bottom() + kTickLengthPx + metrics.ascent() + 2;
 
         if (m_durationUs <= 0)
         {
@@ -166,7 +168,6 @@ namespace sd::widgets
         const std::int64_t tickStepUs = ComputeTickStepUs(windowSpanUs);
 
         const std::int64_t tickBaseUs = (m_windowStartUs / tickStepUs) * tickStepUs;
-        QFontMetrics metrics = painter.fontMetrics();
         int lastLabelRight = std::numeric_limits<int>::min();
 
         painter.setPen(QColor(105, 105, 105));

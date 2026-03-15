@@ -138,12 +138,13 @@
     - added `Reset Replay Layout` action to replay controls/timeline context menus
     - replay controls row is top-anchored in floating mode to avoid centered empty vertical space
     - controls/timeline visibility persistence now uses the same deterministic guard pattern used for replay markers
-    - cosmetic tuning for timeline/readout vertical compactness remains open for follow-up (current state intentionally left near-stable)
+    - timeline readouts (`t=`, `window=`) are now moved to status bar labels to reduce timeline panel vertical pressure
+    - docked replay panel height lock now uses tuned ratio `44/86` (controls/timeline), including reset-layout path
   - Playback timeline regression coverage now includes:
     - cursor/window clamp behavior
     - tick-step adaptation across zoom spans
     - readable time/span label formatting
-  - Next planned implementation slice: finalize timeline vs readout vertical spacing polish, then run final merge readiness sweep for `feature/replay-dockable-workspace`
+  - Finalization status: dockable replay workspace iteration is validated and ready for merge to `main`
 
 ## Known constraints / active considerations
 

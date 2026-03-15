@@ -121,6 +121,7 @@ private:
     void LoadUserReplayBookmarks();
     void PersistUserReplayBookmarks() const;
     void RestoreDefaultReplayWorkspaceLayout();
+    void UpdateReplayDockHeightLock();
     void StepPlaybackByUs(std::int64_t deltaUs);
     void StartSessionRecording();
     void StopSessionRecording();
@@ -130,6 +131,8 @@ private:
 
     QWidget* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
+    QLabel* m_playbackCursorStatusLabel = nullptr;
+    QLabel* m_playbackWindowStatusLabel = nullptr;
     QAction* m_editableAction = nullptr;
     QAction* m_snapToGridAction = nullptr;
     QAction* m_moveModeAction = nullptr;

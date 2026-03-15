@@ -39,7 +39,13 @@ Curated milestone history for this repository.
   - aligned persistence/sync behavior with replay-markers deterministic guard model to avoid context-transition clobbering
 - Applied controls panel alignment polish:
   - controls row remains top-anchored when floating/stretched to reduce vertical dead-space perception
-- Left timeline/readout vertical spacing as near-stable for final cosmetic tuning in next pass.
+- Finalized timeline/readout simplification + docked sizing tune:
+  - moved replay readouts (`t=`, `window=`) to status bar labels instead of timeline canvas text
+  - retained floating timeline ergonomics while reducing docked vertical pressure
+  - tuned docked replay height lock ratio to `44/86` (controls/timeline) and wired reset-layout path to same ratio
+- Validation:
+  - built `SmartDashboardApp`
+  - manual operator verification confirmed desired docked replay layout and reset behavior
 
 ## 2026-03-13 - Replay UX persistence polish and menu/docking refinements
 

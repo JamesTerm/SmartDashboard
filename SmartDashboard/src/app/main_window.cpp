@@ -92,11 +92,11 @@ namespace
 
         if (floating)
         {
-            timeline->setMinimumHeight(54);
+            timeline->setMinimumHeight(58);
         }
         else
         {
-            timeline->setMinimumHeight(54);
+            timeline->setMinimumHeight(42);
         }
     }
 
@@ -310,6 +310,14 @@ MainWindow::MainWindow(QWidget* parent)
     m_statusLabel = new QLabel("State: Disconnected", this);
     statusBar()->addPermanentWidget(m_statusLabel);
 
+    m_playbackCursorStatusLabel = new QLabel("t=0.000s", this);
+    m_playbackCursorStatusLabel->setStyleSheet("QLabel { color: #b8b8b8; }");
+    statusBar()->addPermanentWidget(m_playbackCursorStatusLabel);
+
+    m_playbackWindowStatusLabel = new QLabel("window=0.000s", this);
+    m_playbackWindowStatusLabel->setStyleSheet("QLabel { color: #9aa4b2; }");
+    statusBar()->addPermanentWidget(m_playbackWindowStatusLabel);
+
     QMenu* connectionMenu = menuBar()->addMenu("&Connection");
     m_connectTransportAction = connectionMenu->addAction("Connect");
     m_disconnectTransportAction = connectionMenu->addAction("Disconnect");
@@ -456,13 +464,7 @@ MainWindow::MainWindow(QWidget* parent)
     m_replayTimelineDock->setWidget(m_playbackTimeline);
     addDockWidget(Qt::BottomDockWidgetArea, m_replayTimelineDock);
     splitDockWidget(m_replayControlsDock, m_replayTimelineDock, Qt::Horizontal);
-    {
-        QList<QDockWidget*> bottomReplayDocks;
-        bottomReplayDocks << m_replayControlsDock << m_replayTimelineDock;
-        QList<int> bottomSizes;
-        bottomSizes << 44 << 96;
-        resizeDocks(bottomReplayDocks, bottomSizes, Qt::Vertical);
-    }
+    UpdateReplayDockHeightLock();
     connect(m_playbackTimeline, &sd::widgets::PlaybackTimelineWidget::CursorScrubbedUs, this, &MainWindow::OnPlaybackCursorScrubbed);
 
     connect(
@@ -527,6 +529,7 @@ MainWindow::MainWindow(QWidget* parent)
                 }
             }
             m_replayControlsDock->show();
+            UpdateReplayDockHeightLock();
         }
     );
 
@@ -592,6 +595,7 @@ MainWindow::MainWindow(QWidget* parent)
                 }
             }
             m_replayTimelineDock->show();
+            UpdateReplayDockHeightLock();
         }
     );
 
@@ -660,6 +664,16 @@ MainWindow::MainWindow(QWidget* parent)
         [this](bool topLevel)
         {
             SetTimelineDockMode(m_playbackTimeline, topLevel);
+            UpdateReplayDockHeightLock();
+        }
+    );
+    connect(
+        m_replayControlsDock,
+        &QDockWidget::topLevelChanged,
+        this,
+        [this](bool)
+        {
+            UpdateReplayDockHeightLock();
         }
     );
     connect(
@@ -1390,6 +1404,26 @@ void MainWindow::RestoreDefaultReplayWorkspaceLayout()
     settings.setValue("replay/timelineVisible", true);
 
     SetTimelineDockMode(m_playbackTimeline, false);
+    UpdateReplayDockHeightLock();
+}
+
+void MainWindow::UpdateReplayDockHeightLock()
+{
+    if (m_replayControlsDock == nullptr || m_replayTimelineDock == nullptr)
+    {
+        return;
+    }
+
+    const bool controlsDocked = !m_replayControlsDock->isFloating();
+    const bool timelineDocked = !m_replayTimelineDock->isFloating();
+    if (controlsDocked && timelineDocked)
+    {
+        QList<QDockWidget*> bottomReplayDocks;
+        bottomReplayDocks << m_replayControlsDock << m_replayTimelineDock;
+        QList<int> bottomSizes;
+        bottomSizes << 44 << 86;
+        resizeDocks(bottomReplayDocks, bottomSizes, Qt::Vertical);
+    }
 }
 
 void MainWindow::OnControlBoolEdited(const QString& key, bool value)
@@ -2315,6 +2349,8 @@ void MainWindow::UpdatePlaybackUiState()
         }
     }
 
+    UpdateReplayDockHeightLock();
+
     if (m_replayMarkerDock != nullptr)
     {
         const bool showDockByContext = dockContextVisible;
@@ -2403,6 +2439,19 @@ void MainWindow::UpdatePlaybackUiState()
             }
             m_playbackTimeline->SetMarkers(timelineMarkers);
             RefreshReplayMarkerList(cursorUs);
+
+            const std::int64_t activeWindowSpanUs =
+                std::max<std::int64_t>(1, m_playbackTimeline->GetWindowEndUs() - m_playbackTimeline->GetWindowStartUs());
+            if (m_playbackCursorStatusLabel != nullptr)
+            {
+                m_playbackCursorStatusLabel->setText(QString("t=%1").arg(static_cast<double>(cursorUs) / 1000000.0, 0, 'f', 3));
+            }
+            if (m_playbackWindowStatusLabel != nullptr)
+            {
+                m_playbackWindowStatusLabel->setText(
+                    QString("window=%1").arg(static_cast<double>(activeWindowSpanUs) / 1000000.0, 0, 'f', 3)
+                );
+            }
         }
         else
         {
@@ -2411,7 +2460,25 @@ void MainWindow::UpdatePlaybackUiState()
             m_playbackTimeline->SetWindowUs(0, 0);
             m_playbackTimeline->SetMarkers({});
             RefreshReplayMarkerList(0);
+
+            if (m_playbackCursorStatusLabel != nullptr)
+            {
+                m_playbackCursorStatusLabel->setText("t=0.000s");
+            }
+            if (m_playbackWindowStatusLabel != nullptr)
+            {
+                m_playbackWindowStatusLabel->setText("window=0.000s");
+            }
         }
+    }
+
+    if (m_playbackCursorStatusLabel != nullptr)
+    {
+        m_playbackCursorStatusLabel->setVisible(m_telemetryFeatureEnabled);
+    }
+    if (m_playbackWindowStatusLabel != nullptr)
+    {
+        m_playbackWindowStatusLabel->setVisible(m_telemetryFeatureEnabled);
     }
 }
 
