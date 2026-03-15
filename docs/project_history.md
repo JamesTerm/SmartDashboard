@@ -30,6 +30,17 @@ Curated milestone history for this repository.
   - built `SmartDashboardApp`
   - manual UX verification confirms dock/float cycling and bottom-layout restore behavior
 
+### Follow-up refinement (same branch/session)
+
+- Added replay workspace recovery affordance:
+  - `Reset Replay Layout` action in replay controls/timeline context menus
+  - restores controls + timeline to default bottom side-by-side arrangement and re-enables both panels
+- Applied persistence hardening parity for controls/timeline panel visibility:
+  - aligned persistence/sync behavior with replay-markers deterministic guard model to avoid context-transition clobbering
+- Applied controls panel alignment polish:
+  - controls row remains top-anchored when floating/stretched to reduce vertical dead-space perception
+- Left timeline/readout vertical spacing as near-stable for final cosmetic tuning in next pass.
+
 ## 2026-03-13 - Replay UX persistence polish and menu/docking refinements
 
 - Applied operator-driven replay UX polish based on manual walkthrough feedback:

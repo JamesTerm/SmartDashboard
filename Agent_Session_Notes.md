@@ -134,11 +134,16 @@
     - replay controls/timeline now have right-click context menus matching Replay Markers (`Float`, `Dock Left`, `Dock Right`, `Dock Bottom`)
     - selecting `Dock Bottom` on either controls or timeline restores default bottom side-by-side split for both panels
     - visibility preferences for controls/timeline are persisted via `QSettings` (`replay/controlsVisible`, `replay/timelineVisible`)
+  - Dockable workspace iteration 2 polish is partially implemented:
+    - added `Reset Replay Layout` action to replay controls/timeline context menus
+    - replay controls row is top-anchored in floating mode to avoid centered empty vertical space
+    - controls/timeline visibility persistence now uses the same deterministic guard pattern used for replay markers
+    - cosmetic tuning for timeline/readout vertical compactness remains open for follow-up (current state intentionally left near-stable)
   - Playback timeline regression coverage now includes:
     - cursor/window clamp behavior
     - tick-step adaptation across zoom spans
     - readable time/span label formatting
-  - Next planned implementation slice: dockable workspace iteration 2 (timeline header/readout polish and broader replay panel ergonomics)
+  - Next planned implementation slice: finalize timeline vs readout vertical spacing polish, then run final merge readiness sweep for `feature/replay-dockable-workspace`
 
 ## Known constraints / active considerations
 

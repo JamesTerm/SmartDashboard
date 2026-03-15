@@ -120,6 +120,7 @@ private:
     void RefreshReplaySummaryLabel();
     void LoadUserReplayBookmarks();
     void PersistUserReplayBookmarks() const;
+    void RestoreDefaultReplayWorkspaceLayout();
     void StepPlaybackByUs(std::int64_t deltaUs);
     void StartSessionRecording();
     void StopSessionRecording();
