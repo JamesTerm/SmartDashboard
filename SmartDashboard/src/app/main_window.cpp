@@ -217,6 +217,16 @@ namespace
             tile->SetBoolCheckboxShowLabel(entry.boolCheckboxShowLabel.toBool());
         }
 
+        if (entry.stringChooserMode.isValid())
+        {
+            tile->SetStringChooserMode(entry.stringChooserMode.toBool());
+        }
+
+        if (entry.stringChooserOptions.isValid())
+        {
+            tile->SetStringChooserOptions(entry.stringChooserOptions.toStringList());
+        }
+
         if (entry.boolValue.isValid())
         {
             tile->SetBoolValue(entry.boolValue.toBool());
@@ -979,6 +989,68 @@ void MainWindow::OnSetMoveResizeMode()
 
 void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, const QVariant& value, quint64 seq)
 {
+    if (valueType == static_cast<int>(sd::direct::ValueType::String))
+    {
+        if (key.endsWith("/.type") && value.toString() == "String Chooser")
+        {
+            const QString chooserBase = key.left(key.length() - QString("/.type").length());
+            sd::widgets::VariableTile* chooserTile = GetOrCreateTile(chooserBase, sd::widgets::VariableType::String);
+            if (chooserTile != nullptr)
+            {
+                chooserTile->SetWidgetType("string.chooser");
+                chooserTile->SetStringChooserMode(true);
+            }
+            return;
+        }
+
+        if (key.endsWith("/options"))
+        {
+            const QString chooserBase = key.left(key.length() - QString("/options").length());
+            sd::widgets::VariableTile* chooserTile = GetOrCreateTile(chooserBase, sd::widgets::VariableType::String);
+            if (chooserTile != nullptr)
+            {
+                chooserTile->SetWidgetType("string.chooser");
+                chooserTile->SetStringChooserMode(true);
+                const QStringList rawOptions = value.toString().split(',', Qt::SkipEmptyParts);
+                QStringList options;
+                options.reserve(rawOptions.size());
+                for (const QString& raw : rawOptions)
+                {
+                    const QString trimmed = raw.trimmed();
+                    if (!trimmed.isEmpty())
+                    {
+                        options.push_back(trimmed);
+                    }
+                }
+                chooserTile->SetStringChooserOptions(options);
+            }
+            return;
+        }
+
+        if (key.endsWith("/active") || key.endsWith("/selected") || key.endsWith("/default"))
+        {
+            QString suffix = "/selected";
+            if (key.endsWith("/active"))
+            {
+                suffix = "/active";
+            }
+            else if (key.endsWith("/default"))
+            {
+                suffix = "/default";
+            }
+            const QString chooserBase = key.left(key.length() - suffix.length());
+            sd::widgets::VariableTile* chooserTile = GetOrCreateTile(chooserBase, sd::widgets::VariableType::String);
+            if (chooserTile != nullptr)
+            {
+                chooserTile->SetWidgetType("string.chooser");
+                chooserTile->SetStringChooserMode(true);
+                chooserTile->SetStringValue(value.toString());
+            }
+
+            return;
+        }
+    }
+
     // Sequence rollback detection: publisher restart resets seq,
     // so reset per-key sequence gating to accept new session updates.
     if (seq != 0 && m_lastTransportSeq != 0 && seq < m_lastTransportSeq)
@@ -1465,6 +1537,13 @@ void MainWindow::OnControlStringEdited(const QString& key, const QString& value)
 {
     if (m_transport)
     {
+        const auto chooserIt = m_tiles.find(key.toStdString());
+        if (chooserIt != m_tiles.end() && chooserIt->second != nullptr && chooserIt->second->GetWidgetType() == "string.chooser")
+        {
+            m_transport->PublishString(key + "/selected", value);
+            return;
+        }
+
         m_transport->PublishString(key, value);
     }
 }

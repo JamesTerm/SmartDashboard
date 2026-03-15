@@ -65,6 +65,7 @@ if(BUILD_TESTING)
     add_executable(SmartDashboard_tests
         tests/line_plot_widget_tests.cpp
         tests/playback_timeline_widget_tests.cpp
+        tests/tile_control_widget_tests.cpp
         tests/variable_tile_tests.cpp
         src/widgets/variable_tile.cpp
         src/widgets/line_plot_widget.cpp

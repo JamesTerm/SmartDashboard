@@ -193,6 +193,8 @@ namespace sd::layout
             const QVariant textFontPointSize = widget->property("textFontPointSize");
             const QVariant doubleNumericEditable = widget->property("doubleNumericEditable");
             const QVariant boolCheckboxShowLabel = widget->property("boolCheckboxShowLabel");
+            const QVariant stringChooserMode = widget->property("stringChooserMode");
+            const QVariant stringChooserOptions = widget->property("stringChooserOptions");
             if (gaugeLower.isValid())
             {
                 entry["gaugeLowerLimit"] = gaugeLower.toDouble();
@@ -280,6 +282,14 @@ namespace sd::layout
             if (boolCheckboxShowLabel.isValid())
             {
                 entry["boolCheckboxShowLabel"] = boolCheckboxShowLabel.toBool();
+            }
+            if (stringChooserMode.isValid())
+            {
+                entry["stringChooserMode"] = stringChooserMode.toBool();
+            }
+            if (stringChooserOptions.isValid())
+            {
+                entry["stringChooserOptions"] = QJsonArray::fromStringList(stringChooserOptions.toStringList());
             }
 
             QJsonObject geo;
@@ -434,6 +444,21 @@ namespace sd::layout
             if (entry.contains("boolCheckboxShowLabel"))
             {
                 layoutEntry.boolCheckboxShowLabel = entry.value("boolCheckboxShowLabel").toBool();
+            }
+            if (entry.contains("stringChooserMode"))
+            {
+                layoutEntry.stringChooserMode = entry.value("stringChooserMode").toBool();
+            }
+            if (entry.contains("stringChooserOptions"))
+            {
+                const QJsonArray options = entry.value("stringChooserOptions").toArray();
+                QStringList optionList;
+                optionList.reserve(options.size());
+                for (const QJsonValue& optionValue : options)
+                {
+                    optionList.push_back(optionValue.toString());
+                }
+                layoutEntry.stringChooserOptions = optionList;
             }
             if (entry.contains("boolValue"))
             {

@@ -1,6 +1,7 @@
 #include "widgets/tile_control_widget.h"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QFont>
 #include <QHBoxLayout>
 #include <QLineEdit>
@@ -45,13 +46,27 @@ namespace sd::widgets
         else if (m_type == VariableType::String)
         {
             m_lineEdit = new QLineEdit(this);
+            m_comboBox = new QComboBox(this);
+            m_comboBox->setVisible(false);
             layout->addWidget(m_lineEdit);
+            layout->addWidget(m_comboBox);
+
             connect(m_lineEdit, &QLineEdit::editingFinished, this, [this]()
             {
-                if (!m_settingProgrammatically)
+                if (!m_settingProgrammatically && !m_stringChooserMode)
                 {
                     emit StringEdited(m_lineEdit->text());
                 }
+            });
+
+            connect(m_comboBox, &QComboBox::currentTextChanged, this, [this](const QString& text)
+            {
+                if (m_settingProgrammatically || !m_stringChooserMode)
+                {
+                    return;
+                }
+
+                emit StringEdited(text);
             });
         }
     }
@@ -137,14 +152,69 @@ namespace sd::widgets
 
     void TileControlWidget::SetStringValue(const QString& value)
     {
-        if (!m_lineEdit)
+        if (!m_lineEdit || !m_comboBox)
         {
             return;
         }
 
         m_settingProgrammatically = true;
         m_lineEdit->setText(value);
+
+        const int existingIndex = m_comboBox->findText(value);
+        if (existingIndex >= 0)
+        {
+            m_comboBox->setCurrentIndex(existingIndex);
+        }
+        else if (!value.isEmpty())
+        {
+            m_comboBox->setCurrentText(value);
+        }
+
         m_settingProgrammatically = false;
+    }
+
+    void TileControlWidget::SetStringOptions(const QStringList& options)
+    {
+        if (!m_comboBox)
+        {
+            return;
+        }
+
+        m_settingProgrammatically = true;
+        const QString previous = m_comboBox->currentText();
+        m_comboBox->clear();
+        m_comboBox->addItems(options);
+
+        if (!previous.isEmpty())
+        {
+            const int idx = m_comboBox->findText(previous);
+            if (idx >= 0)
+            {
+                m_comboBox->setCurrentIndex(idx);
+            }
+            else
+            {
+                m_comboBox->setCurrentText(previous);
+            }
+        }
+        m_settingProgrammatically = false;
+    }
+
+    void TileControlWidget::SetStringChooserMode(bool chooserMode)
+    {
+        m_stringChooserMode = chooserMode;
+
+        if (m_lineEdit != nullptr)
+        {
+            m_lineEdit->setVisible(!m_stringChooserMode);
+            m_lineEdit->setEnabled(!m_stringChooserMode);
+        }
+
+        if (m_comboBox != nullptr)
+        {
+            m_comboBox->setVisible(m_stringChooserMode);
+            m_comboBox->setEnabled(m_stringChooserMode);
+        }
     }
 
     void TileControlWidget::SetTextFontPointSize(int pointSize)
@@ -158,6 +228,11 @@ namespace sd::widgets
         if (m_lineEdit != nullptr)
         {
             m_lineEdit->setFont(font);
+        }
+
+        if (m_comboBox != nullptr)
+        {
+            m_comboBox->setFont(font);
         }
 
         if (m_checkBox != nullptr)
