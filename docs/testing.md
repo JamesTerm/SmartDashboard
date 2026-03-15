@@ -97,6 +97,10 @@ Use these checks when validating end-to-end UX behavior.
 
 Use this check when validating NetworkTables transport against the cloned legacy simulator stack.
 
+Detailed simulator-facing transport requirements and chooser contract:
+
+- `docs/robot_simulation_transport_guide.md`
+
 Prerequisites:
 
 - no external NT source dependency is required for dashboard build

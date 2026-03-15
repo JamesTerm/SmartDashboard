@@ -648,6 +648,41 @@ namespace sd::transport
                     return true;
                 }
 
+                // NT string array (0x12): 1-byte element count followed by
+                // repeated [u16 length + UTF-8 bytes] elements.
+                // We expose this as QStringList QVariant so chooser option
+                // metadata can be consumed without lossy string flattening.
+                if (typeId == 0x12)
+                {
+                    std::uint8_t elementCount = 0;
+                    if (!ReadExact(socket, &elementCount, 1))
+                    {
+                        return false;
+                    }
+
+                    QStringList values;
+                    values.reserve(static_cast<int>(elementCount));
+                    for (std::uint8_t i = 0; i < elementCount; ++i)
+                    {
+                        std::uint16_t len = 0;
+                        if (!ReadU16FromSocket(socket, len))
+                        {
+                            return false;
+                        }
+
+                        std::vector<std::uint8_t> bytes(len);
+                        if (len > 0 && !ReadExact(socket, bytes.data(), bytes.size()))
+                        {
+                            return false;
+                        }
+
+                        values.push_back(QString::fromStdString(std::string(bytes.begin(), bytes.end())));
+                    }
+
+                    outValue = values;
+                    return true;
+                }
+
                 return false;
             }
 

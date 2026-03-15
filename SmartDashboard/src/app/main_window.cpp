@@ -1011,7 +1011,17 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
             {
                 chooserTile->SetWidgetType("string.chooser");
                 chooserTile->SetStringChooserMode(true);
-                const QStringList rawOptions = value.toString().split(',', Qt::SkipEmptyParts);
+
+                QStringList rawOptions;
+                if (value.canConvert<QStringList>())
+                {
+                    rawOptions = value.toStringList();
+                }
+                else
+                {
+                    rawOptions = value.toString().split(',', Qt::SkipEmptyParts);
+                }
+
                 QStringList options;
                 options.reserve(rawOptions.size());
                 for (const QString& raw : rawOptions)
