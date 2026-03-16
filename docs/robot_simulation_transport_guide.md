@@ -137,6 +137,26 @@ When using `Direct` mode, also validate dashboard-owned control persistence acro
 - Restart `Robot_Simulation` without restarting the dashboard.
 - Verify the dashboard reconnect path restores/re-publishes remembered control state so operator intent survives the simulator restart.
 
+### Direct stress harness workflow
+
+The most effective current debugging loop for Direct transport issues is a layered harness, not ad-hoc UI clicking.
+
+Recommended sequence:
+
+1. Use `tools/smartdashboard_process.py` to ensure exactly one SmartDashboard instance is running.
+2. Run `DirectStateProbeCli` to seed and verify setup-state keys such as:
+   - `Test/AutoChooser/*`
+   - `TestMove`
+3. Run `DriverStation_TransportSmoke.exe 10000` to exercise a deterministic 10-second auton session.
+4. If needed, run `DirectWatchCli` in parallel to capture passive transport timing.
+5. Repeat the full loop multiple times without restarting SmartDashboard to expose robot-survive restart races.
+
+Important interpretation note:
+
+- `TestMove` and chooser selection are often setup-state values, so they may remain visually static during smoke even when behavior is correct.
+- For paint verification during smoke, prefer live-changing keys such as `Timer` and `Y_ft`.
+- If a passive extra watcher changes the outcome, treat that as a tooling/multi-observer transport stress rather than a typical single-dashboard production flow.
+
 ## Protocol notes for implementers
 
 - This dashboard currently expects NT2-style wire behavior in its NT adapter path.

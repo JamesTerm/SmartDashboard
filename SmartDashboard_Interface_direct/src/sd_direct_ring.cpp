@@ -5,10 +5,16 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <cstring>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace sd::direct
 {
@@ -16,11 +22,42 @@ namespace sd::direct
     {
         constexpr std::size_t kHeaderSize = sizeof(wire::RingHeader);
 
+		void DebugLog(const std::string& text)
+		{
+#ifdef _WIN32
+			OutputDebugStringA(text.c_str());
+#else
+			(void)text;
+#endif
+		}
+
+		bool IsPrintableKey(const std::string& key)
+		{
+			for (unsigned char ch : key)
+			{
+				if (!(std::isalnum(ch) || ch == '/' || ch == '_' || ch == '.' || ch == '-' || ch == ' '))
+					return false;
+			}
+			return true;
+		}
+
+		std::string DescribeType(ValueType type)
+		{
+			switch (type)
+			{
+			case ValueType::Bool: return "bool";
+			case ValueType::Double: return "double";
+			case ValueType::String: return "string";
+			case ValueType::StringArray: return "string_array";
+			default: return "unknown";
+			}
+		}
+    
         // Circular buffer (ring buffer) occupancy calculation.
         std::uint32_t RingUsed(const RingAttachResult& ring)
         {
             const std::uint32_t writeIndex = ring.header->writeIndex.load(std::memory_order_acquire);
-            const std::uint32_t readIndex = ring.header->readIndex.load(std::memory_order_acquire);
+            const std::uint32_t readIndex = ring.header->consumerReadIndex.load(std::memory_order_acquire);
 
             if (writeIndex >= readIndex)
             {
@@ -45,7 +82,7 @@ namespace sd::direct
                 return;
             }
 
-            const std::uint32_t firstPart = std::min(count, ring.capacity - index);
+            const std::uint32_t firstPart = (std::min)(count, ring.capacity - index);
             std::memcpy(ring.payload + index, bytes, firstPart);
 
             if (count > firstPart)
@@ -62,7 +99,7 @@ namespace sd::direct
                 return;
             }
 
-            const std::uint32_t firstPart = std::min(count, ring.capacity - index);
+            const std::uint32_t firstPart = (std::min)(count, ring.capacity - index);
             std::memcpy(outBytes, ring.payload + index, firstPart);
 
             if (count > firstPart)
@@ -169,6 +206,8 @@ namespace sd::direct
             const std::uint64_t nowUs = GetSteadyNowUs();
             header->lastProducerHeartbeatUs.store(nowUs, std::memory_order_release);
             header->lastConsumerHeartbeatUs.store(nowUs, std::memory_order_release);
+            header->consumerInstanceId.store(0, std::memory_order_release);
+            header->consumerReadIndex.store(0, std::memory_order_release);
         }
 
         outRing.header = header;
@@ -304,14 +343,14 @@ namespace sd::direct
         return true;
     }
 
-    bool ReadNextUpsert(RingAttachResult& ring, VariableUpdate& outUpdate)
+    bool ReadNextUpsert(const RingAttachResult& ring, std::uint32_t& readCursor, VariableUpdate& outUpdate)
     {
         if (ring.header == nullptr || ring.payload == nullptr || ring.capacity == 0)
         {
             return false;
         }
 
-        const std::uint32_t readIndex = ring.header->readIndex.load(std::memory_order_acquire);
+        const std::uint32_t readIndex = readCursor;
         const std::uint32_t writeIndex = ring.header->writeIndex.load(std::memory_order_acquire);
         if (readIndex == writeIndex)
         {
@@ -327,15 +366,23 @@ namespace sd::direct
         // This is a resynchronization strategy to keep consumer alive.
         if (msg.messageBytes < sizeof(wire::MessageHeader))
         {
-            ring.header->readIndex.store(writeIndex, std::memory_order_release);
+			std::ostringstream out;
+			out << "[DirectRing] malformed header: messageBytes=" << msg.messageBytes
+				<< " readIndex=" << readIndex << " writeIndex=" << writeIndex << "\n";
+			DebugLog(out.str());
+            readCursor = writeIndex;
             return false;
         }
 
         // Skip unsupported frame types while keeping read cursor consistent.
         if (msg.messageType != static_cast<std::uint8_t>(wire::MsgType::Upsert))
         {
+			std::ostringstream out;
+			out << "[DirectRing] skipping unsupported messageType=" << static_cast<int>(msg.messageType)
+				<< " bytes=" << msg.messageBytes << "\n";
+            DebugLog(out.str());
             const std::uint32_t nextRead = (readIndex + msg.messageBytes) % ring.capacity;
-            ring.header->readIndex.store(nextRead, std::memory_order_release);
+            readCursor = nextRead;
             return false;
         }
 
@@ -343,7 +390,12 @@ namespace sd::direct
         const std::uint32_t payloadBytes = static_cast<std::uint32_t>(msg.keyLen + msg.valueLen);
         if (static_cast<std::uint32_t>(msg.messageBytes) != sizeof(wire::MessageHeader) + payloadBytes)
         {
-            ring.header->readIndex.store(writeIndex, std::memory_order_release);
+			std::ostringstream out;
+			out << "[DirectRing] payload mismatch: messageBytes=" << msg.messageBytes
+				<< " keyLen=" << msg.keyLen << " valueLen=" << msg.valueLen
+				<< " readIndex=" << readIndex << " writeIndex=" << writeIndex << "\n";
+			DebugLog(out.str());
+            readCursor = writeIndex;
             return false;
         }
 
@@ -431,8 +483,32 @@ namespace sd::direct
         outUpdate.seq = msg.seq;
         outUpdate.sourceTimestampUs = msg.sourceTimestampUs;
 
-        ring.header->readIndex.store(cursor, std::memory_order_release);
+		if (!IsPrintableKey(outUpdate.key))
+		{
+			std::ostringstream out;
+			out << "[DirectRing] suspicious key decoded: size=" << outUpdate.key.size()
+				<< " seq=" << outUpdate.seq
+				<< " type=" << DescribeType(outUpdate.type)
+				<< " readIndex=" << readIndex << " writeIndex=" << writeIndex << " keyBytes=";
+			for (unsigned char ch : outUpdate.key)
+				out << static_cast<int>(ch) << ' ';
+			out << "\n";
+			DebugLog(out.str());
+		}
+
+        readCursor = cursor;
         ring.header->lastConsumerHeartbeatUs.store(GetSteadyNowUs(), std::memory_order_release);
         return true;
+    }
+
+    bool ReadNextUpsert(RingAttachResult& ring, VariableUpdate& outUpdate)
+    {
+        std::uint32_t cursor = ring.header->consumerReadIndex.load(std::memory_order_acquire);
+        const bool read = ReadNextUpsert(static_cast<const RingAttachResult&>(ring), cursor, outUpdate);
+        if (read)
+        {
+            ring.header->consumerReadIndex.store(cursor, std::memory_order_release);
+        }
+        return read;
     }
 }

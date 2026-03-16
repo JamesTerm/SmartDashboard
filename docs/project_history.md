@@ -7,6 +7,21 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-16 - Direct stress harness, session control, and restart hardening
+
+- Added a more systematic Direct-mode debugging workflow for Robot_Simulation pairing:
+  - `tools/smartdashboard_process.py` for deterministic launch/check/close control of SmartDashboard
+  - `DirectStateProbeCli` to seed and verify chooser + `TestMove`
+  - `DirectWatchCli` to passively capture Direct transport updates during smoke runs
+- Hardened Direct transport session handling:
+  - subscriber path now uses independent read-cursor semantics instead of a single shared consumed cursor
+  - UI delivery now batches queued transport updates onto the Qt thread instead of posting one queued lambda per update
+  - fixed harness tile placement for `Test/AutoChooser`, `TestMove`, `Timer`, and `Y_ft` to support repeatable visual verification
+- Worked jointly with Robot_Simulation transport updates to improve repeated robot-restart behavior:
+  - repeated single-dashboard runs are healthier
+  - extra concurrent observers still expose race/session weaknesses, so multi-observer robustness remains a later transport-design task
+  - `Timer` and `Y_ft` are now the recommended live paint indicators during smoke, while chooser/TestMove remain primarily setup-state indicators.
+
 ## 2026-03-15 - Direct transport control replay for simulator reconnect stability
 
 - Added direct transport retained-control replay hook to dashboard transport interface:

@@ -29,10 +29,19 @@
 #include <QPushButton>
 #include <QComboBox>
 
+#include <fstream>
+
 namespace sd::widgets
 {
     namespace
     {
+        void DebugTileLog(const QString& line)
+        {
+            static std::ofstream log("direct_tile_debug_log.txt", std::ios::out | std::ios::trunc);
+            log << line.toStdString() << '\n';
+            log.flush();
+        }
+
         QString GetDefaultWidgetType(VariableType type)
         {
             switch (type)
@@ -194,6 +203,7 @@ namespace sd::widgets
         SetBoolCheckboxShowLabel(m_boolCheckboxShowLabel);
         UpdateWidgetPresentation();
         UpdateValueDisplay();
+        DebugTileLog(QString("tile.create key=%1 widget=%2 type=%3").arg(m_key).arg(m_widgetType).arg(static_cast<int>(m_type)));
     }
 
     void VariableTile::SetEditable(bool editable)
@@ -459,6 +469,7 @@ namespace sd::widgets
     void VariableTile::SetStringChooserMode(bool chooserMode)
     {
         m_stringChooserMode = chooserMode;
+        DebugTileLog(QString("tile.set_chooser_mode key=%1 chooser=%2 widget=%3").arg(m_key).arg(m_stringChooserMode ? 1 : 0).arg(m_widgetType));
         setProperty("stringChooserMode", m_stringChooserMode);
         if (m_controlWidget != nullptr)
         {
@@ -471,6 +482,7 @@ namespace sd::widgets
     void VariableTile::SetStringChooserOptions(const QStringList& options)
     {
         m_stringChooserOptions = options;
+        DebugTileLog(QString("tile.set_chooser_options key=%1 count=%2 widget=%3").arg(m_key).arg(options.size()).arg(m_widgetType));
         setProperty("stringChooserOptions", m_stringChooserOptions);
         if (m_controlWidget != nullptr)
         {
@@ -510,18 +522,21 @@ namespace sd::widgets
     void VariableTile::SetBoolValue(bool value)
     {
         m_boolValue = value;
+        DebugTileLog(QString("tile.set_bool key=%1 value=%2 widget=%3").arg(m_key).arg(m_boolValue ? 1 : 0).arg(m_widgetType));
         UpdateValueDisplay();
     }
 
     void VariableTile::SetDoubleValue(double value)
     {
         m_doubleValue = value;
+        DebugTileLog(QString("tile.set_double key=%1 value=%2 widget=%3").arg(m_key).arg(m_doubleValue).arg(m_widgetType));
         UpdateValueDisplay();
     }
 
     void VariableTile::SetStringValue(const QString& value)
     {
         m_stringValue = value;
+        DebugTileLog(QString("tile.set_string key=%1 value=%2 widget=%3 chooser=%4").arg(m_key).arg(m_stringValue).arg(m_widgetType).arg(m_stringChooserMode ? 1 : 0));
         UpdateValueDisplay();
     }
 

@@ -45,10 +45,16 @@
 #include <QtCore/QPoint>
 
 #include <chrono>
+#include <fstream>
 #include <limits>
 
 namespace
 {
+    bool IsHarnessFocusKey(const QString& key)
+    {
+        return key == "Test/AutoChooser" || key == "TestMove" || key == "Timer" || key == "Y_ft";
+    }
+
     QString FormatReplayTimeUs(std::int64_t timeUs)
     {
         const std::int64_t clampedUs = std::max<std::int64_t>(0, timeUs);
@@ -260,6 +266,9 @@ namespace
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
+    m_uiDebugLog.open("direct_ui_debug_log.txt", std::ios::out | std::ios::trunc);
+    DebugLogUiEvent("MainWindow start");
+
     RefreshWindowTitle();
     resize(1200, 800);
 
@@ -940,7 +949,34 @@ MainWindow::MainWindow(QWidget* parent)
 
 MainWindow::~MainWindow()
 {
+    DebugLogUiEvent("MainWindow stop");
     StopTransport();
+}
+
+void MainWindow::DebugLogUiEvent(const QString& line) const
+{
+    if (!m_uiDebugLog.is_open())
+    {
+        return;
+    }
+
+    m_uiDebugLog << line.toStdString() << '\n';
+    m_uiDebugLog.flush();
+}
+
+void MainWindow::DrainPendingUiUpdates()
+{
+    QVector<sd::transport::VariableUpdate> updates;
+    {
+        std::lock_guard<std::mutex> lock(m_pendingUiUpdatesMutex);
+        updates.swap(m_pendingUiUpdates);
+        m_uiDrainScheduled = false;
+    }
+
+    for (const auto& update : updates)
+    {
+        OnVariableUpdateReceived(update.key, update.valueType, update.value, static_cast<quint64>(update.seq));
+    }
 }
 
 void MainWindow::OnToggleEditable()
@@ -1004,6 +1040,8 @@ void MainWindow::OnSetMoveResizeMode()
 
 void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, const QVariant& value, quint64 seq)
 {
+    DebugLogUiEvent(QString("update key=%1 type=%2 seq=%3").arg(key).arg(valueType).arg(seq));
+
     if (valueType == static_cast<int>(sd::direct::ValueType::String)
         || valueType == static_cast<int>(sd::direct::ValueType::StringArray))
     {
@@ -1125,6 +1163,8 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
 
 void MainWindow::OnConnectionStateChanged(int state)
 {
+    DebugLogUiEvent(QString("connection state=%1").arg(state));
+
     m_connectionState = state;
 
     const int connected = static_cast<int>(sd::transport::ConnectionState::Connected);
@@ -1405,15 +1445,34 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
     tile->SetEditInteractionMode(m_editInteractionMode);
 
     auto savedIt = m_savedLayoutByKey.find(keyStd);
-    if (savedIt != m_savedLayoutByKey.end())
+    if (savedIt != m_savedLayoutByKey.end() && !IsHarnessFocusKey(key))
     {
         const sd::layout::WidgetLayoutEntry& entry = savedIt->second;
         ApplyLayoutEntryToTile(tile, entry);
     }
     else
     {
-        tile->setGeometry(24 + m_nextTileOffset, 32 + m_nextTileOffset, 220, 84);
-        m_nextTileOffset = (m_nextTileOffset + 24) % 200;
+        if (key == "Test/AutoChooser")
+        {
+            tile->setGeometry(24, 32, 320, 84);
+        }
+        else if (key == "TestMove")
+        {
+            tile->setGeometry(24, 132, 320, 84);
+        }
+        else if (key == "Timer")
+        {
+            tile->setGeometry(24, 232, 320, 84);
+        }
+        else if (key == "Y_ft")
+        {
+            tile->setGeometry(24, 332, 320, 84);
+        }
+        else
+        {
+            tile->setGeometry(24 + m_nextTileOffset, 32 + m_nextTileOffset, 220, 84);
+            m_nextTileOffset = (m_nextTileOffset + 24) % 200;
+        }
     }
 
     tile->setProperty("variableKey", key);
@@ -2397,10 +2456,21 @@ void MainWindow::StartTransport()
     const bool started = m_transport->Start(
         [this](const sd::transport::VariableUpdate& update)
         {
-            QMetaObject::invokeMethod(this, [this, update]()
+            bool scheduleDrain = false;
             {
-                OnVariableUpdateReceived(update.key, update.valueType, update.value, static_cast<quint64>(update.seq));
-            }, Qt::QueuedConnection);
+                std::lock_guard<std::mutex> lock(m_pendingUiUpdatesMutex);
+                m_pendingUiUpdates.push_back(update);
+                if (!m_uiDrainScheduled)
+                {
+                    m_uiDrainScheduled = true;
+                    scheduleDrain = true;
+                }
+            }
+
+            if (scheduleDrain)
+            {
+                QMetaObject::invokeMethod(this, &MainWindow::DrainPendingUiUpdates, Qt::QueuedConnection);
+            }
         },
         [this](sd::transport::ConnectionState state)
         {

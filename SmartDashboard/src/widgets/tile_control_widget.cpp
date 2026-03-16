@@ -7,8 +7,20 @@
 #include <QLineEdit>
 #include <QSlider>
 
+#include <fstream>
+
 namespace sd::widgets
 {
+    namespace
+    {
+        void DebugControlLog(const QString& line)
+        {
+            static std::ofstream log("direct_control_debug_log.txt", std::ios::out | std::ios::trunc);
+            log << line.toStdString() << '\n';
+            log.flush();
+        }
+    }
+
     TileControlWidget::TileControlWidget(VariableType type, QWidget* parent)
         : QWidget(parent)
         , m_type(type)
@@ -106,6 +118,7 @@ namespace sd::widgets
         m_settingProgrammatically = true;
         m_slider->setValue(static_cast<int>(normalized * 100.0 + 0.5));
         m_settingProgrammatically = false;
+        DebugControlLog(QString("control.set_double value=%1 chooser=%2").arg(value).arg(m_stringChooserMode ? 1 : 0));
     }
 
     void TileControlWidget::SetDoubleRange(double lowerLimit, double upperLimit)
@@ -171,6 +184,7 @@ namespace sd::widgets
         }
 
         m_settingProgrammatically = false;
+        DebugControlLog(QString("control.set_string value=%1 chooser=%2 combo_count=%3").arg(value).arg(m_stringChooserMode ? 1 : 0).arg(m_comboBox->count()));
     }
 
     void TileControlWidget::SetStringOptions(const QStringList& options)
@@ -198,6 +212,7 @@ namespace sd::widgets
             }
         }
         m_settingProgrammatically = false;
+        DebugControlLog(QString("control.set_options count=%1 chooser=%2 current=%3").arg(options.size()).arg(m_stringChooserMode ? 1 : 0).arg(m_comboBox->currentText()));
     }
 
     void TileControlWidget::SetStringChooserMode(bool chooserMode)
@@ -215,6 +230,8 @@ namespace sd::widgets
             m_comboBox->setVisible(m_stringChooserMode);
             m_comboBox->setEnabled(m_stringChooserMode);
         }
+
+        DebugControlLog(QString("control.set_chooser_mode chooser=%1 combo_visible=%2 line_visible=%3").arg(m_stringChooserMode ? 1 : 0).arg(m_comboBox && m_comboBox->isVisible() ? 1 : 0).arg(m_lineEdit && m_lineEdit->isVisible() ? 1 : 0));
     }
 
     void TileControlWidget::SetTextFontPointSize(int pointSize)

@@ -89,7 +89,7 @@ namespace sd::transport
                 pubConfig.mappingName = L"Local\\SmartDashboard.Direct.Command.Buffer";
                 pubConfig.dataEventName = L"Local\\SmartDashboard.Direct.Command.DataAvailable";
                 pubConfig.heartbeatEventName = L"Local\\SmartDashboard.Direct.Command.Heartbeat";
-                pubConfig.autoFlushThread = false;
+                pubConfig.autoFlushThread = true;
                 m_commandPublisher = sd::direct::CreateDirectPublisher(pubConfig);
             }
 

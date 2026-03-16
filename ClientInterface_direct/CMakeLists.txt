@@ -49,9 +49,27 @@ add_executable(SmartDashboardCaptureCli
     tools/smartdashboard_capture_cli.cpp
 )
 
+add_executable(DirectStateProbeCli
+    tools/direct_state_probe_cli.cpp
+)
+
+add_executable(DirectWatchCli
+    tools/direct_watch_cli.cpp
+)
+
 target_link_libraries(SmartDashboardCaptureCli
     PRIVATE
         SmartDashboard_Interface_direct
+)
+
+target_link_libraries(DirectStateProbeCli
+    PRIVATE
+        ClientInterface_direct
+)
+
+target_link_libraries(DirectWatchCli
+    PRIVATE
+        ClientInterface_direct
 )
 
 target_include_directories(SmartDashboardCaptureCli
@@ -59,7 +77,21 @@ target_include_directories(SmartDashboardCaptureCli
         ${CMAKE_SOURCE_DIR}/SmartDashboard_Interface_direct/include
 )
 
+target_include_directories(DirectStateProbeCli
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/SmartDashboard_Interface_direct/include
+)
+
+target_include_directories(DirectWatchCli
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/SmartDashboard_Interface_direct/include
+)
+
 target_compile_features(SmartDashboardCaptureCli PRIVATE cxx_std_20)
+target_compile_features(DirectStateProbeCli PRIVATE cxx_std_20)
+target_compile_features(DirectWatchCli PRIVATE cxx_std_20)
 
 if(BUILD_TESTING)
     include(FetchContent)

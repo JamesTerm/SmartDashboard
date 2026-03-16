@@ -49,8 +49,21 @@
 - Chooser compatibility slice is now implemented for Direct pairing:
   - chooser metadata routing handles direct string-array `/options`
   - chooser reconnect no longer clobbers robot-owned selection on dashboard reopen
-  - current reference-point bug: full two-way retained ownership split is still incomplete; dashboard restart preserves chooser behavior, but some dashboard-owned values repaint stale, and robot restart still does not fully restore both chooser + control state together.
-- Next simulator-facing goal: finish retained ownership parity for Direct, then use that behavior as the baseline for Robot_Simulation/Shuffleboard comparison.
+  - current reference-point bug shifted from basic chooser behavior to restart/session robustness and paint verification under repeated Robot_Simulation smoke cycles.
+- New Direct transport/harness status:
+  - SmartDashboard direct telemetry now uses independent subscriber read cursors rather than one shared consumed cursor
+  - UI callback path was switched from one queued lambda per update to a batched queued drain on the Qt thread
+  - process-control helper exists at `tools/smartdashboard_process.py` so sessions can deterministically launch/check/close the dashboard during transport experiments
+  - focused CLIs now exist for direct probing/capture:
+    - `DirectStateProbeCli` seeds and verifies chooser + `TestMove`
+    - `DirectWatchCli` passively records direct updates during a run
+  - a fixed harness workspace now places `Test/AutoChooser`, `TestMove`, `Timer`, and `Y_ft` in visible positions for manual paint checks
+- Current practical conclusion:
+  - real single-dashboard direct runs are much healthier after the transport fixes
+  - repeated robot restart stress improved after fixing publisher free-space accounting against the active consumer cursor
+  - passive extra observers still expose race/session weaknesses, so transport is not yet truly multi-observer safe
+  - when robot behavior is correct but chooser/TestMove look static, those may simply be setup-state values; `Timer` and `Y_ft` are better indicators for smoke-phase paint health
+- Next simulator-facing goal: finish hardening repeated robot-survive stress for the real single-dashboard path, then document the harness/debugging workflow as a student-friendly systems-debugging example.
 
 ## Known constraints / active considerations
 
@@ -73,6 +86,7 @@
 - Manual paired testing status with Robot_Simulation Direct:
   - chooser operator flow works (`Just Move Forward` executes correctly)
   - dashboard reopen no longer overwrites robot-owned chooser selection
-  - remaining bug: repaint/restore parity is incomplete for some dashboard-owned values (`TestMove`-style controls) and robot-restart-second still does not restore everything together
+  - real single-dashboard restart behavior is improved but still somewhat flaky over repeated robot restarts
+  - extra concurrent observer/watch tooling can still perturb repeated runs, which is acceptable for now if direct mode remains effectively single-real-client
 - Keep an eye on additional dashboard-owned keys that may need explicit scoped alias conventions documented for mixed legacy layouts.
 - Official WPILib SmartDashboard did support `SendableChooser`; upcoming work should treat chooser support as a compatibility requirement, not a Shuffleboard-only feature.

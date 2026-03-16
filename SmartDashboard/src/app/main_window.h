@@ -8,6 +8,7 @@
 #include <QMainWindow>
 #include <QByteArray>
 #include <QVariant>
+#include <QVector>
 
 #include <condition_variable>
 #include <deque>
@@ -17,6 +18,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <fstream>
 #include <unordered_set>
 #include <unordered_map>
 #include <vector>
@@ -132,6 +134,8 @@ private:
     void PublishRememberedControlValues();
     void PublishRememberedNonChooserControls();
     void PublishRememberedChooserSelections();
+    void DebugLogUiEvent(const QString& line) const;
+    void DrainPendingUiUpdates();
 
     QWidget* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
@@ -193,6 +197,10 @@ private:
     };
     std::unordered_map<std::string, RememberedControlValue> m_rememberedControlValues;
     std::unordered_set<std::string> m_robotOwnedChooserKeys;
+    mutable std::ofstream m_uiDebugLog;
+    std::mutex m_pendingUiUpdatesMutex;
+    QVector<sd::transport::VariableUpdate> m_pendingUiUpdates;
+    bool m_uiDrainScheduled = false;
 
     std::mutex m_recordingMutex;
     std::condition_variable m_recordingCv;

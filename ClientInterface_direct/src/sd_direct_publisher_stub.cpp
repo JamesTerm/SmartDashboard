@@ -46,6 +46,10 @@ namespace sd::direct
                 return false;
             }
 
+            m_lastObservedConsumerInstanceId = (m_ring.header != nullptr)
+                ? m_ring.header->consumerInstanceId.load(std::memory_order_acquire)
+                : 0;
+
             bool eventCreated = false;
             if (!m_dataEvent.OpenOrCreateAutoReset(m_config.dataEventName, eventCreated))
             {
@@ -228,6 +232,7 @@ namespace sd::direct
             }
 
             const std::uint64_t lastConsumerHeartbeatUs = m_ring.header->lastConsumerHeartbeatUs.load(std::memory_order_acquire);
+            const std::uint64_t consumerInstanceId = m_ring.header->consumerInstanceId.load(std::memory_order_acquire);
             const std::uint64_t nowUs = GetSteadyNowUs();
             const bool consumerActive =
                 (lastConsumerHeartbeatUs != 0) &&
@@ -237,15 +242,27 @@ namespace sd::direct
             if (!consumerActive)
             {
                 m_consumerWasActive = false;
+                if (consumerInstanceId != 0)
+                {
+                    m_lastObservedConsumerInstanceId = consumerInstanceId;
+                }
                 return;
             }
 
-            if (m_consumerWasActive)
+            const bool consumerChanged =
+                (consumerInstanceId != 0) &&
+                (consumerInstanceId != m_lastObservedConsumerInstanceId);
+
+            if (m_consumerWasActive && !consumerChanged)
             {
                 return;
             }
 
             m_consumerWasActive = true;
+            if (consumerInstanceId != 0)
+            {
+                m_lastObservedConsumerInstanceId = consumerInstanceId;
+            }
 
             std::unordered_map<std::string, PendingValue> retainedCopy;
             {
@@ -281,6 +298,7 @@ namespace sd::direct
         std::mutex m_retainedMutex;
         std::unordered_map<std::string, PendingValue> m_retained;
         bool m_consumerWasActive = false;
+        std::uint64_t m_lastObservedConsumerInstanceId = 0;
     };
 
     std::unique_ptr<IDirectPublisher> CreateDirectPublisher(const PublisherConfig& cfg)

@@ -670,4 +670,53 @@ namespace sd::direct
         EXPECT_EQ(snapshot.active, "DoNothing");
         EXPECT_EQ(snapshot.selected, "Taxi");
     }
+
+    TEST(DirectPublisherTests, LateJoiningSubscriberReceivesRetainedCommandReplay)
+    {
+        const TestChannels channels = MakeTestChannels();
+
+        PublisherConfig pubConfig;
+        pubConfig.mappingName = channels.mappingName;
+        pubConfig.dataEventName = channels.dataEventName;
+        pubConfig.heartbeatEventName = channels.heartbeatEventName;
+        pubConfig.autoFlushThread = true;
+
+        auto publisher = CreateDirectPublisher(pubConfig);
+        ASSERT_TRUE(publisher->Start());
+
+        publisher->PublishDouble("TestMove", 3.5);
+        ASSERT_TRUE(publisher->FlushNow());
+
+        SubscriberConfig subConfig;
+        subConfig.mappingName = channels.mappingName;
+        subConfig.dataEventName = channels.dataEventName;
+        subConfig.heartbeatEventName = channels.heartbeatEventName;
+
+        std::atomic<double> observed {0.0};
+        auto subscriber = CreateDirectSubscriber(subConfig);
+        ASSERT_TRUE(subscriber->Start(
+            [&observed](const VariableUpdate& update)
+            {
+                if (update.key == "TestMove" && update.type == ValueType::Double)
+                {
+                    observed.store(update.value.doubleValue);
+                }
+            },
+            [](ConnectionState)
+            {
+            }
+        ));
+
+        ASSERT_TRUE(WaitUntil(
+            [&observed]()
+            {
+                return observed.load() > 1.0;
+            },
+            2s
+        ));
+        EXPECT_DOUBLE_EQ(observed.load(), 3.5);
+
+        subscriber->Stop();
+        publisher->Stop();
+    }
 }

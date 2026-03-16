@@ -40,6 +40,8 @@ namespace sd::direct::wire
         std::atomic<std::uint64_t> droppedCount;
         std::atomic<std::uint64_t> lastProducerHeartbeatUs;
         std::atomic<std::uint64_t> lastConsumerHeartbeatUs;
+        std::atomic<std::uint64_t> consumerInstanceId;
+        std::atomic<std::uint32_t> consumerReadIndex;
     };
 
     struct alignas(8) MessageHeader

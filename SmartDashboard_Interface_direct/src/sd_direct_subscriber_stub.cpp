@@ -8,8 +8,14 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <sstream>
 #include <thread>
 #include <utility>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace sd::direct
 {
@@ -30,6 +36,7 @@ namespace sd::direct
 
             m_update = std::move(onUpdate);
             m_state = std::move(onState);
+            m_instanceId = NextInstanceId();
             SetState(ConnectionState::Connecting);
 
             // Shared-memory consumer endpoint setup.
@@ -47,6 +54,10 @@ namespace sd::direct
                 SetState(ConnectionState::Disconnected);
                 return false;
             }
+
+            m_readCursor = (m_ring.header != nullptr)
+                ? m_ring.header->writeIndex.load(std::memory_order_acquire)
+                : 0;
 
             bool eventCreated = false;
             if (!m_dataEvent.OpenOrCreateAutoReset(m_config.dataEventName, eventCreated))
@@ -109,6 +120,15 @@ namespace sd::direct
         }
 
     private:
+		void DebugLog(const std::string& text) const
+		{
+#ifdef _WIN32
+			OutputDebugStringA(text.c_str());
+#else
+			(void)text;
+#endif
+		}
+
         void SetState(ConnectionState state)
         {
             const ConnectionState previous = m_connectionState.exchange(state);
@@ -129,12 +149,14 @@ namespace sd::direct
             {
                 // Event-driven wait loop (reacts to publisher data event).
                 const DWORD waitResult = m_dataEvent.Wait(static_cast<DWORD>(m_config.waitTimeout.count()));
-                if (waitResult == WAIT_OBJECT_0)
+                if (waitResult == WAIT_OBJECT_0 || waitResult == WAIT_TIMEOUT)
                 {
                     VariableUpdate update;
 
                     // Drain pattern: consume all currently queued ring messages.
-                    while (ReadNextUpsert(m_ring, update))
+                    // We do this on timeout as well so late-joining subscribers can
+                    // recover already-buffered frames even if they missed the original signal.
+                    while (ReadNextUpsert(static_cast<const RingAttachResult&>(m_ring), m_readCursor, update))
                     {
                         m_lastSeq.store(update.seq, std::memory_order_release);
                         if (m_update)
@@ -165,6 +187,20 @@ namespace sd::direct
                         SetState(ConnectionState::Connected);
                     }
 
+                    const std::uint64_t previousInstanceId =
+                        m_ring.header->consumerInstanceId.exchange(m_instanceId, std::memory_order_acq_rel);
+                    if (previousInstanceId != m_instanceId)
+                    {
+                        const std::uint32_t writeIndex = m_ring.header->writeIndex.load(std::memory_order_acquire);
+					std::ostringstream out;
+					out << "[DirectSubscriber] consumer instance change old=" << previousInstanceId
+						<< " new=" << m_instanceId
+						<< " writeIndex=" << writeIndex
+						<< "\n";
+					DebugLog(out.str());
+                        m_readCursor = writeIndex;
+                    }
+
                     m_ring.header->lastConsumerHeartbeatUs.store(nowUs, std::memory_order_release);
                     m_droppedCount.store(m_ring.header->droppedCount.load(std::memory_order_acquire));
                 }
@@ -177,6 +213,12 @@ namespace sd::direct
             }
         }
 
+        static std::uint64_t NextInstanceId()
+        {
+            static std::atomic<std::uint64_t> nextId {1};
+            return nextId.fetch_add(1, std::memory_order_relaxed);
+        }
+
         SubscriberConfig m_config;
         UpdateCallback m_update;
         StateCallback m_state;
@@ -184,6 +226,8 @@ namespace sd::direct
         std::atomic<ConnectionState> m_connectionState {ConnectionState::Disconnected};
         std::atomic<std::uint64_t> m_lastSeq {0};
         std::atomic<std::uint64_t> m_droppedCount {0};
+        std::uint64_t m_instanceId = 0;
+        std::uint32_t m_readCursor = 0;
         SharedMemoryRegion m_region;
         NamedEvent m_dataEvent;
         NamedEvent m_heartbeatEvent;
