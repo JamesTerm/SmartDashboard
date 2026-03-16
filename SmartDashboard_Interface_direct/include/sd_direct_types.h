@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace sd::direct
 {
@@ -10,7 +11,8 @@ namespace sd::direct
     {
         Bool = 1,
         Double = 2,
-        String = 3
+        String = 3,
+        StringArray = 4
     };
 
     // Generic value container used in callbacks.
@@ -19,6 +21,7 @@ namespace sd::direct
         bool boolValue = false;
         double doubleValue = 0.0;
         std::string stringValue;
+        std::vector<std::string> stringArrayValue;
     };
 
     // One logical update produced by a publisher and consumed by subscribers.

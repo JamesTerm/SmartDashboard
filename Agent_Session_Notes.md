@@ -44,7 +44,13 @@
 - Direct reconnect improvement now in progress/validated with Robot_Simulation pairing:
   - replay retained control values at transport start
   - republish remembered control widget values on `Connected` transitions
-  - goal: dashboard-owned controls survive repeated simulator restarts without restarting dashboard.
+  - direct publisher now also replays retained command values when a robot consumer appears after dashboard startup
+  - goal remains: dashboard-owned controls survive repeated simulator restarts without restarting dashboard.
+- Chooser compatibility slice is now implemented for Direct pairing:
+  - chooser metadata routing handles direct string-array `/options`
+  - chooser reconnect no longer clobbers robot-owned selection on dashboard reopen
+  - current reference-point bug: full two-way retained ownership split is still incomplete; dashboard restart preserves chooser behavior, but some dashboard-owned values repaint stale, and robot restart still does not fully restore both chooser + control state together.
+- Next simulator-facing goal: finish retained ownership parity for Direct, then use that behavior as the baseline for Robot_Simulation/Shuffleboard comparison.
 
 ## Known constraints / active considerations
 
@@ -64,5 +70,9 @@
 
 ## Active follow-up log
 
-- `AutonTest` and `TestMove` startup/reconnect behavior with Robot_Simulation direct mode now passes in manual paired testing after control republish/replay additions.
+- Manual paired testing status with Robot_Simulation Direct:
+  - chooser operator flow works (`Just Move Forward` executes correctly)
+  - dashboard reopen no longer overwrites robot-owned chooser selection
+  - remaining bug: repaint/restore parity is incomplete for some dashboard-owned values (`TestMove`-style controls) and robot-restart-second still does not restore everything together
 - Keep an eye on additional dashboard-owned keys that may need explicit scoped alias conventions documented for mixed legacy layouts.
+- Official WPILib SmartDashboard did support `SendableChooser`; upcoming work should treat chooser support as a compatibility requirement, not a Shuffleboard-only feature.

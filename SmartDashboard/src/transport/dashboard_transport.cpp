@@ -133,6 +133,16 @@ namespace sd::transport
                             case sd::direct::ValueType::String:
                                 converted.value = QString::fromStdString(update.value.stringValue);
                                 break;
+                            case sd::direct::ValueType::StringArray:
+                            {
+                                QStringList list;
+                                for (const std::string& item : update.value.stringArrayValue)
+                                {
+                                    list.push_back(QString::fromStdString(item));
+                                }
+                                converted.value = list;
+                                break;
+                            }
                             default:
                                 converted.value = QVariant();
                                 break;

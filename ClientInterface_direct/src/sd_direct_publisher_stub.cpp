@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -85,6 +86,8 @@ namespace sd::direct
                 m_worker.join();
             }
 
+            m_consumerWasActive = false;
+
             m_heartbeatEvent.Close();
             m_dataEvent.Close();
             m_region.Close();
@@ -109,6 +112,13 @@ namespace sd::direct
             VariableValue pendingValue;
             pendingValue.stringValue = std::string(value);
             StorePending(key, ValueType::String, pendingValue);
+        }
+
+        void PublishStringArray(std::string_view key, const std::vector<std::string>& value) override
+        {
+            VariableValue pendingValue;
+            pendingValue.stringArrayValue = value;
+            StorePending(key, ValueType::StringArray, pendingValue);
         }
 
         bool FlushNow() override
@@ -187,6 +197,7 @@ namespace sd::direct
         {
             while (m_running.load())
             {
+                MaybeReplayRetainedSnapshot();
                 FlushNow();
 
                 // Fixed-interval scheduling (periodic timer loop).
@@ -196,11 +207,64 @@ namespace sd::direct
 
         void StorePending(std::string_view key, ValueType type, const VariableValue& value)
         {
-            std::lock_guard<std::mutex> lock(m_pendingMutex);
             PendingValue pending;
             pending.type = type;
             pending.value = value;
+
+            {
+                std::lock_guard<std::mutex> retainedLock(m_retainedMutex);
+                m_retained[std::string(key)] = pending;
+            }
+
+            std::lock_guard<std::mutex> lock(m_pendingMutex);
             m_pending[std::string(key)] = std::move(pending);
+        }
+
+        void MaybeReplayRetainedSnapshot()
+        {
+            if (m_ring.header == nullptr)
+            {
+                return;
+            }
+
+            const std::uint64_t lastConsumerHeartbeatUs = m_ring.header->lastConsumerHeartbeatUs.load(std::memory_order_acquire);
+            const std::uint64_t nowUs = GetSteadyNowUs();
+            const bool consumerActive =
+                (lastConsumerHeartbeatUs != 0) &&
+                (nowUs >= lastConsumerHeartbeatUs) &&
+                ((nowUs - lastConsumerHeartbeatUs) <= 500000ULL);
+
+            if (!consumerActive)
+            {
+                m_consumerWasActive = false;
+                return;
+            }
+
+            if (m_consumerWasActive)
+            {
+                return;
+            }
+
+            m_consumerWasActive = true;
+
+            std::unordered_map<std::string, PendingValue> retainedCopy;
+            {
+                std::lock_guard<std::mutex> retainedLock(m_retainedMutex);
+                retainedCopy = m_retained;
+            }
+
+            if (retainedCopy.empty())
+            {
+                return;
+            }
+
+            {
+                std::lock_guard<std::mutex> pendingLock(m_pendingMutex);
+                for (const auto& entry : retainedCopy)
+                {
+                    m_pending[entry.first] = entry.second;
+                }
+            }
         }
 
         PublisherConfig m_config;
@@ -214,6 +278,9 @@ namespace sd::direct
         std::thread m_worker;
         std::mutex m_pendingMutex;
         std::unordered_map<std::string, PendingValue> m_pending;
+        std::mutex m_retainedMutex;
+        std::unordered_map<std::string, PendingValue> m_retained;
+        bool m_consumerWasActive = false;
     };
 
     std::unique_ptr<IDirectPublisher> CreateDirectPublisher(const PublisherConfig& cfg)

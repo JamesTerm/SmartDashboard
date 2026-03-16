@@ -52,7 +52,8 @@ Required topics:
 - `<base>/.type` string = `String Chooser`
 - `<base>/options`
   - preferred on NT path: string array
-  - acceptable temporary fallback: comma-separated string
+  - preferred on Direct path after shared protocol update: string array
+  - acceptable temporary fallback only while bridging older builds: comma-separated string
 - `<base>/default` string
 - `<base>/active` string
 - `<base>/selected` string
@@ -105,6 +106,7 @@ Practical rule:
 - chooser publisher contract:
   - `ClientInterface_direct/tests/direct_publisher_tests.cpp`
   - test: `DirectPublisherTests.StreamsStringChooserTopics`
+  - test: `DirectPublisherTests.StreamsStringArrayChooserOptions`
 - chooser widget behavior:
   - `SmartDashboard/tests/tile_control_widget_tests.cpp`
   - `SmartDashboard/tests/variable_tile_tests.cpp`

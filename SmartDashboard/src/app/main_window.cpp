@@ -108,6 +108,7 @@ namespace
                 return sd::widgets::VariableType::Bool;
             case static_cast<int>(sd::direct::ValueType::Double):
                 return sd::widgets::VariableType::Double;
+            case static_cast<int>(sd::direct::ValueType::StringArray):
             case static_cast<int>(sd::direct::ValueType::String):
                 return sd::widgets::VariableType::String;
             default:
@@ -1003,7 +1004,8 @@ void MainWindow::OnSetMoveResizeMode()
 
 void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, const QVariant& value, quint64 seq)
 {
-    if (valueType == static_cast<int>(sd::direct::ValueType::String))
+    if (valueType == static_cast<int>(sd::direct::ValueType::String)
+        || valueType == static_cast<int>(sd::direct::ValueType::StringArray))
     {
         if (key.endsWith("/.type") && value.toString() == "String Chooser")
         {
@@ -1069,6 +1071,16 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
                 chooserTile->SetWidgetType("string.chooser");
                 chooserTile->SetStringChooserMode(true);
                 chooserTile->SetStringValue(value.toString());
+
+                if (suffix == "/selected")
+                {
+                    RememberedControlValue chooserRemembered;
+                    chooserRemembered.valueType = static_cast<int>(sd::direct::ValueType::String);
+                    chooserRemembered.value = value;
+                    chooserRemembered.isChooserSelected = true;
+                    m_rememberedControlValues[chooserBase.toStdString()] = chooserRemembered;
+                    m_robotOwnedChooserKeys.insert(chooserBase.toStdString());
+                }
             }
 
             return;
@@ -1121,7 +1133,7 @@ void MainWindow::OnConnectionStateChanged(int state)
         // Reconnect handling: reset sequence gating when transport re-enters connected state.
         m_variableStore.ResetSequenceTracking();
 
-        PublishRememberedControlValues();
+        PublishRememberedNonChooserControls();
     }
 
     UpdateWindowConnectionText(state);
@@ -1155,13 +1167,68 @@ void MainWindow::PublishRememberedControlValues()
         {
             if (remembered.isChooserSelected)
             {
-                m_transport->PublishString(key + "/selected", remembered.value.toString());
+                continue;
             }
             else
             {
                 m_transport->PublishString(key, remembered.value.toString());
             }
         }
+    }
+}
+
+void MainWindow::PublishRememberedNonChooserControls()
+{
+    if (!m_transport)
+    {
+        return;
+    }
+
+    for (const auto& [keyStd, remembered] : m_rememberedControlValues)
+    {
+        const QString key = QString::fromStdString(keyStd);
+        if (key.isEmpty() || remembered.isChooserSelected)
+        {
+            continue;
+        }
+
+        if (remembered.valueType == static_cast<int>(sd::direct::ValueType::Bool))
+        {
+            m_transport->PublishBool(key, remembered.value.toBool());
+        }
+        else if (remembered.valueType == static_cast<int>(sd::direct::ValueType::Double))
+        {
+            m_transport->PublishDouble(key, remembered.value.toDouble());
+        }
+        else if (remembered.valueType == static_cast<int>(sd::direct::ValueType::String))
+        {
+            m_transport->PublishString(key, remembered.value.toString());
+        }
+    }
+}
+
+void MainWindow::PublishRememberedChooserSelections()
+{
+    if (!m_transport)
+    {
+        return;
+    }
+
+    for (const auto& keyStd : m_robotOwnedChooserKeys)
+    {
+        const auto it = m_rememberedControlValues.find(keyStd);
+        if (it == m_rememberedControlValues.end() || !it->second.isChooserSelected)
+        {
+            continue;
+        }
+
+        const QString key = QString::fromStdString(keyStd);
+        if (key.isEmpty())
+        {
+            continue;
+        }
+
+        m_transport->PublishString(key + "/selected", it->second.value.toString());
     }
 }
 
@@ -1623,6 +1690,7 @@ void MainWindow::OnControlStringEdited(const QString& key, const QString& value)
         remembered.value = QVariant(value);
         remembered.isChooserSelected = false;
         m_rememberedControlValues[key.toStdString()] = remembered;
+        m_robotOwnedChooserKeys.erase(key.toStdString());
     }
 
     if (m_transport)
@@ -1637,6 +1705,7 @@ void MainWindow::OnControlStringEdited(const QString& key, const QString& value)
                 chooserRemembered.value = QVariant(value);
                 chooserRemembered.isChooserSelected = true;
                 m_rememberedControlValues[key.toStdString()] = chooserRemembered;
+                m_robotOwnedChooserKeys.erase(key.toStdString());
             }
             m_transport->PublishString(key + "/selected", value);
             return;
@@ -2383,7 +2452,7 @@ void MainWindow::StartTransport()
                     const QString widgetType = tile->GetWidgetType();
                     if (widgetType == "string.chooser")
                     {
-                        m_transport->PublishString(key + "/selected", tile->GetStringValue());
+                        continue;
                     }
                     else
                     {

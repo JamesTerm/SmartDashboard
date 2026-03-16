@@ -8,6 +8,7 @@
 #include <cstring>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace sd::direct
 {
@@ -81,6 +82,17 @@ namespace sd::direct
                     return 8;
                 case ValueType::String:
                     return static_cast<std::uint16_t>(std::min<std::size_t>(value.stringValue.size(), wire::kStringMax));
+                case ValueType::StringArray:
+                {
+                    std::size_t total = 1;
+                    const std::size_t count = std::min<std::size_t>(value.stringArrayValue.size(), wire::kStringArrayMaxCount);
+                    for (std::size_t i = 0; i < count; ++i)
+                    {
+                        total += 2;
+                        total += std::min<std::size_t>(value.stringArrayValue[i].size(), wire::kStringMax);
+                    }
+                    return static_cast<std::uint16_t>(total);
+                }
                 default:
                     return 0;
             }
@@ -96,6 +108,8 @@ namespace sd::direct
                     return wire::WireValueType::Double;
                 case ValueType::String:
                     return wire::WireValueType::String;
+                case ValueType::StringArray:
+                    return wire::WireValueType::StringArray;
                 default:
                     return wire::WireValueType::String;
             }
@@ -111,6 +125,8 @@ namespace sd::direct
                     return ValueType::Double;
                 case wire::WireValueType::String:
                     return ValueType::String;
+                case wire::WireValueType::StringArray:
+                    return ValueType::StringArray;
                 default:
                     return ValueType::String;
             }
@@ -250,6 +266,32 @@ namespace sd::direct
                     cursor = (cursor + valueLen) % ring.capacity;
                     break;
                 }
+                case ValueType::StringArray:
+                {
+                    const std::uint8_t count = static_cast<std::uint8_t>(std::min<std::size_t>(value.stringArrayValue.size(), wire::kStringArrayMaxCount));
+                    CopyToRing(ring, cursor, &count, 1);
+                    cursor = (cursor + 1) % ring.capacity;
+
+                    for (std::size_t i = 0; i < count; ++i)
+                    {
+                        const std::uint16_t itemLen = static_cast<std::uint16_t>(std::min<std::size_t>(value.stringArrayValue[i].size(), wire::kStringMax));
+                        std::array<std::uint8_t, 2> lenBytes {};
+                        std::memcpy(lenBytes.data(), &itemLen, sizeof(itemLen));
+                        CopyToRing(ring, cursor, lenBytes.data(), static_cast<std::uint32_t>(lenBytes.size()));
+                        cursor = (cursor + static_cast<std::uint32_t>(lenBytes.size())) % ring.capacity;
+                        if (itemLen > 0)
+                        {
+                            CopyToRing(
+                                ring,
+                                cursor,
+                                reinterpret_cast<const std::uint8_t*>(value.stringArrayValue[i].data()),
+                                itemLen
+                            );
+                            cursor = (cursor + itemLen) % ring.capacity;
+                        }
+                    }
+                    break;
+                }
                 default:
                     break;
             }
@@ -347,6 +389,33 @@ namespace sd::direct
                 if (msg.valueLen > 0)
                 {
                     CopyFromRing(ring, cursor, reinterpret_cast<std::uint8_t*>(value.stringValue.data()), msg.valueLen);
+                }
+                cursor = (cursor + msg.valueLen) % ring.capacity;
+                break;
+            }
+            case ValueType::StringArray:
+            {
+                if (msg.valueLen > 0)
+                {
+                    std::vector<std::uint8_t> bytes(msg.valueLen);
+                    CopyFromRing(ring, cursor, bytes.data(), msg.valueLen);
+
+                    std::size_t offset = 0;
+                    const std::uint8_t count = bytes[offset++];
+                    value.stringArrayValue.clear();
+                    value.stringArrayValue.reserve(count);
+                    for (std::uint8_t i = 0; i < count && offset + 2 <= bytes.size(); ++i)
+                    {
+                        std::uint16_t itemLen = 0;
+                        std::memcpy(&itemLen, bytes.data() + offset, sizeof(itemLen));
+                        offset += 2;
+                        const std::size_t boundedLen = std::min<std::size_t>(itemLen, bytes.size() - offset);
+                        value.stringArrayValue.emplace_back(
+                            reinterpret_cast<const char*>(bytes.data() + offset),
+                            boundedLen
+                        );
+                        offset += boundedLen;
+                    }
                 }
                 cursor = (cursor + msg.valueLen) % ring.capacity;
                 break;

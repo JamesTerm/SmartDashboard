@@ -62,6 +62,12 @@ namespace sd::direct
             std::uint64_t id = 0;
             StringChangedCallback callback;
         };
+
+        struct StringArraySubscription
+        {
+            std::uint64_t id = 0;
+            StringArrayChangedCallback callback;
+        };
     }
 
     struct SmartDashboardClient::Impl
@@ -91,9 +97,11 @@ namespace sd::direct
         std::unordered_map<std::string, std::vector<BoolSubscription>> boolSubscribers;
         std::unordered_map<std::string, std::vector<DoubleSubscription>> doubleSubscribers;
         std::unordered_map<std::string, std::vector<StringSubscription>> stringSubscribers;
+        std::unordered_map<std::string, std::vector<StringArraySubscription>> stringArraySubscribers;
         std::unordered_map<std::string, std::vector<BoolSubscription>> boolCommandSubscribers;
         std::unordered_map<std::string, std::vector<DoubleSubscription>> doubleCommandSubscribers;
         std::unordered_map<std::string, std::vector<StringSubscription>> stringCommandSubscribers;
+        std::unordered_map<std::string, std::vector<StringArraySubscription>> stringArrayCommandSubscribers;
 
         void HandleUpdate(const VariableUpdate& update)
         {
@@ -102,6 +110,7 @@ namespace sd::direct
             std::vector<BoolChangedCallback> boolCallbacks;
             std::vector<DoubleChangedCallback> doubleCallbacks;
             std::vector<StringChangedCallback> stringCallbacks;
+            std::vector<StringArrayChangedCallback> stringArrayCallbacks;
 
             {
                 std::lock_guard<std::mutex> lock(mutex);
@@ -156,6 +165,17 @@ namespace sd::direct
                         }
                     }
                 }
+                else if (update.type == ValueType::StringArray)
+                {
+                    auto subIt = stringArraySubscribers.find(update.key);
+                    if (subIt != stringArraySubscribers.end())
+                    {
+                        for (const StringArraySubscription& sub : subIt->second)
+                        {
+                            stringArrayCallbacks.push_back(sub.callback);
+                        }
+                    }
+                }
             }
 
             if (config.enableRetainedStore)
@@ -184,6 +204,13 @@ namespace sd::direct
                     callback(update.value.stringValue);
                 }
             }
+            else if (update.type == ValueType::StringArray)
+            {
+                for (const auto& callback : stringArrayCallbacks)
+                {
+                    callback(update.value.stringArrayValue);
+                }
+            }
         }
 
         void HandleCommandUpdate(const VariableUpdate& update)
@@ -191,6 +218,7 @@ namespace sd::direct
             std::vector<BoolChangedCallback> boolCallbacks;
             std::vector<DoubleChangedCallback> doubleCallbacks;
             std::vector<StringChangedCallback> stringCallbacks;
+            std::vector<StringArrayChangedCallback> stringArrayCallbacks;
 
             {
                 std::lock_guard<std::mutex> lock(mutex);
@@ -228,6 +256,17 @@ namespace sd::direct
                         }
                     }
                 }
+                else if (update.type == ValueType::StringArray)
+                {
+                    auto subIt = stringArrayCommandSubscribers.find(update.key);
+                    if (subIt != stringArrayCommandSubscribers.end())
+                    {
+                        for (const StringArraySubscription& sub : subIt->second)
+                        {
+                            stringArrayCallbacks.push_back(sub.callback);
+                        }
+                    }
+                }
             }
 
             if (update.type == ValueType::Bool)
@@ -249,6 +288,13 @@ namespace sd::direct
                 for (const auto& callback : stringCallbacks)
                 {
                     callback(update.value.stringValue);
+                }
+            }
+            else if (update.type == ValueType::StringArray)
+            {
+                for (const auto& callback : stringArrayCallbacks)
+                {
+                    callback(update.value.stringArrayValue);
                 }
             }
         }
@@ -289,6 +335,19 @@ namespace sd::direct
             }
 
             outValue = it->second.value.stringValue;
+            return true;
+        }
+
+        bool TryReadCachedStringArray(std::string_view key, std::vector<std::string>& outValue) const
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            auto it = cache.find(std::string(key));
+            if (it == cache.end() || it->second.type != ValueType::StringArray)
+            {
+                return false;
+            }
+
+            outValue = it->second.value.stringArrayValue;
             return true;
         }
     };
@@ -454,6 +513,22 @@ namespace sd::direct
         }
     }
 
+    void SmartDashboardClient::PutStringArray(std::string_view key, const std::vector<std::string>& value)
+    {
+        if (m_impl && m_impl->publisher)
+        {
+            VariableUpdate localUpdate;
+            localUpdate.key = std::string(key);
+            localUpdate.type = ValueType::StringArray;
+            localUpdate.value.stringArrayValue = value;
+            localUpdate.seq = m_impl->localSeq++;
+            localUpdate.sourceTimestampUs = GetSteadyNowUs();
+            m_impl->HandleUpdate(localUpdate);
+
+            m_impl->publisher->PublishStringArray(key, value);
+        }
+    }
+
     bool SmartDashboardClient::FlushNow()
     {
         if (!m_impl || !m_impl->publisher)
@@ -542,6 +617,32 @@ namespace sd::direct
         return true;
     }
 
+    bool SmartDashboardClient::TryGetStringArray(std::string_view key, std::vector<std::string>& outValue) const
+    {
+        if (!m_impl)
+        {
+            return false;
+        }
+        if (m_impl->TryReadCachedStringArray(key, outValue))
+        {
+            return true;
+        }
+
+        if (!m_impl->config.enableRetainedStore)
+        {
+            return false;
+        }
+
+        VariableValue retained;
+        if (!m_impl->retainedStore.TryGet(key, ValueType::StringArray, retained))
+        {
+            return false;
+        }
+
+        outValue = retained.stringArrayValue;
+        return true;
+    }
+
     bool SmartDashboardClient::GetBoolean(std::string_view key, bool defaultValue)
     {
         // Assertive get: if value missing, publish default to prime downstream readers.
@@ -582,6 +683,19 @@ namespace sd::direct
         PutString(key, defaultValue);
         FlushNow();
         return std::string(defaultValue);
+    }
+
+    std::vector<std::string> SmartDashboardClient::GetStringArray(std::string_view key, const std::vector<std::string>& defaultValue)
+    {
+        std::vector<std::string> value;
+        if (TryGetStringArray(key, value))
+        {
+            return value;
+        }
+
+        PutStringArray(key, defaultValue);
+        FlushNow();
+        return defaultValue;
     }
 
     SubscriptionToken SmartDashboardClient::SubscribeBoolean(std::string key, BoolChangedCallback callback, bool invokeImmediately)
@@ -677,6 +791,37 @@ namespace sd::direct
         return SubscriptionToken {std::move(key), ValueType::String, id};
     }
 
+    SubscriptionToken SmartDashboardClient::SubscribeStringArray(std::string key, StringArrayChangedCallback callback, bool invokeImmediately)
+    {
+        if (!m_impl || !callback)
+        {
+            return {};
+        }
+
+        std::uint64_t id = 0;
+        std::vector<std::string> immediateValue;
+        bool hasImmediate = false;
+        {
+            std::lock_guard<std::mutex> lock(m_impl->mutex);
+            id = m_impl->nextSubscriptionId++;
+            m_impl->stringArraySubscribers[key].push_back(StringArraySubscription {id, callback});
+
+            auto it = m_impl->cache.find(key);
+            if (invokeImmediately && it != m_impl->cache.end() && it->second.type == ValueType::StringArray)
+            {
+                immediateValue = it->second.value.stringArrayValue;
+                hasImmediate = true;
+            }
+        }
+
+        if (hasImmediate)
+        {
+            callback(immediateValue);
+        }
+
+        return SubscriptionToken {std::move(key), ValueType::StringArray, id};
+    }
+
     SubscriptionToken SmartDashboardClient::SubscribeBooleanCommand(std::string key, BoolChangedCallback callback, bool)
     {
         if (!m_impl || !callback)
@@ -723,6 +868,22 @@ namespace sd::direct
             m_impl->stringCommandSubscribers[key].push_back(StringSubscription {id, callback});
         }
         return SubscriptionToken {std::move(key), ValueType::String, id};
+    }
+
+    SubscriptionToken SmartDashboardClient::SubscribeStringArrayCommand(std::string key, StringArrayChangedCallback callback, bool)
+    {
+        if (!m_impl || !callback)
+        {
+            return {};
+        }
+
+        std::uint64_t id = 0;
+        {
+            std::lock_guard<std::mutex> lock(m_impl->mutex);
+            id = m_impl->nextSubscriptionId++;
+            m_impl->stringArrayCommandSubscribers[key].push_back(StringArraySubscription {id, callback});
+        }
+        return SubscriptionToken {std::move(key), ValueType::StringArray, id};
     }
 
     bool SmartDashboardClient::Unsubscribe(const SubscriptionToken& token)
@@ -802,6 +963,44 @@ namespace sd::direct
             const auto cmdBefore = cmdVec.size();
             cmdVec.erase(
                 std::remove_if(cmdVec.begin(), cmdVec.end(), [&token](const DoubleSubscription& sub)
+                {
+                    return sub.id == token.id;
+                }),
+                cmdVec.end()
+            );
+            return cmdVec.size() != cmdBefore;
+        }
+
+        if (token.type == ValueType::StringArray)
+        {
+            auto it = m_impl->stringArraySubscribers.find(token.key);
+            if (it != m_impl->stringArraySubscribers.end())
+            {
+                auto& vec = it->second;
+                const auto before = vec.size();
+                vec.erase(
+                    std::remove_if(vec.begin(), vec.end(), [&token](const StringArraySubscription& sub)
+                    {
+                        return sub.id == token.id;
+                    }),
+                    vec.end()
+                );
+                if (vec.size() != before)
+                {
+                    return true;
+                }
+            }
+
+            auto cmdIt = m_impl->stringArrayCommandSubscribers.find(token.key);
+            if (cmdIt == m_impl->stringArrayCommandSubscribers.end())
+            {
+                return false;
+            }
+
+            auto& cmdVec = cmdIt->second;
+            const auto cmdBefore = cmdVec.size();
+            cmdVec.erase(
+                std::remove_if(cmdVec.begin(), cmdVec.end(), [&token](const StringArraySubscription& sub)
                 {
                     return sub.id == token.id;
                 }),

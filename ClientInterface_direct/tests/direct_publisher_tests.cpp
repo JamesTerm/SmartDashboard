@@ -569,4 +569,105 @@ namespace sd::direct
         EXPECT_EQ(snapshot.active, "DoNothing");
         EXPECT_EQ(snapshot.selected, "Taxi");
     }
+
+    TEST(DirectPublisherTests, StreamsStringArrayChooserOptions)
+    {
+        const TestChannels channels = MakeTestChannels();
+
+        SubscriberConfig subConfig;
+        subConfig.mappingName = channels.mappingName;
+        subConfig.dataEventName = channels.dataEventName;
+        subConfig.heartbeatEventName = channels.heartbeatEventName;
+
+        PublisherConfig pubConfig;
+        pubConfig.mappingName = channels.mappingName;
+        pubConfig.dataEventName = channels.dataEventName;
+        pubConfig.heartbeatEventName = channels.heartbeatEventName;
+        pubConfig.autoFlushThread = false;
+
+        auto subscriber = CreateDirectSubscriber(subConfig);
+        auto publisher = CreateDirectPublisher(pubConfig);
+
+        struct ChooserSnapshot
+        {
+            std::string type;
+            std::vector<std::string> options;
+            std::string active;
+            std::string selected;
+        };
+
+        ChooserSnapshot snapshot;
+        std::mutex snapshotMutex;
+
+        ASSERT_TRUE(subscriber->Start(
+            [&snapshot, &snapshotMutex](const VariableUpdate& update)
+            {
+                std::lock_guard<std::mutex> lock(snapshotMutex);
+                if (update.key == "Test/AutoChooser/.type" && update.type == ValueType::String)
+                {
+                    snapshot.type = update.value.stringValue;
+                }
+                else if (update.key == "Test/AutoChooser/options" && update.type == ValueType::StringArray)
+                {
+                    snapshot.options = update.value.stringArrayValue;
+                }
+                else if (update.key == "Test/AutoChooser/active" && update.type == ValueType::String)
+                {
+                    snapshot.active = update.value.stringValue;
+                }
+                else if (update.key == "Test/AutoChooser/selected" && update.type == ValueType::String)
+                {
+                    snapshot.selected = update.value.stringValue;
+                }
+            },
+            [](ConnectionState)
+            {
+            }
+        ));
+
+        ASSERT_TRUE(publisher->Start());
+
+        const auto chooserObserved = [&snapshot, &snapshotMutex]()
+        {
+            std::lock_guard<std::mutex> lock(snapshotMutex);
+            return snapshot.type == "String Chooser"
+                && snapshot.options.size() == 3
+                && snapshot.options[0] == "DoNothing"
+                && snapshot.options[1] == "Taxi"
+                && snapshot.options[2] == "TwoPiece"
+                && snapshot.active == "DoNothing"
+                && snapshot.selected == "Taxi";
+        };
+
+        const auto publishChooserSnapshot = [&publisher]()
+        {
+            publisher->PublishString("Test/AutoChooser/.type", "String Chooser");
+            publisher->PublishStringArray("Test/AutoChooser/options", {"DoNothing", "Taxi", "TwoPiece"});
+            publisher->PublishString("Test/AutoChooser/default", "DoNothing");
+            publisher->PublishString("Test/AutoChooser/active", "DoNothing");
+            publisher->PublishString("Test/AutoChooser/selected", "Taxi");
+            publisher->FlushNow();
+        };
+
+        ASSERT_TRUE(WaitUntil(
+            [&publishChooserSnapshot, &chooserObserved]()
+            {
+                publishChooserSnapshot();
+                return chooserObserved();
+            },
+            2s
+        ));
+
+        publisher->Stop();
+        subscriber->Stop();
+
+        std::lock_guard<std::mutex> lock(snapshotMutex);
+        EXPECT_EQ(snapshot.type, "String Chooser");
+        ASSERT_EQ(snapshot.options.size(), 3u);
+        EXPECT_EQ(snapshot.options[0], "DoNothing");
+        EXPECT_EQ(snapshot.options[1], "Taxi");
+        EXPECT_EQ(snapshot.options[2], "TwoPiece");
+        EXPECT_EQ(snapshot.active, "DoNothing");
+        EXPECT_EQ(snapshot.selected, "Taxi");
+    }
 }

@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <unordered_set>
 #include <unordered_map>
 #include <vector>
 
@@ -129,6 +130,8 @@ private:
     void RecordConnectionEvent(int state);
     bool IsRecordingTransportKind(sd::transport::TransportKind kind) const;
     void PublishRememberedControlValues();
+    void PublishRememberedNonChooserControls();
+    void PublishRememberedChooserSelections();
 
     QWidget* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
@@ -189,6 +192,7 @@ private:
         bool isChooserSelected = false;
     };
     std::unordered_map<std::string, RememberedControlValue> m_rememberedControlValues;
+    std::unordered_set<std::string> m_robotOwnedChooserKeys;
 
     std::mutex m_recordingMutex;
     std::condition_variable m_recordingCv;

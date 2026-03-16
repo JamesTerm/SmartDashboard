@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace sd::direct
 {
@@ -45,6 +46,7 @@ namespace sd::direct
         virtual void PublishBool(std::string_view key, bool value) = 0;
         virtual void PublishDouble(std::string_view key, double value) = 0;
         virtual void PublishString(std::string_view key, std::string_view value) = 0;
+        virtual void PublishStringArray(std::string_view key, const std::vector<std::string>& value) = 0;
 
         // Commit staged values to the ring and signal subscribers.
         virtual bool FlushNow() = 0;

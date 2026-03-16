@@ -11,6 +11,7 @@ namespace sd::direct::wire
     constexpr std::uint32_t kDefaultCapacityBytes = 1U << 20;
     constexpr std::size_t kKeyMax = 128;
     constexpr std::size_t kStringMax = 256;
+    constexpr std::size_t kStringArrayMaxCount = 32;
 
     enum class MsgType : std::uint8_t
     {
@@ -21,7 +22,8 @@ namespace sd::direct::wire
     {
         Bool = 1,
         Double = 2,
-        String = 3
+        String = 3,
+        StringArray = 4
     };
 
     struct alignas(8) RingHeader

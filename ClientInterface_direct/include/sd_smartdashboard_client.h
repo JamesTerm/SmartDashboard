@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace sd::direct
 {
@@ -47,6 +48,7 @@ namespace sd::direct
     using BoolChangedCallback = std::function<void(bool)>;
     using DoubleChangedCallback = std::function<void(double)>;
     using StringChangedCallback = std::function<void(const std::string&)>;
+    using StringArrayChangedCallback = std::function<void(const std::vector<std::string>&)>;
 
     class SmartDashboardClient final
     {
@@ -60,19 +62,23 @@ namespace sd::direct
         void PutBoolean(std::string_view key, bool value);
         void PutDouble(std::string_view key, double value);
         void PutString(std::string_view key, std::string_view value);
+        void PutStringArray(std::string_view key, const std::vector<std::string>& value);
         bool FlushNow();
 
         bool TryGetBoolean(std::string_view key, bool& outValue) const;
         bool TryGetDouble(std::string_view key, double& outValue) const;
         bool TryGetString(std::string_view key, std::string& outValue) const;
+        bool TryGetStringArray(std::string_view key, std::vector<std::string>& outValue) const;
 
         bool GetBoolean(std::string_view key, bool defaultValue);
         double GetDouble(std::string_view key, double defaultValue);
         std::string GetString(std::string_view key, std::string_view defaultValue);
+        std::vector<std::string> GetStringArray(std::string_view key, const std::vector<std::string>& defaultValue);
 
         SubscriptionToken SubscribeBoolean(std::string key, BoolChangedCallback callback, bool invokeImmediately = true);
         SubscriptionToken SubscribeDouble(std::string key, DoubleChangedCallback callback, bool invokeImmediately = true);
         SubscriptionToken SubscribeString(std::string key, StringChangedCallback callback, bool invokeImmediately = true);
+        SubscriptionToken SubscribeStringArray(std::string key, StringArrayChangedCallback callback, bool invokeImmediately = true);
         bool Unsubscribe(const SubscriptionToken& token);
 
         // Callback for writable dashboard controls coming back to app/client.
@@ -80,6 +86,7 @@ namespace sd::direct
         SubscriptionToken SubscribeBooleanCommand(std::string key, BoolChangedCallback callback, bool invokeImmediately = false);
         SubscriptionToken SubscribeDoubleCommand(std::string key, DoubleChangedCallback callback, bool invokeImmediately = false);
         SubscriptionToken SubscribeStringCommand(std::string key, StringChangedCallback callback, bool invokeImmediately = false);
+        SubscriptionToken SubscribeStringArrayCommand(std::string key, StringArrayChangedCallback callback, bool invokeImmediately = false);
 
     private:
         struct Impl;
