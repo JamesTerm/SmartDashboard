@@ -105,6 +105,7 @@ Current product-direction priorities:
 - foundation-first readiness before broad `NetworkTables` rollout
 - strong live dashboard usefulness compared with `Shuffleboard`
 - `SendableChooser`-class compatibility and other common team workflows
+- reconnect-safe dashboard-owned controls during simulator/robot restarts
 - improved plotting, including future multi-trace line-plot support
 - replay/telemetry features that strengthen debugging without taking over the product
 

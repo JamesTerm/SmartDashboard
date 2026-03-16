@@ -127,6 +127,14 @@ Practical rule:
    - chooser appears as one dropdown tile (no extra metadata tiles)
    - changing dropdown writes to `<base>/selected` and simulator reacts
 
+### Direct reconnect validation focus
+
+When using `Direct` mode, also validate dashboard-owned control persistence across simulator restarts.
+
+- Set one or more operator-owned values from the dashboard (for example `AutonTest`, `Test/AutonTest`, `TestMove`, chooser selections).
+- Restart `Robot_Simulation` without restarting the dashboard.
+- Verify the dashboard reconnect path restores/re-publishes remembered control state so operator intent survives the simulator restart.
+
 ## Protocol notes for implementers
 
 - This dashboard currently expects NT2-style wire behavior in its NT adapter path.
