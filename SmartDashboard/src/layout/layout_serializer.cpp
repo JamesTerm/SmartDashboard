@@ -152,25 +152,6 @@ namespace sd::layout
             entry["variableKey"] = widget->property("variableKey").toString();
             entry["widgetType"] = widget->property("widgetType").toString();
 
-            auto* tile = qobject_cast<const sd::widgets::VariableTile*>(widget);
-            if (tile != nullptr)
-            {
-                switch (tile->GetType())
-                {
-                    case sd::widgets::VariableType::Bool:
-                        entry["boolValue"] = tile->GetBoolValue();
-                        break;
-                    case sd::widgets::VariableType::Double:
-                        entry["doubleValue"] = tile->GetDoubleValue();
-                        break;
-                    case sd::widgets::VariableType::String:
-                        entry["stringValue"] = tile->GetStringValue();
-                        break;
-                    default:
-                        break;
-                }
-            }
-
             const QVariant gaugeLower = widget->property("gaugeLowerLimit");
             const QVariant gaugeUpper = widget->property("gaugeUpperLimit");
             const QVariant gaugeTick = widget->property("gaugeTickInterval");
@@ -459,18 +440,6 @@ namespace sd::layout
                     optionList.push_back(optionValue.toString());
                 }
                 layoutEntry.stringChooserOptions = optionList;
-            }
-            if (entry.contains("boolValue"))
-            {
-                layoutEntry.boolValue = entry.value("boolValue").toBool();
-            }
-            if (entry.contains("doubleValue"))
-            {
-                layoutEntry.doubleValue = entry.value("doubleValue").toDouble();
-            }
-            if (entry.contains("stringValue"))
-            {
-                layoutEntry.stringValue = entry.value("stringValue").toString();
             }
             outEntries.push_back(layoutEntry);
         }

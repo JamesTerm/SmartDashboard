@@ -81,19 +81,19 @@ int main(int argc, char** argv)
     };
 
     std::vector<sd::direct::SubscriptionToken> tokens;
-    tokens.push_back(client.SubscribeString("Test/AutonTest/AutoChooser/.type", [&](const std::string& value)
+    tokens.push_back(client.SubscribeString("Test/Auton_Selection/AutoChooser/.type", [&](const std::string& value)
     {
         LogLine(logFile, logMutex, logPrefix() + "chooser.type=" + value);
     }));
-    tokens.push_back(client.SubscribeString("Test/AutonTest/AutoChooser/selected", [&](const std::string& value)
+    tokens.push_back(client.SubscribeString("Test/Auton_Selection/AutoChooser/selected", [&](const std::string& value)
     {
         LogLine(logFile, logMutex, logPrefix() + "chooser.selected=" + value);
     }));
-    tokens.push_back(client.SubscribeString("Test/AutonTest/AutoChooser/active", [&](const std::string& value)
+    tokens.push_back(client.SubscribeString("Test/Auton_Selection/AutoChooser/active", [&](const std::string& value)
     {
         LogLine(logFile, logMutex, logPrefix() + "chooser.active=" + value);
     }));
-    tokens.push_back(client.SubscribeStringArray("Test/AutonTest/AutoChooser/options", [&](const std::vector<std::string>& value)
+    tokens.push_back(client.SubscribeStringArray("Test/Auton_Selection/AutoChooser/options", [&](const std::vector<std::string>& value)
     {
         LogLine(logFile, logMutex, logPrefix() + "chooser.options=" + JoinStrings(value));
     }));
@@ -101,6 +101,18 @@ int main(int argc, char** argv)
     {
         std::ostringstream out;
         out << logPrefix() << "TestMove=" << value;
+        LogLine(logFile, logMutex, out.str());
+    }));
+    tokens.push_back(client.SubscribeDouble("Timer", [&](double value)
+    {
+        std::ostringstream out;
+        out << logPrefix() << "Timer=" << value;
+        LogLine(logFile, logMutex, out.str());
+    }));
+    tokens.push_back(client.SubscribeDouble("Y_ft", [&](double value)
+    {
+        std::ostringstream out;
+        out << logPrefix() << "Y_ft=" << value;
         LogLine(logFile, logMutex, out.str());
     }));
 

@@ -369,11 +369,11 @@ namespace sd::direct
         SmartDashboardClient robot(robotConfig);
         ASSERT_TRUE(robot.Start());
 
-        robot.PutString("Test/AutonTest/AutoChooser/.type", "String Chooser");
-        robot.PutStringArray("Test/AutonTest/AutoChooser/options", {"Do Nothing", "Just Move Forward", "Just Rotate"});
-        robot.PutString("Test/AutonTest/AutoChooser/default", "Do Nothing");
-        robot.PutString("Test/AutonTest/AutoChooser/active", "Just Move Forward");
-        robot.PutString("Test/AutonTest/AutoChooser/selected", "Just Move Forward");
+        robot.PutString("Test/Auton_Selection/AutoChooser/.type", "String Chooser");
+        robot.PutStringArray("Test/Auton_Selection/AutoChooser/options", {"Do Nothing", "Just Move Forward", "Just Rotate"});
+        robot.PutString("Test/Auton_Selection/AutoChooser/default", "Do Nothing");
+        robot.PutString("Test/Auton_Selection/AutoChooser/active", "Just Move Forward");
+        robot.PutString("Test/Auton_Selection/AutoChooser/selected", "Just Move Forward");
         ASSERT_TRUE(robot.FlushNow());
 
         SmartDashboardClientConfig dashboardConfig;
@@ -394,7 +394,7 @@ namespace sd::direct
         ASSERT_TRUE(WaitUntil(
             [&dashboard, &selected]()
             {
-                return dashboard.TryGetString("Test/AutonTest/AutoChooser/selected", selected);
+                return dashboard.TryGetString("Test/Auton_Selection/AutoChooser/selected", selected);
             },
             2s
         ));
@@ -409,7 +409,7 @@ namespace sd::direct
         ASSERT_TRUE(WaitUntil(
             [&dashboardRestarted, &selected]()
             {
-                return dashboardRestarted.TryGetString("Test/AutonTest/AutoChooser/selected", selected);
+                return dashboardRestarted.TryGetString("Test/Auton_Selection/AutoChooser/selected", selected);
             },
             2s
         ));

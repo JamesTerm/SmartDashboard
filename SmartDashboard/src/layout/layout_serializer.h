@@ -40,9 +40,6 @@ namespace sd::layout
         QVariant boolCheckboxShowLabel;
         QVariant stringChooserMode;
         QVariant stringChooserOptions;
-        QVariant boolValue;
-        QVariant doubleValue;
-        QVariant stringValue;
     };
 
     bool SaveLayout(const QWidget* canvas, const QString& filePath);

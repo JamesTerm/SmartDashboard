@@ -67,25 +67,96 @@ namespace
         }
         std::cout << "]";
     }
+
+    void PublishSeedWindow(
+        sd::direct::SmartDashboardClient& telemetryClient,
+        sd::direct::SmartDashboardClient& commandClient,
+        bool seedChooser,
+        const std::vector<std::string>& chooserOptions,
+        std::chrono::milliseconds duration)
+    {
+        using namespace std::chrono_literals;
+
+        const auto deadline = std::chrono::steady_clock::now() + duration;
+        while (std::chrono::steady_clock::now() < deadline)
+        {
+            commandClient.PutDouble("AutonTest", 1.0);
+            commandClient.PutDouble("TestMove", 3.5);
+            if (seedChooser)
+            {
+                commandClient.PutString("Test/Auton_Selection/AutoChooser/selected", "Just Move Forward");
+            }
+            commandClient.FlushNow();
+
+            telemetryClient.PutDouble("AutonTest", 1.0);
+            telemetryClient.PutDouble("TestMove", 3.5);
+            if (seedChooser)
+            {
+                telemetryClient.PutString("Test/Auton_Selection/AutoChooser/.type", "String Chooser");
+                telemetryClient.PutStringArray("Test/Auton_Selection/AutoChooser/options", chooserOptions);
+                telemetryClient.PutString("Test/Auton_Selection/AutoChooser/default", "Do Nothing");
+                telemetryClient.PutString("Test/Auton_Selection/AutoChooser/active", "Just Move Forward");
+                telemetryClient.PutString("Test/Auton_Selection/AutoChooser/selected", "Just Move Forward");
+            }
+            telemetryClient.FlushNow();
+
+            std::this_thread::sleep_for(50ms);
+        }
+    }
 }
 
 int main(int argc, char** argv)
 {
     using namespace std::chrono_literals;
 
+    const bool kSeedChooser = false;
+
     const std::chrono::milliseconds timeout = (argc > 1)
         ? std::chrono::milliseconds(std::max(100, std::atoi(argv[1])))
         : 4000ms;
+    bool seed = false;
+    std::chrono::milliseconds seedDuration = std::chrono::milliseconds(1500);
+    for (int i = 2; i < argc; ++i)
+    {
+        if (std::string(argv[i]) == "--seed")
+        {
+            seed = true;
+        }
+        else if (std::string(argv[i]) == "--seed-ms" && (i + 1) < argc)
+        {
+            seedDuration = std::chrono::milliseconds(std::max(100, std::atoi(argv[++i])));
+        }
+    }
 
-    sd::direct::SmartDashboardClientConfig config;
-    config.publisher.autoFlushThread = true;
-    config.enableSubscriber = true;
-    config.enableCommandSubscriber = true;
+    sd::direct::SmartDashboardClientConfig telemetryConfig;
+    telemetryConfig.publisher.autoFlushThread = true;
+    telemetryConfig.enableSubscriber = true;
+    telemetryConfig.enableCommandSubscriber = false;
 
-    sd::direct::SmartDashboardClient client(config);
-    if (!client.Start())
+    sd::direct::SmartDashboardClient telemetryClient(telemetryConfig);
+    if (!telemetryClient.Start())
     {
         std::cerr << "failed to start direct state probe" << std::endl;
+        return 1;
+    }
+
+    sd::direct::SmartDashboardClientConfig commandConfig;
+    commandConfig.publisher.mappingName = L"Local\\SmartDashboard.Direct.Command.Buffer";
+    commandConfig.publisher.dataEventName = L"Local\\SmartDashboard.Direct.Command.DataAvailable";
+    commandConfig.publisher.heartbeatEventName = L"Local\\SmartDashboard.Direct.Command.Heartbeat";
+    commandConfig.publisher.autoFlushThread = true;
+    commandConfig.subscriber.mappingName = commandConfig.publisher.mappingName;
+    commandConfig.subscriber.dataEventName = commandConfig.publisher.dataEventName;
+    commandConfig.subscriber.heartbeatEventName = commandConfig.publisher.heartbeatEventName;
+    commandConfig.enableSubscriber = true;
+    commandConfig.enableCommandSubscriber = false;
+    commandConfig.enableRetainedStore = false;
+
+    sd::direct::SmartDashboardClient commandClient(commandConfig);
+    if (!commandClient.Start())
+    {
+        telemetryClient.Stop();
+        std::cerr << "failed to start command state probe" << std::endl;
         return 1;
     }
 
@@ -98,25 +169,29 @@ int main(int argc, char** argv)
         "Smart Waypoints"
     };
 
-    client.PutString("Test/AutonTest/AutoChooser/.type", "String Chooser");
-    client.PutStringArray("Test/AutonTest/AutoChooser/options", chooserOptions);
-    client.PutString("Test/AutonTest/AutoChooser/default", "Do Nothing");
-    client.PutString("Test/AutonTest/AutoChooser/active", "Just Move Forward");
-    client.PutString("Test/AutonTest/AutoChooser/selected", "Just Move Forward");
-    client.PutDouble("TestMove", 3.5);
-    client.FlushNow();
+    if (seed)
+    {
+        PublishSeedWindow(telemetryClient, commandClient, kSeedChooser, chooserOptions, seedDuration);
+    }
 
+    double autonTest = 0.0;
     std::string chooserType;
     std::string chooserSelected;
     std::vector<std::string> observedOptions;
     double testMove = 0.0;
+    double timer = 0.0;
+    double yFeet = 0.0;
 
-    const bool gotType = WaitForString(client, "Test/AutonTest/AutoChooser/.type", chooserType, timeout);
-    const bool gotSelected = WaitForString(client, "Test/AutonTest/AutoChooser/selected", chooserSelected, timeout);
-    const bool gotOptions = WaitForStringArray(client, "Test/AutonTest/AutoChooser/options", observedOptions, timeout);
-    const bool gotMove = WaitForDouble(client, "TestMove", testMove, timeout);
+    const bool gotAuton = WaitForDouble(commandClient, "AutonTest", autonTest, timeout);
+    const bool gotType = WaitForString(telemetryClient, "Test/Auton_Selection/AutoChooser/.type", chooserType, timeout);
+    const bool gotSelected = WaitForString(telemetryClient, "Test/Auton_Selection/AutoChooser/selected", chooserSelected, timeout);
+    const bool gotOptions = WaitForStringArray(telemetryClient, "Test/Auton_Selection/AutoChooser/options", observedOptions, timeout);
+    const bool gotMove = WaitForDouble(commandClient, "TestMove", testMove, timeout);
+    const bool gotTimer = WaitForDouble(telemetryClient, "Timer", timer, timeout);
+    const bool gotY = WaitForDouble(telemetryClient, "Y_ft", yFeet, timeout);
 
     std::cout << "probe.timeout_ms=" << timeout.count() << "\n";
+    std::cout << "AutonTest=" << (gotAuton ? autonTest : -1.0) << "\n";
     std::cout << "chooser.type=" << (gotType ? chooserType : "<missing>") << "\n";
     std::cout << "chooser.selected=" << (gotSelected ? chooserSelected : "<missing>") << "\n";
     std::cout << "chooser.options=";
@@ -130,16 +205,15 @@ int main(int argc, char** argv)
     }
     std::cout << "\n";
     std::cout << "TestMove=" << (gotMove ? testMove : -1.0) << "\n";
+    std::cout << "Timer=" << (gotTimer ? timer : -1.0) << "\n";
+    std::cout << "Y_ft=" << (gotY ? yFeet : -1.0) << "\n";
 
-    const bool ok = gotType
-        && chooserType == "String Chooser"
-        && gotSelected
-        && chooserSelected == "Just Move Forward"
-        && gotOptions
-        && observedOptions == chooserOptions
+    const bool ok = gotAuton
+        && autonTest >= 1.0
         && gotMove
         && testMove > 1.0;
 
-    client.Stop();
+    commandClient.Stop();
+    telemetryClient.Stop();
     return ok ? 0 : 2;
 }

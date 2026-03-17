@@ -7,6 +7,24 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-17 - Direct numeric control recovery, layout-value cleanup, and debugging workflow note
+
+- Stopped layout save/load from persisting live widget values:
+  - layout files now keep arrangement and widget configuration only
+  - old robot/session values no longer overwrite startup state when the robot is offline.
+- Reworked direct simulator probe behavior so it behaves more like a real stream instead of a single burst:
+  - repeated publish window with flushes
+  - explicit numeric seeding path for `AutonTest` and `TestMove`
+  - chooser path renamed to `Test/Auton_Selection/AutoChooser` so chooser experiments no longer collide with legacy numeric `AutonTest`.
+- Tightened Direct-mode teaching/debugging workflow after regression hunting with Robot_Simulation:
+  - verify the smallest observable first (`AutonTest` populate check)
+  - confirm the helper/test path matches the real dashboard ownership model
+  - separate chooser and numeric experiments to reduce masked failures
+  - use small strategic commits so known-good checkpoints can be reused for regression testing.
+- Current paired result with Robot_Simulation:
+  - direct numeric populate is working again from the probe path
+  - end-to-end paired motion now depends more on harness baseline semantics than on the original command-delivery bug.
+
 ## 2026-03-16 - Direct stress harness, session control, and restart hardening
 
 - Added a more systematic Direct-mode debugging workflow for Robot_Simulation pairing:

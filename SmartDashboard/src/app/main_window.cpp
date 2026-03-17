@@ -250,18 +250,6 @@ namespace
             tile->SetStringChooserOptions(entry.stringChooserOptions.toStringList());
         }
 
-        if (entry.boolValue.isValid())
-        {
-            tile->SetBoolValue(entry.boolValue.toBool());
-        }
-        if (entry.doubleValue.isValid())
-        {
-            tile->SetDoubleValue(entry.doubleValue.toDouble());
-        }
-        if (entry.stringValue.isValid())
-        {
-            tile->SetStringValue(entry.stringValue.toString());
-        }
     }
 }
 
@@ -1127,6 +1115,16 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
                     chooserRemembered.valueType = static_cast<int>(sd::direct::ValueType::String);
                     chooserRemembered.value = value;
                     m_rememberedControlValues[chooserBase.toStdString()] = chooserRemembered;
+
+                    // In Direct mode the robot reads chooser intent from the
+                    // dashboard->robot command channel, not from telemetry.
+                    // Mirror retained/live chooser selection updates into the
+                    // command channel so a fresh auton enable sees the latest
+                    // operator intent even if no local edit happened this run.
+                    if (m_connectionConfig.kind == sd::transport::TransportKind::Direct && m_transport)
+                    {
+                        m_transport->PublishString(chooserBase + "/selected", value.toString());
+                    }
                 }
             }
 
@@ -1165,6 +1163,51 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
             break;
         default:
             break;
+    }
+
+    if (m_connectionConfig.kind == sd::transport::TransportKind::Direct
+        && m_transport
+        && IsOperatorControlWidget(tile))
+    {
+        RememberedControlValue remembered;
+
+        if (record.type == sd::widgets::VariableType::Bool)
+        {
+            remembered.valueType = static_cast<int>(sd::direct::ValueType::Bool);
+            remembered.value = record.value.toBool();
+            m_rememberedControlValues[keyStd] = remembered;
+            m_transport->PublishBool(key, record.value.toBool());
+        }
+        else if (record.type == sd::widgets::VariableType::Double)
+        {
+            remembered.valueType = static_cast<int>(sd::direct::ValueType::Double);
+            remembered.value = record.value.toDouble();
+            m_rememberedControlValues[keyStd] = remembered;
+            m_transport->PublishDouble(key, record.value.toDouble());
+        }
+        else if (record.type == sd::widgets::VariableType::String && tile->GetWidgetType() != "string.chooser")
+        {
+            remembered.valueType = static_cast<int>(sd::direct::ValueType::String);
+            remembered.value = record.value.toString();
+            m_rememberedControlValues[keyStd] = remembered;
+            m_transport->PublishString(key, record.value.toString());
+        }
+    }
+
+    if (m_connectionConfig.kind == sd::transport::TransportKind::Direct
+        && (key == "AutonTest" || key == "Test/AutonTest" || key == "TestMove"))
+    {
+        RememberedControlValue remembered;
+        remembered.valueType = static_cast<int>(sd::direct::ValueType::Double);
+        remembered.value = QVariant(record.value.toDouble());
+        m_rememberedControlValues[keyStd] = remembered;
+
+        if (m_transport != nullptr)
+        {
+            m_transport->PublishDouble(key, record.value.toDouble());
+        }
+
+        DebugLogUiEvent(QString("retain direct numeric key=%1 value=%2").arg(key).arg(record.value.toDouble()));
     }
 
     RecordVariableEvent(key, valueType, value, seq);
@@ -2469,7 +2512,11 @@ void MainWindow::StartTransport()
                     const QString widgetType = tile->GetWidgetType();
                     if (widgetType == "string.chooser")
                     {
-                        continue;
+                        const QString selectedValue = tile->GetStringValue();
+                        if (!selectedValue.isEmpty())
+                        {
+                            m_transport->PublishString(key + "/selected", selectedValue);
+                        }
                     }
                     else
                     {

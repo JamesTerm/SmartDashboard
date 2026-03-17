@@ -507,19 +507,19 @@ namespace sd::direct
                 }
 
                 std::lock_guard<std::mutex> lock(snapshotMutex);
-                if (update.key == "Test/AutonTest/AutoChooser/.type")
+                if (update.key == "Test/Auton_Selection/AutoChooser/.type")
                 {
                     snapshot.type = update.value.stringValue;
                 }
-                else if (update.key == "Test/AutonTest/AutoChooser/options")
+                else if (update.key == "Test/Auton_Selection/AutoChooser/options")
                 {
                     snapshot.options = update.value.stringValue;
                 }
-                else if (update.key == "Test/AutonTest/AutoChooser/active")
+                else if (update.key == "Test/Auton_Selection/AutoChooser/active")
                 {
                     snapshot.active = update.value.stringValue;
                 }
-                else if (update.key == "Test/AutonTest/AutoChooser/selected")
+                else if (update.key == "Test/Auton_Selection/AutoChooser/selected")
                 {
                     snapshot.selected = update.value.stringValue;
                 }
@@ -543,11 +543,11 @@ namespace sd::direct
 
         const auto publishChooserSnapshot = [&publisher]()
         {
-            publisher->PublishString("Test/AutonTest/AutoChooser/.type", "String Chooser");
-            publisher->PublishString("Test/AutonTest/AutoChooser/options", "DoNothing,Taxi,TwoPiece");
-            publisher->PublishString("Test/AutonTest/AutoChooser/default", "DoNothing");
-            publisher->PublishString("Test/AutonTest/AutoChooser/active", "DoNothing");
-            publisher->PublishString("Test/AutonTest/AutoChooser/selected", "Taxi");
+            publisher->PublishString("Test/Auton_Selection/AutoChooser/.type", "String Chooser");
+            publisher->PublishString("Test/Auton_Selection/AutoChooser/options", "DoNothing,Taxi,TwoPiece");
+            publisher->PublishString("Test/Auton_Selection/AutoChooser/default", "DoNothing");
+            publisher->PublishString("Test/Auton_Selection/AutoChooser/active", "DoNothing");
+            publisher->PublishString("Test/Auton_Selection/AutoChooser/selected", "Taxi");
             publisher->FlushNow();
         };
 
@@ -603,19 +603,19 @@ namespace sd::direct
             [&snapshot, &snapshotMutex](const VariableUpdate& update)
             {
                 std::lock_guard<std::mutex> lock(snapshotMutex);
-                if (update.key == "Test/AutonTest/AutoChooser/.type" && update.type == ValueType::String)
+                if (update.key == "Test/Auton_Selection/AutoChooser/.type" && update.type == ValueType::String)
                 {
                     snapshot.type = update.value.stringValue;
                 }
-                else if (update.key == "Test/AutonTest/AutoChooser/options" && update.type == ValueType::StringArray)
+                else if (update.key == "Test/Auton_Selection/AutoChooser/options" && update.type == ValueType::StringArray)
                 {
                     snapshot.options = update.value.stringArrayValue;
                 }
-                else if (update.key == "Test/AutonTest/AutoChooser/active" && update.type == ValueType::String)
+                else if (update.key == "Test/Auton_Selection/AutoChooser/active" && update.type == ValueType::String)
                 {
                     snapshot.active = update.value.stringValue;
                 }
-                else if (update.key == "Test/AutonTest/AutoChooser/selected" && update.type == ValueType::String)
+                else if (update.key == "Test/Auton_Selection/AutoChooser/selected" && update.type == ValueType::String)
                 {
                     snapshot.selected = update.value.stringValue;
                 }
@@ -641,11 +641,11 @@ namespace sd::direct
 
         const auto publishChooserSnapshot = [&publisher]()
         {
-            publisher->PublishString("Test/AutonTest/AutoChooser/.type", "String Chooser");
-            publisher->PublishStringArray("Test/AutonTest/AutoChooser/options", {"DoNothing", "Taxi", "TwoPiece"});
-            publisher->PublishString("Test/AutonTest/AutoChooser/default", "DoNothing");
-            publisher->PublishString("Test/AutonTest/AutoChooser/active", "DoNothing");
-            publisher->PublishString("Test/AutonTest/AutoChooser/selected", "Taxi");
+            publisher->PublishString("Test/Auton_Selection/AutoChooser/.type", "String Chooser");
+            publisher->PublishStringArray("Test/Auton_Selection/AutoChooser/options", {"DoNothing", "Taxi", "TwoPiece"});
+            publisher->PublishString("Test/Auton_Selection/AutoChooser/default", "DoNothing");
+            publisher->PublishString("Test/Auton_Selection/AutoChooser/active", "DoNothing");
+            publisher->PublishString("Test/Auton_Selection/AutoChooser/selected", "Taxi");
             publisher->FlushNow();
         };
 
