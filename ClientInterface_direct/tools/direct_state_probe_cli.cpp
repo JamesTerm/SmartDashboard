@@ -80,15 +80,17 @@ namespace
         const auto deadline = std::chrono::steady_clock::now() + duration;
         while (std::chrono::steady_clock::now() < deadline)
         {
-            commandClient.PutDouble("AutonTest", 1.0);
             commandClient.PutDouble("TestMove", 3.5);
             if (seedChooser)
             {
                 commandClient.PutString("Test/Auton_Selection/AutoChooser/selected", "Just Move Forward");
             }
+            else
+            {
+                commandClient.PutDouble("AutonTest", 1.0);
+            }
             commandClient.FlushNow();
 
-            telemetryClient.PutDouble("AutonTest", 1.0);
             telemetryClient.PutDouble("TestMove", 3.5);
             if (seedChooser)
             {
@@ -97,6 +99,10 @@ namespace
                 telemetryClient.PutString("Test/Auton_Selection/AutoChooser/default", "Do Nothing");
                 telemetryClient.PutString("Test/Auton_Selection/AutoChooser/active", "Just Move Forward");
                 telemetryClient.PutString("Test/Auton_Selection/AutoChooser/selected", "Just Move Forward");
+            }
+            else
+            {
+                telemetryClient.PutDouble("AutonTest", 1.0);
             }
             telemetryClient.FlushNow();
 
@@ -109,7 +115,7 @@ int main(int argc, char** argv)
 {
     using namespace std::chrono_literals;
 
-    const bool kSeedChooser = false;
+    bool seedChooser = false;
 
     const std::chrono::milliseconds timeout = (argc > 1)
         ? std::chrono::milliseconds(std::max(100, std::atoi(argv[1])))
@@ -125,6 +131,10 @@ int main(int argc, char** argv)
         else if (std::string(argv[i]) == "--seed-ms" && (i + 1) < argc)
         {
             seedDuration = std::chrono::milliseconds(std::max(100, std::atoi(argv[++i])));
+        }
+        else if (std::string(argv[i]) == "--chooser")
+        {
+            seedChooser = true;
         }
     }
 
@@ -171,7 +181,7 @@ int main(int argc, char** argv)
 
     if (seed)
     {
-        PublishSeedWindow(telemetryClient, commandClient, kSeedChooser, chooserOptions, seedDuration);
+        PublishSeedWindow(telemetryClient, commandClient, seedChooser, chooserOptions, seedDuration);
     }
 
     double autonTest = 0.0;
@@ -182,7 +192,9 @@ int main(int argc, char** argv)
     double timer = 0.0;
     double yFeet = 0.0;
 
-    const bool gotAuton = WaitForDouble(commandClient, "AutonTest", autonTest, timeout);
+    const bool gotAuton = seedChooser
+        ? false
+        : WaitForDouble(commandClient, "AutonTest", autonTest, timeout);
     const bool gotType = WaitForString(telemetryClient, "Test/Auton_Selection/AutoChooser/.type", chooserType, timeout);
     const bool gotSelected = WaitForString(telemetryClient, "Test/Auton_Selection/AutoChooser/selected", chooserSelected, timeout);
     const bool gotOptions = WaitForStringArray(telemetryClient, "Test/Auton_Selection/AutoChooser/options", observedOptions, timeout);
@@ -208,10 +220,17 @@ int main(int argc, char** argv)
     std::cout << "Timer=" << (gotTimer ? timer : -1.0) << "\n";
     std::cout << "Y_ft=" << (gotY ? yFeet : -1.0) << "\n";
 
-    const bool ok = gotAuton
-        && autonTest >= 1.0
+    const bool chooserOk = !seedChooser
+        || (gotSelected && chooserSelected == "Just Move Forward");
+
+    const bool numericOk = seedChooser
+        ? true
+        : (gotAuton && autonTest >= 1.0);
+
+    const bool ok = numericOk
         && gotMove
-        && testMove > 1.0;
+        && testMove > 1.0
+        && chooserOk;
 
     commandClient.Stop();
     telemetryClient.Stop();

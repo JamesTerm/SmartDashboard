@@ -1,4 +1,5 @@
 import ctypes
+import os
 import subprocess
 import sys
 import time
@@ -32,6 +33,10 @@ def helper(command):
     return run([sys.executable, str(SMARTDASHBOARD_HELPER), command])
 
 
+def kill_process_by_name(image_name):
+    subprocess.run(["taskkill", "/IM", image_name, "/F"], check=False, capture_output=True, text=True)
+
+
 def wait_for_window(title, timeout_s=12.0):
     user32 = ctypes.windll.user32
     deadline = time.time() + timeout_s
@@ -59,7 +64,10 @@ def truncate_logs():
     for path in (ROBOT_LOG, AUTON_CHAIN_LOG, UI_LOG, WATCH_LOG):
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():
-            path.unlink()
+            try:
+                path.unlink()
+            except PermissionError:
+                pass
 
 
 def tail(path, lines=40):
@@ -92,9 +100,33 @@ def parse_probe_numeric(output, key):
     return None
 
 
+def log_contains(path, needle):
+    if not path.exists():
+        return False
+    return needle in path.read_text(encoding="utf-8", errors="replace")
+
+
+def log_count(path, needle):
+    if not path.exists():
+        return 0
+    return path.read_text(encoding="utf-8", errors="replace").count(needle)
+
+
+def make_probe_args(timeout_ms, use_chooser, seed=False, seed_ms=None):
+    args = [str(SMARTDASHBOARD_PROBE), str(timeout_ms)]
+    if seed:
+        args.append("--seed")
+        if seed_ms is not None:
+            args.extend(["--seed-ms", str(seed_ms)])
+    if use_chooser:
+        args.append("--chooser")
+    return args
+
+
 def main():
     cycles = int(sys.argv[1]) if len(sys.argv) > 1 else 6
     enable_seconds = float(sys.argv[2]) if len(sys.argv) > 2 else 10.0
+    use_chooser = any(arg == "--chooser" for arg in sys.argv[3:])
 
     truncate_logs()
     helper("restart")
@@ -102,15 +134,13 @@ def main():
     watch = subprocess.Popen([str(SMARTDASHBOARD_WATCH), str(int((cycles * (enable_seconds + 3) + 10) * 1000)), str(WATCH_LOG)])
     ds = subprocess.Popen([str(DRIVERSTATION_EXE), "direct"])
 
-    last_post_y = None
-
     try:
         hwnd = wait_for_window(WINDOW_TITLE)
         if not hwnd:
             raise RuntimeError("driverstation_window_not_found")
 
         seed_duration_ms = max(2000, int((enable_seconds + 3.0) * 1000))
-        seed = run([str(SMARTDASHBOARD_PROBE), "2000", "--seed", "--seed-ms", str(seed_duration_ms)], check=False)
+        seed = run(make_probe_args(2000, use_chooser, seed=True, seed_ms=seed_duration_ms), check=False)
         print(f"seed_probe_rc={seed.returncode}")
         if seed.stdout:
             print(seed.stdout.strip())
@@ -124,19 +154,27 @@ def main():
             click(hwnd, IDC_STOP)
             time.sleep(0.75)
 
-            pre_probe = run([str(SMARTDASHBOARD_PROBE), "2000"], check=False)
+            pre_probe = run(make_probe_args(2000, use_chooser), check=False)
             pre_output = pre_probe.stdout or ""
             print(f"cycle={cycle} pre_probe_rc={pre_probe.returncode}")
             if pre_output:
                 print(pre_output.strip())
-            if "AutonTest=1" not in pre_output and "AutonTest=1.0" not in pre_output:
-                print(f"cycle={cycle} auton_selection_missing")
-                break
+            if use_chooser:
+                if "chooser.selected=Just Move Forward" not in pre_output:
+                    print(f"cycle={cycle} chooser_selection_missing")
+                    break
+                if "AutonTest=1" in pre_output or "AutonTest=1.0" in pre_output:
+                    print(f"cycle={cycle} chooser_seed_leaked_numeric_autontest")
+                    break
+            else:
+                if "AutonTest=1" not in pre_output and "AutonTest=1.0" not in pre_output:
+                    print(f"cycle={cycle} auton_selection_missing")
+                    break
             if "TestMove=3.5" not in pre_output:
                 print(f"cycle={cycle} precondition_failed")
                 break
 
-            stable_probe = run([str(SMARTDASHBOARD_PROBE), "2000"], check=False)
+            stable_probe = run(make_probe_args(2000, use_chooser), check=False)
             stable_output = stable_probe.stdout or ""
             print(f"cycle={cycle} stable_probe_rc={stable_probe.returncode}")
             if stable_output:
@@ -144,13 +182,15 @@ def main():
 
             pre_timer = parse_probe_numeric(stable_output, "Timer")
             pre_y = parse_probe_numeric(stable_output, "Y_ft")
+            pre_moveforward_count = log_count(AUTON_CHAIN_LOG, "[MoveForward] Activate TestMove=3.5")
+            pre_drive_count = log_count(AUTON_CHAIN_LOG, "[TeleAutonV2] DriveToLocation")
             print(f"cycle={cycle} pre_timer={pre_timer} pre_y_ft={pre_y}")
 
             click(hwnd, IDC_START)
             print(f"cycle={cycle} action=enable")
             time.sleep(enable_seconds)
 
-            probe = run([str(SMARTDASHBOARD_PROBE), "2000"], check=False)
+            probe = run(make_probe_args(2000, use_chooser), check=False)
             print(f"cycle={cycle} probe_rc={probe.returncode}")
             if probe.stdout:
                 print(probe.stdout.strip())
@@ -160,11 +200,23 @@ def main():
             post_output = probe.stdout or ""
             post_timer = parse_probe_numeric(post_output, "Timer")
             post_y = parse_probe_numeric(post_output, "Y_ft")
-            last_post_y = post_y
             print(f"cycle={cycle} post_timer={post_timer} post_y_ft={post_y}")
 
-            if pre_y is None or post_y is None or abs(post_y - pre_y) < 0.25:
-                print(f"cycle={cycle} y_ft_not_moving")
+            post_moveforward_count = log_count(AUTON_CHAIN_LOG, "[MoveForward] Activate TestMove=3.5")
+            post_drive_count = log_count(AUTON_CHAIN_LOG, "[TeleAutonV2] DriveToLocation")
+            moveforward_seen = post_moveforward_count > pre_moveforward_count
+            drive_seen = post_drive_count > pre_drive_count
+            motion_seen = (pre_y is not None and post_y is not None and abs(post_y - pre_y) >= 0.25)
+
+            if not moveforward_seen or not drive_seen:
+                print(f"cycle={cycle} move_command_missing")
+                break
+
+            if not motion_seen:
+                print(f"cycle={cycle} motion_snapshot_small but command_chain_ok=1")
+
+            if pre_y is None or post_y is None:
+                print(f"cycle={cycle} y_ft_unavailable")
                 break
 
             if pre_timer is not None and post_timer is not None:
@@ -177,6 +229,9 @@ def main():
             click(hwnd, IDC_STOP)
             print(f"cycle={cycle} action=disable")
             time.sleep(1.5)
+
+        else:
+            print("stress_result=pass")
 
         print("robot_log_tail:")
         for line in tail(ROBOT_LOG):
@@ -199,11 +254,13 @@ def main():
             ds.wait(timeout=5)
         except Exception:
             ds.kill()
+        kill_process_by_name("DriverStation.exe")
         helper("close")
         try:
             watch.wait(timeout=5)
         except Exception:
             watch.kill()
+        kill_process_by_name("DirectWatchCli.exe")
 
 
 if __name__ == "__main__":

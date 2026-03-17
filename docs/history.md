@@ -6,6 +6,11 @@ This document explains how FRC dashboard and telemetry architectures evolved, wh
 
 Audience: students and mentors who want to understand software architecture trade-offs, not just tool names.
 
+For current repository-specific debugging lessons, also see:
+
+- `docs/learning/`
+- `docs/journal/`
+
 ## Why this history matters
 
 When teams build dashboards, they are really building **data systems**: a robot produces state, software transports it, and humans interpret it in real time. FRC dashboard history is a series of attempts to improve that pipeline under real constraints:

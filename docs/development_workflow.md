@@ -60,6 +60,11 @@ Use an incremental ladder instead:
 
 This pattern matters for both hand-written debugging and AI-assisted work: the faster we isolate one truth at a time, the less likely we are to chase a symptom caused by a test harness mistake.
 
+See also:
+
+- `docs/learning/regression_debugging.md`
+- `docs/journal/2026-03-17-direct-debugging-journey.md`
+
 ## Review expectations
 
 - Behavior changes include proof of validation (tests or reproducible manual checks).

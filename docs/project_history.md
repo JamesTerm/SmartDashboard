@@ -24,6 +24,9 @@ Curated milestone history for this repository.
 - Current paired result with Robot_Simulation:
   - direct numeric populate is working again from the probe path
   - end-to-end paired motion now depends more on harness baseline semantics than on the original command-delivery bug.
+- Documentation now has a clearer split for teaching and storytelling:
+  - `docs/learning/` for reusable engineering lessons
+  - `docs/journal/` for longer-form dated debugging writeups.
 
 ## 2026-03-16 - Direct stress harness, session control, and restart hardening
 
