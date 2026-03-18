@@ -1,7 +1,5 @@
 #include "widgets/variable_tile.h"
 
-#include "app/debug_log_paths.h"
-
 #include "widgets/line_plot_widget.h"
 #include "widgets/tile_control_widget.h"
 
@@ -31,17 +29,13 @@
 #include <QPushButton>
 #include <QComboBox>
 
-#include <fstream>
-
 namespace sd::widgets
 {
     namespace
     {
         void DebugTileLog(const QString& line)
         {
-            static std::ofstream log(sd::app::GetDebugLogPath("direct_tile_debug_log.txt").toStdString(), std::ios::out | std::ios::trunc);
-            log << line.toStdString() << '\n';
-            log.flush();
+            static_cast<void>(line);
         }
 
         QString GetDefaultWidgetType(VariableType type)
@@ -529,21 +523,18 @@ namespace sd::widgets
     void VariableTile::SetBoolValue(bool value)
     {
         m_boolValue = value;
-        DebugTileLog(QString("tile.set_bool key=%1 value=%2 widget=%3").arg(m_key).arg(m_boolValue ? 1 : 0).arg(m_widgetType));
         UpdateValueDisplay();
     }
 
     void VariableTile::SetDoubleValue(double value)
     {
         m_doubleValue = value;
-        DebugTileLog(QString("tile.set_double key=%1 value=%2 widget=%3").arg(m_key).arg(m_doubleValue).arg(m_widgetType));
         UpdateValueDisplay();
     }
 
     void VariableTile::SetStringValue(const QString& value)
     {
         m_stringValue = value;
-        DebugTileLog(QString("tile.set_string key=%1 value=%2 widget=%3 chooser=%4").arg(m_key).arg(m_stringValue).arg(m_widgetType).arg(m_stringChooserMode ? 1 : 0));
         UpdateValueDisplay();
     }
 

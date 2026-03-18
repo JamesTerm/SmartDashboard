@@ -1,7 +1,5 @@
 #include "widgets/tile_control_widget.h"
 
-#include "app/debug_log_paths.h"
-
 #include <QCheckBox>
 #include <QComboBox>
 #include <QFont>
@@ -9,17 +7,13 @@
 #include <QLineEdit>
 #include <QSlider>
 
-#include <fstream>
-
 namespace sd::widgets
 {
     namespace
     {
         void DebugControlLog(const QString& line)
         {
-            static std::ofstream log(sd::app::GetDebugLogPath("direct_control_debug_log.txt").toStdString(), std::ios::out | std::ios::trunc);
-            log << line.toStdString() << '\n';
-            log.flush();
+            static_cast<void>(line);
         }
     }
 

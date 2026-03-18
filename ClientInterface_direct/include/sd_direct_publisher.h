@@ -23,7 +23,9 @@ namespace sd::direct
         std::uint32_t ringBufferBytes = 1U << 20;
 
         // Auto-flush period when autoFlushThread is enabled.
-        std::chrono::milliseconds flushPeriod {16};
+        // Keep this comfortably below one 20 ms robot loop so the dashboard
+        // does not feel a full control-cycle behind during normal use.
+        std::chrono::milliseconds flushPeriod {5};
 
         // When true, a background thread periodically calls FlushNow().
         // When false, caller is responsible for calling FlushNow().

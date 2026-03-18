@@ -25,7 +25,10 @@ namespace sd::direct
         std::wstring heartbeatEventName = L"Local\\SmartDashboard.Direct.Heartbeat";
 
         // Poll/wait timings used by subscriber worker loop.
-        std::chrono::milliseconds waitTimeout {50};
+        // This remains event-driven; the timeout is mainly a backstop for late
+        // joins and stale-state maintenance, so keep it short to avoid visible
+        // latency when signals are missed or coalesced.
+        std::chrono::milliseconds waitTimeout {5};
         std::chrono::milliseconds staleTimeout {1000};
         std::chrono::milliseconds heartbeatPeriod {100};
     };
