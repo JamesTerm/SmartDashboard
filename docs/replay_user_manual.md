@@ -46,7 +46,7 @@ Notes:
 
 ## Control reference
 
-Replay controls live in the status area.
+Replay controls live in the `Replay Controls` panel, which is docked at the bottom by default.
 
 - `Play/Pause` (`▶` / `⏸`): toggles replay movement.
 - `|◀`: rewind to start and pause.
@@ -59,6 +59,8 @@ Replay controls live in the status area.
   - `window=...` shows current visible timeline window span
 
 ## Timeline reference
+
+The timeline lives in the `Replay Timeline` panel.
 
 Timeline interactions:
 

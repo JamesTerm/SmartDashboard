@@ -468,4 +468,255 @@ namespace sd::direct
         // so under timing variability we assert a realistic minimum.
         EXPECT_GE(distinct.size(), 2U);
     }
+
+    TEST(DirectPublisherTests, StreamsStringChooserTopics)
+    {
+        const TestChannels channels = MakeTestChannels();
+
+        SubscriberConfig subConfig;
+        subConfig.mappingName = channels.mappingName;
+        subConfig.dataEventName = channels.dataEventName;
+        subConfig.heartbeatEventName = channels.heartbeatEventName;
+
+        PublisherConfig pubConfig;
+        pubConfig.mappingName = channels.mappingName;
+        pubConfig.dataEventName = channels.dataEventName;
+        pubConfig.heartbeatEventName = channels.heartbeatEventName;
+        pubConfig.autoFlushThread = false;
+
+        auto subscriber = CreateDirectSubscriber(subConfig);
+        auto publisher = CreateDirectPublisher(pubConfig);
+
+        struct ChooserSnapshot
+        {
+            std::string type;
+            std::string options;
+            std::string active;
+            std::string selected;
+        };
+
+        ChooserSnapshot snapshot;
+        std::mutex snapshotMutex;
+
+        ASSERT_TRUE(subscriber->Start(
+            [&snapshot, &snapshotMutex](const VariableUpdate& update)
+            {
+                if (update.type != ValueType::String)
+                {
+                    return;
+                }
+
+                std::lock_guard<std::mutex> lock(snapshotMutex);
+                if (update.key == "Test/Auton_Selection/AutoChooser/.type")
+                {
+                    snapshot.type = update.value.stringValue;
+                }
+                else if (update.key == "Test/Auton_Selection/AutoChooser/options")
+                {
+                    snapshot.options = update.value.stringValue;
+                }
+                else if (update.key == "Test/Auton_Selection/AutoChooser/active")
+                {
+                    snapshot.active = update.value.stringValue;
+                }
+                else if (update.key == "Test/Auton_Selection/AutoChooser/selected")
+                {
+                    snapshot.selected = update.value.stringValue;
+                }
+            },
+            [](ConnectionState)
+            {
+            }
+        ));
+
+        ASSERT_TRUE(publisher->Start());
+
+        const auto chooserObserved = [&snapshot, &snapshotMutex]()
+        {
+            std::lock_guard<std::mutex> lock(snapshotMutex);
+            return
+                snapshot.type == "String Chooser"
+                && snapshot.options == "DoNothing,Taxi,TwoPiece"
+                && snapshot.active == "DoNothing"
+                && snapshot.selected == "Taxi";
+        };
+
+        const auto publishChooserSnapshot = [&publisher]()
+        {
+            publisher->PublishString("Test/Auton_Selection/AutoChooser/.type", "String Chooser");
+            publisher->PublishString("Test/Auton_Selection/AutoChooser/options", "DoNothing,Taxi,TwoPiece");
+            publisher->PublishString("Test/Auton_Selection/AutoChooser/default", "DoNothing");
+            publisher->PublishString("Test/Auton_Selection/AutoChooser/active", "DoNothing");
+            publisher->PublishString("Test/Auton_Selection/AutoChooser/selected", "Taxi");
+            publisher->FlushNow();
+        };
+
+        ASSERT_TRUE(WaitUntil(
+            [&publishChooserSnapshot, &chooserObserved]()
+            {
+                publishChooserSnapshot();
+                return chooserObserved();
+            },
+            2s
+        ));
+
+        publisher->Stop();
+        subscriber->Stop();
+
+        std::lock_guard<std::mutex> lock(snapshotMutex);
+        EXPECT_EQ(snapshot.type, "String Chooser");
+        EXPECT_EQ(snapshot.options, "DoNothing,Taxi,TwoPiece");
+        EXPECT_EQ(snapshot.active, "DoNothing");
+        EXPECT_EQ(snapshot.selected, "Taxi");
+    }
+
+    TEST(DirectPublisherTests, StreamsStringArrayChooserOptions)
+    {
+        const TestChannels channels = MakeTestChannels();
+
+        SubscriberConfig subConfig;
+        subConfig.mappingName = channels.mappingName;
+        subConfig.dataEventName = channels.dataEventName;
+        subConfig.heartbeatEventName = channels.heartbeatEventName;
+
+        PublisherConfig pubConfig;
+        pubConfig.mappingName = channels.mappingName;
+        pubConfig.dataEventName = channels.dataEventName;
+        pubConfig.heartbeatEventName = channels.heartbeatEventName;
+        pubConfig.autoFlushThread = false;
+
+        auto subscriber = CreateDirectSubscriber(subConfig);
+        auto publisher = CreateDirectPublisher(pubConfig);
+
+        struct ChooserSnapshot
+        {
+            std::string type;
+            std::vector<std::string> options;
+            std::string active;
+            std::string selected;
+        };
+
+        ChooserSnapshot snapshot;
+        std::mutex snapshotMutex;
+
+        ASSERT_TRUE(subscriber->Start(
+            [&snapshot, &snapshotMutex](const VariableUpdate& update)
+            {
+                std::lock_guard<std::mutex> lock(snapshotMutex);
+                if (update.key == "Test/Auton_Selection/AutoChooser/.type" && update.type == ValueType::String)
+                {
+                    snapshot.type = update.value.stringValue;
+                }
+                else if (update.key == "Test/Auton_Selection/AutoChooser/options" && update.type == ValueType::StringArray)
+                {
+                    snapshot.options = update.value.stringArrayValue;
+                }
+                else if (update.key == "Test/Auton_Selection/AutoChooser/active" && update.type == ValueType::String)
+                {
+                    snapshot.active = update.value.stringValue;
+                }
+                else if (update.key == "Test/Auton_Selection/AutoChooser/selected" && update.type == ValueType::String)
+                {
+                    snapshot.selected = update.value.stringValue;
+                }
+            },
+            [](ConnectionState)
+            {
+            }
+        ));
+
+        ASSERT_TRUE(publisher->Start());
+
+        const auto chooserObserved = [&snapshot, &snapshotMutex]()
+        {
+            std::lock_guard<std::mutex> lock(snapshotMutex);
+            return snapshot.type == "String Chooser"
+                && snapshot.options.size() == 3
+                && snapshot.options[0] == "DoNothing"
+                && snapshot.options[1] == "Taxi"
+                && snapshot.options[2] == "TwoPiece"
+                && snapshot.active == "DoNothing"
+                && snapshot.selected == "Taxi";
+        };
+
+        const auto publishChooserSnapshot = [&publisher]()
+        {
+            publisher->PublishString("Test/Auton_Selection/AutoChooser/.type", "String Chooser");
+            publisher->PublishStringArray("Test/Auton_Selection/AutoChooser/options", {"DoNothing", "Taxi", "TwoPiece"});
+            publisher->PublishString("Test/Auton_Selection/AutoChooser/default", "DoNothing");
+            publisher->PublishString("Test/Auton_Selection/AutoChooser/active", "DoNothing");
+            publisher->PublishString("Test/Auton_Selection/AutoChooser/selected", "Taxi");
+            publisher->FlushNow();
+        };
+
+        ASSERT_TRUE(WaitUntil(
+            [&publishChooserSnapshot, &chooserObserved]()
+            {
+                publishChooserSnapshot();
+                return chooserObserved();
+            },
+            2s
+        ));
+
+        publisher->Stop();
+        subscriber->Stop();
+
+        std::lock_guard<std::mutex> lock(snapshotMutex);
+        EXPECT_EQ(snapshot.type, "String Chooser");
+        ASSERT_EQ(snapshot.options.size(), 3u);
+        EXPECT_EQ(snapshot.options[0], "DoNothing");
+        EXPECT_EQ(snapshot.options[1], "Taxi");
+        EXPECT_EQ(snapshot.options[2], "TwoPiece");
+        EXPECT_EQ(snapshot.active, "DoNothing");
+        EXPECT_EQ(snapshot.selected, "Taxi");
+    }
+
+    TEST(DirectPublisherTests, LateJoiningSubscriberReceivesRetainedCommandReplay)
+    {
+        const TestChannels channels = MakeTestChannels();
+
+        PublisherConfig pubConfig;
+        pubConfig.mappingName = channels.mappingName;
+        pubConfig.dataEventName = channels.dataEventName;
+        pubConfig.heartbeatEventName = channels.heartbeatEventName;
+        pubConfig.autoFlushThread = true;
+
+        auto publisher = CreateDirectPublisher(pubConfig);
+        ASSERT_TRUE(publisher->Start());
+
+        publisher->PublishDouble("TestMove", 3.5);
+        ASSERT_TRUE(publisher->FlushNow());
+
+        SubscriberConfig subConfig;
+        subConfig.mappingName = channels.mappingName;
+        subConfig.dataEventName = channels.dataEventName;
+        subConfig.heartbeatEventName = channels.heartbeatEventName;
+
+        std::atomic<double> observed {0.0};
+        auto subscriber = CreateDirectSubscriber(subConfig);
+        ASSERT_TRUE(subscriber->Start(
+            [&observed](const VariableUpdate& update)
+            {
+                if (update.key == "TestMove" && update.type == ValueType::Double)
+                {
+                    observed.store(update.value.doubleValue);
+                }
+            },
+            [](ConnectionState)
+            {
+            }
+        ));
+
+        ASSERT_TRUE(WaitUntil(
+            [&observed]()
+            {
+                return observed.load() > 1.0;
+            },
+            2s
+        ));
+        EXPECT_DOUBLE_EQ(observed.load(), 3.5);
+
+        subscriber->Stop();
+        publisher->Stop();
+    }
 }

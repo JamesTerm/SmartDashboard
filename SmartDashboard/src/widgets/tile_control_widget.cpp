@@ -1,13 +1,28 @@
 #include "widgets/tile_control_widget.h"
 
+#include "app/debug_log_paths.h"
+
 #include <QCheckBox>
+#include <QComboBox>
 #include <QFont>
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QSlider>
 
+#include <fstream>
+
 namespace sd::widgets
 {
+    namespace
+    {
+        void DebugControlLog(const QString& line)
+        {
+            static std::ofstream log(sd::app::GetDebugLogPath("direct_control_debug_log.txt").toStdString(), std::ios::out | std::ios::trunc);
+            log << line.toStdString() << '\n';
+            log.flush();
+        }
+    }
+
     TileControlWidget::TileControlWidget(VariableType type, QWidget* parent)
         : QWidget(parent)
         , m_type(type)
@@ -45,13 +60,27 @@ namespace sd::widgets
         else if (m_type == VariableType::String)
         {
             m_lineEdit = new QLineEdit(this);
+            m_comboBox = new QComboBox(this);
+            m_comboBox->setVisible(false);
             layout->addWidget(m_lineEdit);
+            layout->addWidget(m_comboBox);
+
             connect(m_lineEdit, &QLineEdit::editingFinished, this, [this]()
             {
-                if (!m_settingProgrammatically)
+                if (!m_settingProgrammatically && !m_stringChooserMode)
                 {
                     emit StringEdited(m_lineEdit->text());
                 }
+            });
+
+            connect(m_comboBox, &QComboBox::currentTextChanged, this, [this](const QString& text)
+            {
+                if (m_settingProgrammatically || !m_stringChooserMode)
+                {
+                    return;
+                }
+
+                emit StringEdited(text);
             });
         }
     }
@@ -91,6 +120,7 @@ namespace sd::widgets
         m_settingProgrammatically = true;
         m_slider->setValue(static_cast<int>(normalized * 100.0 + 0.5));
         m_settingProgrammatically = false;
+        DebugControlLog(QString("control.set_double value=%1 chooser=%2").arg(value).arg(m_stringChooserMode ? 1 : 0));
     }
 
     void TileControlWidget::SetDoubleRange(double lowerLimit, double upperLimit)
@@ -137,14 +167,73 @@ namespace sd::widgets
 
     void TileControlWidget::SetStringValue(const QString& value)
     {
-        if (!m_lineEdit)
+        if (!m_lineEdit || !m_comboBox)
         {
             return;
         }
 
         m_settingProgrammatically = true;
         m_lineEdit->setText(value);
+
+        const int existingIndex = m_comboBox->findText(value);
+        if (existingIndex >= 0)
+        {
+            m_comboBox->setCurrentIndex(existingIndex);
+        }
+        else if (!value.isEmpty())
+        {
+            m_comboBox->setCurrentText(value);
+        }
+
         m_settingProgrammatically = false;
+        DebugControlLog(QString("control.set_string value=%1 chooser=%2 combo_count=%3").arg(value).arg(m_stringChooserMode ? 1 : 0).arg(m_comboBox->count()));
+    }
+
+    void TileControlWidget::SetStringOptions(const QStringList& options)
+    {
+        if (!m_comboBox)
+        {
+            return;
+        }
+
+        m_settingProgrammatically = true;
+        const QString previous = m_comboBox->currentText();
+        m_comboBox->clear();
+        m_comboBox->addItems(options);
+
+        if (!previous.isEmpty())
+        {
+            const int idx = m_comboBox->findText(previous);
+            if (idx >= 0)
+            {
+                m_comboBox->setCurrentIndex(idx);
+            }
+            else
+            {
+                m_comboBox->setCurrentText(previous);
+            }
+        }
+        m_settingProgrammatically = false;
+        DebugControlLog(QString("control.set_options count=%1 chooser=%2 current=%3").arg(options.size()).arg(m_stringChooserMode ? 1 : 0).arg(m_comboBox->currentText()));
+    }
+
+    void TileControlWidget::SetStringChooserMode(bool chooserMode)
+    {
+        m_stringChooserMode = chooserMode;
+
+        if (m_lineEdit != nullptr)
+        {
+            m_lineEdit->setVisible(!m_stringChooserMode);
+            m_lineEdit->setEnabled(!m_stringChooserMode);
+        }
+
+        if (m_comboBox != nullptr)
+        {
+            m_comboBox->setVisible(m_stringChooserMode);
+            m_comboBox->setEnabled(m_stringChooserMode);
+        }
+
+        DebugControlLog(QString("control.set_chooser_mode chooser=%1 combo_visible=%2 line_visible=%3").arg(m_stringChooserMode ? 1 : 0).arg(m_comboBox && m_comboBox->isVisible() ? 1 : 0).arg(m_lineEdit && m_lineEdit->isVisible() ? 1 : 0));
     }
 
     void TileControlWidget::SetTextFontPointSize(int pointSize)
@@ -158,6 +247,11 @@ namespace sd::widgets
         if (m_lineEdit != nullptr)
         {
             m_lineEdit->setFont(font);
+        }
+
+        if (m_comboBox != nullptr)
+        {
+            m_comboBox->setFont(font);
         }
 
         if (m_checkBox != nullptr)

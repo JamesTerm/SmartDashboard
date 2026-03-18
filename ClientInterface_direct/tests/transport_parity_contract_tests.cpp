@@ -276,4 +276,146 @@ namespace sd::direct
         second.Stop();
         RemoveFileIfExists(retainedPath);
     }
+
+    TEST(TransportParityContractTests, DirectRobotSurvivesStressReplaysDashboardOwnedCommandValue)
+    {
+        const TestChannels commandChannels = MakeUniqueChannels(L"Local\\SmartDashboard.Contract.CommandRetained");
+
+        SmartDashboardClientConfig dashboardConfig;
+        dashboardConfig.publisher.mappingName = commandChannels.mappingName;
+        dashboardConfig.publisher.dataEventName = commandChannels.dataEventName;
+        dashboardConfig.publisher.heartbeatEventName = commandChannels.heartbeatEventName;
+        dashboardConfig.publisher.autoFlushThread = true;
+        dashboardConfig.enableSubscriber = false;
+        dashboardConfig.enableRetainedStore = false;
+
+        SmartDashboardClient dashboard(dashboardConfig);
+        ASSERT_TRUE(dashboard.Start());
+        dashboard.PutDouble("TestMove", 3.5);
+        ASSERT_TRUE(dashboard.FlushNow());
+
+        double testMove = 0.0;
+        SubscriberConfig robotSubConfig;
+        robotSubConfig.mappingName = commandChannels.mappingName;
+        robotSubConfig.dataEventName = commandChannels.dataEventName;
+        robotSubConfig.heartbeatEventName = commandChannels.heartbeatEventName;
+
+        auto robot = CreateDirectSubscriber(robotSubConfig);
+        ASSERT_TRUE(robot->Start(
+            [&testMove](const VariableUpdate& update)
+            {
+                if (update.key == "TestMove" && update.type == ValueType::Double)
+                {
+                    testMove = update.value.doubleValue;
+                }
+            },
+            [](ConnectionState)
+            {
+            }
+        ));
+
+        ASSERT_TRUE(WaitUntil(
+            [&testMove]()
+            {
+                return testMove > 1.0;
+            },
+            2s
+        ));
+        EXPECT_DOUBLE_EQ(testMove, 3.5);
+
+        robot->Stop();
+
+        auto robotRestarted = CreateDirectSubscriber(robotSubConfig);
+        ASSERT_TRUE(robotRestarted->Start(
+            [&testMove](const VariableUpdate& update)
+            {
+                if (update.key == "TestMove" && update.type == ValueType::Double)
+                {
+                    testMove = update.value.doubleValue;
+                }
+            },
+            [](ConnectionState)
+            {
+            }
+        ));
+
+        testMove = 0.0;
+        ASSERT_TRUE(WaitUntil(
+            [&testMove]()
+            {
+                return testMove > 1.0;
+            },
+            2s
+        ));
+        EXPECT_DOUBLE_EQ(testMove, 3.5);
+
+        robotRestarted->Stop();
+        dashboard.Stop();
+    }
+
+    TEST(TransportParityContractTests, DirectDashboardSurvivesStressKeepsRobotOwnedChooserSelection)
+    {
+        const TestChannels telemetryChannels = MakeUniqueChannels(L"Local\\SmartDashboard.Contract.TelemetryRetained");
+        const TestChannels dashboardPublisherChannels = MakeUniqueChannels(L"Local\\SmartDashboard.Contract.TelemetryRetained.DashboardPub");
+
+        SmartDashboardClientConfig robotConfig;
+        robotConfig.publisher.mappingName = telemetryChannels.mappingName;
+        robotConfig.publisher.dataEventName = telemetryChannels.dataEventName;
+        robotConfig.publisher.heartbeatEventName = telemetryChannels.heartbeatEventName;
+        robotConfig.publisher.autoFlushThread = true;
+        robotConfig.enableSubscriber = false;
+        robotConfig.enableRetainedStore = false;
+
+        SmartDashboardClient robot(robotConfig);
+        ASSERT_TRUE(robot.Start());
+
+        robot.PutString("Test/Auton_Selection/AutoChooser/.type", "String Chooser");
+        robot.PutStringArray("Test/Auton_Selection/AutoChooser/options", {"Do Nothing", "Just Move Forward", "Just Rotate"});
+        robot.PutString("Test/Auton_Selection/AutoChooser/default", "Do Nothing");
+        robot.PutString("Test/Auton_Selection/AutoChooser/active", "Just Move Forward");
+        robot.PutString("Test/Auton_Selection/AutoChooser/selected", "Just Move Forward");
+        ASSERT_TRUE(robot.FlushNow());
+
+        SmartDashboardClientConfig dashboardConfig;
+        dashboardConfig.publisher.mappingName = dashboardPublisherChannels.mappingName;
+        dashboardConfig.publisher.dataEventName = dashboardPublisherChannels.dataEventName;
+        dashboardConfig.publisher.heartbeatEventName = dashboardPublisherChannels.heartbeatEventName;
+        dashboardConfig.publisher.autoFlushThread = false;
+        dashboardConfig.subscriber.mappingName = telemetryChannels.mappingName;
+        dashboardConfig.subscriber.dataEventName = telemetryChannels.dataEventName;
+        dashboardConfig.subscriber.heartbeatEventName = telemetryChannels.heartbeatEventName;
+        dashboardConfig.enableSubscriber = true;
+        dashboardConfig.enableRetainedStore = false;
+
+        SmartDashboardClient dashboard(dashboardConfig);
+        ASSERT_TRUE(dashboard.Start());
+
+        std::string selected;
+        ASSERT_TRUE(WaitUntil(
+            [&dashboard, &selected]()
+            {
+                return dashboard.TryGetString("Test/Auton_Selection/AutoChooser/selected", selected);
+            },
+            2s
+        ));
+        EXPECT_EQ(selected, "Just Move Forward");
+
+        dashboard.Stop();
+
+        SmartDashboardClient dashboardRestarted(dashboardConfig);
+        ASSERT_TRUE(dashboardRestarted.Start());
+
+        selected.clear();
+        ASSERT_TRUE(WaitUntil(
+            [&dashboardRestarted, &selected]()
+            {
+                return dashboardRestarted.TryGetString("Test/Auton_Selection/AutoChooser/selected", selected);
+            },
+            2s
+        ));
+        EXPECT_EQ(selected, "Just Move Forward");
+
+        dashboardRestarted.Stop();
+        robot.Stop();
+    }
 }

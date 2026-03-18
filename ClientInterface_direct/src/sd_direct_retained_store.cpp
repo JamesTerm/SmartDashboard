@@ -46,6 +46,7 @@ namespace sd::direct
                 double doubleValue;
                 char stringValue[kMaxStringBytes + 1];
             } value {};
+            char stringArrayValue[kMaxStringBytes + 1] {};
         };
 
         bool WaitForMutex(HANDLE mutexHandle)
@@ -191,6 +192,10 @@ namespace sd::direct
                     out.precision(std::numeric_limits<double>::max_digits10);
                     out << e.value.doubleValue;
                 }
+                else if (e.type == static_cast<std::uint8_t>(ValueType::StringArray))
+                {
+                    out << Escape(std::string(e.stringArrayValue));
+                }
                 else
                 {
                     out << Escape(std::string(e.value.stringValue));
@@ -248,6 +253,12 @@ namespace sd::direct
                 else if (e.type == static_cast<std::uint8_t>(ValueType::Double))
                 {
                     e.value.doubleValue = std::stod(parts[4]);
+                }
+                else if (e.type == static_cast<std::uint8_t>(ValueType::StringArray))
+                {
+                    const std::string val = parts[4].substr(0, kMaxStringBytes);
+                    std::memcpy(e.stringArrayValue, val.data(), val.size());
+                    e.stringArrayValue[val.size()] = '\0';
                 }
                 else
                 {
@@ -417,6 +428,21 @@ namespace sd::direct
         {
             dst.value.doubleValue = update.value.doubleValue;
         }
+        else if (update.type == ValueType::StringArray)
+        {
+            std::string joined;
+            for (std::size_t i = 0; i < update.value.stringArrayValue.size(); ++i)
+            {
+                if (i > 0)
+                {
+                    joined.push_back('\x1f');
+                }
+                joined += update.value.stringArrayValue[i];
+            }
+            const std::string val = joined.substr(0, kMaxStringBytes);
+            std::memcpy(dst.stringArrayValue, val.data(), val.size());
+            dst.stringArrayValue[val.size()] = '\0';
+        }
         else
         {
             const std::string val = update.value.stringValue.substr(0, kMaxStringBytes);
@@ -457,6 +483,25 @@ namespace sd::direct
             else if (type == ValueType::Double)
             {
                 outValue.doubleValue = e.value.doubleValue;
+            }
+            else if (type == ValueType::StringArray)
+            {
+                outValue.stringArrayValue.clear();
+                std::string current;
+                const std::string packed = e.stringArrayValue;
+                for (char ch : packed)
+                {
+                    if (ch == '\x1f')
+                    {
+                        outValue.stringArrayValue.push_back(current);
+                        current.clear();
+                    }
+                    else
+                    {
+                        current.push_back(ch);
+                    }
+                }
+                outValue.stringArrayValue.push_back(current);
             }
             else
             {

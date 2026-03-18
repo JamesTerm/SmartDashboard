@@ -26,7 +26,7 @@ namespace sd::direct
 
         // Poll/wait timings used by subscriber worker loop.
         std::chrono::milliseconds waitTimeout {50};
-        std::chrono::milliseconds staleTimeout {250};
+        std::chrono::milliseconds staleTimeout {1000};
         std::chrono::milliseconds heartbeatPeriod {100};
     };
 

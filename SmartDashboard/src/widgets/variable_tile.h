@@ -2,6 +2,7 @@
 
 #include <QFrame>
 #include <QSize>
+#include <QStringList>
 
 class QLabel;
 class QMenu;
@@ -63,6 +64,8 @@ namespace sd::widgets
         void SetTextFontPointSize(int pointSize);
         void SetDoubleNumericEditable(bool editable);
         void SetBoolCheckboxShowLabel(bool showLabel);
+        void SetStringChooserMode(bool chooserMode);
+        void SetStringChooserOptions(const QStringList& options);
         void ResetLinePlotGraph();
 
         QString GetKey() const;
@@ -71,6 +74,8 @@ namespace sd::widgets
         bool GetBoolValue() const;
         double GetDoubleValue() const;
         QString GetStringValue() const;
+        bool GetStringChooserMode() const;
+        QStringList GetStringChooserOptions() const;
         void SetWidgetType(const QString& widgetType);
         void SetTitleText(const QString& title);
 
@@ -146,6 +151,8 @@ namespace sd::widgets
         bool m_doubleNumericEditable = false;
         int m_textFontPointSize = 0;
         bool m_boolCheckboxShowLabel = false;
+        bool m_stringChooserMode = false;
+        QStringList m_stringChooserOptions;
         double m_gaugeLowerLimit = -1.0;
         double m_gaugeUpperLimit = 1.0;
         double m_gaugeTickInterval = 0.2;

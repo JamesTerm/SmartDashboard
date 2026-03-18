@@ -38,9 +38,8 @@ namespace sd::layout
         QVariant textFontPointSize;
         QVariant doubleNumericEditable;
         QVariant boolCheckboxShowLabel;
-        QVariant boolValue;
-        QVariant doubleValue;
-        QVariant stringValue;
+        QVariant stringChooserMode;
+        QVariant stringChooserOptions;
     };
 
     bool SaveLayout(const QWidget* canvas, const QString& filePath);

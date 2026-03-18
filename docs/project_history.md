@@ -5,8 +5,114 @@ Curated milestone history for this repository.
 - Edit this file for durable project milestones and outcomes.
 - Keep lean handoff context in `Agent_Session_Notes.md`.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
+- Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
-## 2026-03-14 - Dockable replay workspace iteration 1 (controls + timeline panels)
+## 2026-03-17 - Direct survive restart fix and remembered-control recovery
+
+- Restored the Direct dashboard-survive path for Robot_Simulation pairing without changing the compatibility baseline:
+  - numeric `AutonTest` baseline remains preserved for simple/legacy validation
+  - chooser flow stays on the scoped `Test/Auton_Selection/AutoChooser` path.
+- Fixed remembered dashboard-owned control recovery in `MainWindow`:
+  - load remembered control values from `QSettings` on startup
+  - apply them after layout load and again after Direct retained replay
+  - persist control edits immediately when bool/double/string operator widgets change.
+- Hardened Direct startup ordering around retained replay:
+  - clear variable sequence tracking before replaying retained startup values so synthetic `seq=0` updates are allowed to repaint tiles after restart
+  - extend retained numeric replay coverage to include `TestMove` / `Test/TestMove` as well as `AutonTest`.
+- Reduced Direct chooser/widget churn during reconnects:
+  - avoid redundant chooser widget-type resets in `MainWindow`
+  - make `VariableTile::SetStringChooserMode()` a no-op when mode is unchanged.
+- Improved direct subscriber instance isolation for multi-process observers by deriving subscriber instance ids from process/time-local entropy instead of a simple in-process counter.
+- Added end-to-end validation tooling:
+  - new `tools/survive_sequence.py` automates dashboard-survive followed by robot-survive verification.
+- Validation/result:
+  - paired survive flow now restores `TestMove=3.5`
+  - chooser selection survives dashboard restart
+  - subsequent robot-survive phase passes cleanly
+  - immediate post-restart telemetry paint can still be sparse in the shortest probe window, so that remains a follow-up polish item rather than a blocker.
+
+## 2026-03-17 - Direct numeric control recovery, layout-value cleanup, and debugging workflow note
+
+- Stopped layout save/load from persisting live widget values:
+  - layout files now keep arrangement and widget configuration only
+  - old robot/session values no longer overwrite startup state when the robot is offline.
+- Reworked direct simulator probe behavior so it behaves more like a real stream instead of a single burst:
+  - repeated publish window with flushes
+  - explicit numeric seeding path for `AutonTest` and `TestMove`
+  - chooser path renamed to `Test/Auton_Selection/AutoChooser` so chooser experiments no longer collide with legacy numeric `AutonTest`.
+- Tightened Direct-mode teaching/debugging workflow after regression hunting with Robot_Simulation:
+  - verify the smallest observable first (`AutonTest` populate check)
+  - confirm the helper/test path matches the real dashboard ownership model
+  - separate chooser and numeric experiments to reduce masked failures
+  - use small strategic commits so known-good checkpoints can be reused for regression testing.
+- Current paired result with Robot_Simulation:
+  - direct numeric populate is working again from the probe path
+  - end-to-end paired motion now depends more on harness baseline semantics than on the original command-delivery bug.
+- Documentation now has a clearer split for teaching and storytelling:
+  - `docs/learning/` for reusable engineering lessons
+  - `docs/journal/` for longer-form dated debugging writeups.
+
+## 2026-03-16 - Direct stress harness, session control, and restart hardening
+
+- Added a more systematic Direct-mode debugging workflow for Robot_Simulation pairing:
+  - `tools/smartdashboard_process.py` for deterministic launch/check/close control of SmartDashboard
+  - `DirectStateProbeCli` to seed and verify chooser + `TestMove`
+  - `DirectWatchCli` to passively capture Direct transport updates during smoke runs
+- Hardened Direct transport session handling:
+  - subscriber path now uses independent read-cursor semantics instead of a single shared consumed cursor
+  - UI delivery now batches queued transport updates onto the Qt thread instead of posting one queued lambda per update
+  - fixed harness tile placement for `Test/AutonTest/AutoChooser`, `TestMove`, `Timer`, and `Y_ft` to support repeatable visual verification
+- Worked jointly with Robot_Simulation transport updates to improve repeated robot-restart behavior:
+  - repeated single-dashboard runs are healthier
+  - extra concurrent observers still expose race/session weaknesses, so multi-observer robustness remains a later transport-design task
+  - `Timer` and `Y_ft` are now the recommended live paint indicators during smoke, while chooser/TestMove remain primarily setup-state indicators.
+
+## 2026-03-15 - Direct transport control replay for simulator reconnect stability
+
+- Added direct transport retained-control replay hook to dashboard transport interface:
+  - `IDashboardTransport::ReplayRetainedControls(...)`.
+- Implemented retained control replay in direct dashboard transport:
+  - caches latest direct variable updates by key (`m_latestByKey`)
+  - replays key control values (`AutonTest`, `Test/AutonTest`) on transport start path.
+- Added startup and reconnect control republish behavior in main window:
+  - publishes current operator control tile values on transport start
+  - republishes remembered control values when connection transitions to `Connected`
+  - includes chooser `key/selected` publish behavior.
+- Added remembered control cache in main window for reconnects without fresh UI edit events.
+- Validation:
+  - `SmartDashboardApp` builds in Debug.
+  - paired manual stress against Robot_Simulation direct mode confirms control values (`AutonTest`, `TestMove`) survive repeated simulator restarts without restarting SmartDashboard.
+
+## 2026-03-15 - Robot simulation transport contract aligned with Shuffleboard-focused direction
+
+- Added dedicated simulator-facing transport handoff guide:
+  - `docs/robot_simulation_transport_guide.md`
+- Document now captures dual-mode simulator expectation for interoperability work:
+  - `Direct` mode for local deterministic integration loops
+  - `Legacy NT` mode as compatibility baseline for SmartDashboard/Shuffleboard migration validation
+- Compatibility stance is now explicit and reusable across sessions:
+  - keep legacy NT behavior stable as the comparison oracle
+  - allow Shuffleboard-oriented behavior as additive profile work that must not break legacy baseline behavior
+- Added explicit guidance for chooser contract and migration key policy (`scoped preferred + legacy alias fallback`) so Robot_Simulation and dashboard sessions share the same assumptions.
+
+## 2026-03-14 - Documentation synchronization and handoff cleanup
+
+- Reduced `Agent_Session_Notes.md` to handoff-critical current-state context only.
+- Reaffirmed documentation split:
+  - `Agent_Session_Notes.md` = lean next-session handoff
+  - `docs/project_history.md` = durable milestone log
+- Refreshed replay documentation to match local `main` state:
+  - `docs/replay_parity_roadmap.md` now marks baseline and competitive parity items as implemented
+  - advanced replay section now distinguishes implemented vs. still-future items
+  - dockable replay workspace note now reflects merged/finalized status instead of in-progress branch language
+  - `docs/replay_user_manual.md` now matches the dockable replay workspace layout (`Replay Controls` and `Replay Timeline` panels, status-bar readouts)
+
+## 2026-03-14 - Dockable replay workspace finalized and merged to main
+
+- Merged `feature/replay-dockable-workspace` into local `main` after workspace validation.
+- Replay workspace on `main` now includes dockable `Replay Controls`, `Replay Timeline`, and `Replay Markers` panels with persisted visibility/layout behavior.
+
+### Implementation details from the feature branch
 
 - Added dockable replay workspace panels for parity with Replay Markers workflow:
   - `Replay Controls` moved into its own `QDockWidget`
@@ -192,8 +298,8 @@ Curated milestone history for this repository.
 
 - Merged `feature/playback-recording-replay` into local `main` after replay + capture CLI validation.
 - Created annotated stability tag: `v0.9.0-replay-foundation`.
-- Started next iteration branch: `feature/replay-iteration-a-timeline-readability`.
-- Next implementation target is Iteration A from `docs/replay_parity_roadmap.md` (timeline readability and temporal affordances).
+- At that time, the next iteration branch was `feature/replay-iteration-a-timeline-readability`.
+- At that time, the next implementation target was Iteration A from `docs/replay_parity_roadmap.md` (timeline readability and temporal affordances).
 
 ## 2026-03-12 - Replay parity iterations A+B (timeline readability, markers, jump workflow)
 

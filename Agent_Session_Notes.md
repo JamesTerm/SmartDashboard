@@ -10,6 +10,7 @@
 - `apply_patch` expects workspace-relative paths (forward slashes). Avoid absolute Windows paths to prevent separator errors.
 - Code style uses ANSI/Allman indentation; keep brace/indent alignment consistent with existing blocks to avoid drift.
 - Use Windows CRLF line endings for C++ source files in this repo.
+- Read nearby `Ian:` comments before editing a file. They mark intentional boundaries or historical lessons that should be preserved unless you deliberately mean to change behavior.
 
 ## Documentation and teaching comments rule
 
@@ -22,147 +23,75 @@
 ## Design docs
 
 - Primary design document: `design/SmartDashboard_Design.md`
+- Durable milestone history: `docs/project_history.md`
+- Replay operator reference: `docs/replay_user_manual.md`
+- Replay status/roadmap reference: `docs/replay_parity_roadmap.md`
+- Robot simulation transport contract: `docs/robot_simulation_transport_guide.md`
 
 ## Quick context for next session
 
-- Current architecture: direct transport (`*_direct`) + `VariableStore` + Qt widget tiles.
-- Two-way bool/double/string command/telemetry path is implemented and unit tested.
-- Editable mode supports move/resize workflows and intentionally blocks value writes.
-- Non-editable mode restores writable controls (including interactive gauge command writes).
-- Layout save/load now uses file dialogs, tracks dirty state, and prompts on close with `Yes/No/Cancel`.
-- Layout load applies entries to existing session widgets and can instantiate saved widgets immediately at startup.
-- Direct client now includes a retained key-value store (shared-memory + mutex + optional file persistence) to provide authoritative direct-table semantics.
-- `TryGet/Get` now fall back to retained store on cache miss; this addresses cross-run config retrieval for iterative tuning tests.
-- Progress-bar startup behavior is stabilized by routing value updates via configured `widgetType` (not transient visibility state).
-- `SmartDashboard_tests` target exists with `tests/variable_tile_tests.cpp` regression coverage for centered-zero progress-bar startup behavior.
-- App icon is now wired for Windows builds via `dist/win/app_icon.rc` and `dist/win/smartdashboard_app.ico`.
-- Runtime Qt icon is also set via `src/resources/resources.qrc` + `QApplication::setWindowIcon`, so titlebar/taskbar icon paths match the EXE icon.
-- `AssertiveGetPublishesDefaultAndCallbackReceivesUpdates` test isolation uses unique per-test direct channels and disables retained fallback for that case.
-- Line plot x-axis model refined to sample-anchored behavior: right edge is newest sample, left edge is oldest retained sample (up to configured buffer size), so the 250th sample back stays pinned to the left margin once buffer is full.
-- Line plot ingest now advances x-position by EMA-estimated sample period per sample (instead of raw wall-clock gaps), preserving smooth left/right anchoring through pause/resume and irregular transport timing.
-- Number-line/gridline stability work remains centered on x-axis spacing and anchoring; rendering path itself is stable.
-- Added x-tick hysteresis in line plot step selection (`0.70x..1.60x` hold window) to reduce x-axis/gridline oscillation under jittered cadence while keeping absolute-time tick anchoring.
-- Added line-plot burst/pause/resume regression case that validates x-range remains exactly `[oldestRetained, newestRetained]` with full buffer anchoring.
-- New student/mentor-friendly reference doc created: `docs/line_plot_notes.md` summarizing tradeoffs (time accuracy vs readability), sample-anchored viewport behavior, EMA/tick concepts, and diagnostics ideas.
-- Replay path now documents and supports two telemetry JSON shapes by design:
-  - replay-event stream (SmartDashboard recorder, line-delimited events)
-  - capture-session object (SmartDashboardCaptureCli, `metadata` + `signals[]`)
-  - rationale: interactive replay semantics vs automation/harness analysis schema
-- Added `SmartDashboard/tests/line_plot_widget_tests.cpp` stress-oriented regression coverage for varying buffer/rate scenarios; `SmartDashboard_tests` now includes both line-plot and variable-tile tests.
-- `DirectPublisherTests.StreamsSineWaveDouble` now exposes live-tunable `Test/DoubleSine/Config/SampleRateMs` (default 16 ms) so publish cadence can be adjusted without editing code.
-- Direct transport UI label compaction: tile title text now shows only the last key segment in Direct mode (for example `.../Config/SampleRateMs` -> `SampleRateMs`) while preserving full underlying keys for publish/subscribe and layout identity.
-- Telemetry recording/playback vertical slice is now implemented on branch `feature/playback-recording-replay`:
-  - recorder writes live Direct/NT bool/double/string events to `logs/session_<timestamp>.json` (newline-delimited JSON events)
-  - replay transport can load session files and drive existing widget/model flow with play/pause/seek/speed
-  - timeline scrub/zoom/pan control exists in status bar and is wired to replay cursor
-- Telemetry UI controls were refined for operator workflow:
-  - menu toggle to enable/disable telemetry UI entirely (`Connection -> Enable telemetry recording/playback UI`)
-  - compact transport controls now use icon-style play/pause and record indicators
-  - record control is disabled/ghosted in replay transport
-  - replay label compaction now matches direct mode (shows last key segment only)
-- Replay workflow/connection semantics were further refined:
-  - switching transport kind now tears down active transport first so stale "Connected" state does not persist across mode changes
-  - replay mode status bar now shows only `Replay` (filename kept in title bar)
-  - replay mode window title shows selected replay filename (or `no file selected`)
-  - replay mode auto-starts when a persisted replay file path exists; Connect/Disconnect actions are disabled in replay mode
-- Telemetry controls got additional UX polish:
-  - playback controls/scrub are ghosted when not in replay mode
-  - added rewind-to-start control (`|◀`) that pauses playback and seeks to t=0
-  - play/pause icon now has explicit disabled-state styling so ghosting is visually obvious
-- Added standalone testing-harness capture CLI target `SmartDashboardCaptureCli`:
-  - source: `ClientInterface_direct/tools/smartdashboard_capture_cli.cpp`
-  - build target wired in `ClientInterface_direct/CMakeLists.txt`
-  - exe path (Debug): `build/ClientInterface_direct/Debug/SmartDashboardCaptureCli.exe`
-  - supports required args (`--out`, `--label`, `--duration-sec`) and preferred ops (`--start-delay-ms`, `--sample-ms`, `--overwrite`, `--append`, `--quiet`, `--verbose`, repeatable `--tag`)
-  - supports orchestration args (`--list-signals`, `--signals`, `--stop-file`, `--run-id`)
-  - writes stable metadata + signal-series JSON schema with robust temp-file replace on overwrite mode
-- Capture CLI iteration-1 connection hardening added for empty-log troubleshooting:
-  - direct channel override args: `--mapping-name`, `--data-event-name`, `--heartbeat-event-name`
-  - startup gating arg: `--wait-for-connected-ms` (default `2000`)
-  - strict non-empty guard: `--require-first-sample` (fails non-zero on empty capture)
-  - verbose output now includes connection diagnostics and selected channel names
-  - summary now distinguishes `Connection state at capture end` vs `Post-stop connection state` to avoid false confusion when post-stop is `Disconnected`
-- Iteration-2 started on capture connection method selection:
-  - new arg `--connect-method <direct|auto>`
-  - `auto` tries explicit overrides first (if set), then known default direct channel families
-  - this is intended to reduce empty-run risk when publisher channel family is uncertain
-  - external validation note: healthy captures may end with `Connection state at capture end: Stale` and `Post-stop connection state: Disconnected`; this is acceptable when `Connection observed during capture: true` and sample counts are non-zero
-- Added internal automated coverage for capture CLI behavior:
-  - `ClientInterface_direct/tests/capture_cli_tests.cpp`
-  - validates successful capture on custom direct channels and timeout failure path
-- New teaching/user docs for harness usage:
-  - `docs/testing_harness_capture_cli.md`
-  - README section `Testing Harness Capture CLI`
-  - examples intentionally use generic placeholders (`example_name_1`, `example_name_2`) to avoid project-specific confusion
-- Added replay planning + user-facing docs:
-  - `docs/replay_parity_roadmap.md` (iterative parity checklist and acceptance path)
-  - `docs/replay_user_manual.md` (operator workflow guide for replay controls and timeline interactions)
-- Branch/status handoff update:
-  - feature branch `feature/playback-recording-replay` was merged into local `main`
-  - stable milestone tag created: `v0.9.0-replay-foundation`
-  - current active branch for next work: `feature/replay-iteration-a-timeline-readability`
-  - next planned implementation slice: Iteration A from `docs/replay_parity_roadmap.md` (timeline readability)
-- Replay parity iteration progress update:
-  - Iteration A (timeline readability) is now implemented:
-    - adaptive timeline tick marks + readable time labels across zoom levels
-    - cursor timestamp and visible window-span readouts in timeline UI
-    - overview strip showing full duration with highlighted visible window
-  - Iteration B (system markers and jump workflow) is now implemented:
-    - replay transport parses `connection_state` and `marker` events into typed playback markers
-    - timeline renders marker glyphs in both overview and visible track windows
-    - status bar adds previous/next marker jump controls (`⏮` / `⏭`) wired to replay seek
-  - Iteration C (marker list panel + keyboard navigation) is now implemented:
-    - added docked `Replay Markers` list with timestamp/type/label rows
-    - clicking/activating a marker list row seeks replay to that marker timestamp
-    - marker list selection auto-follows replay cursor to nearest prior marker
-    - keyboard stepping in replay mode: `Left/Right` = ±100 ms, `Shift+Left/Shift+Right` = ±1 s
-  - Iteration D (analysis helpers) first slice is now implemented:
-    - added user bookmark action (`B+`) to capture timeline points during replay analysis
-    - added anomaly marker classification in replay transport (`anomaly` events and low-voltage/brownout-style data heuristics)
-    - timeline now renders anomaly markers as a distinct marker kind
-    - marker dock now shows visible-window summary stats (marker count, anomaly count, span)
-    - added bookmark cleanup control (`Bx`) and summary now includes bookmark count in visible window
-  - Replay marker UX/persistence polish is in-progress and now includes:
-    - menu cleanup: moved `Enable telemetry recording/playback UI` to `View` and moved `Replay: Open session file...` to `File`
-    - replay marker dock context menu (`Float`, `Dock Right`, `Dock Left`) for reliable docking workflow
-    - marker list interaction hardening and timeline auto-follow while zoomed playback advances
-    - bookmark persistence across sessions (`replay/userBookmarks` in `QSettings`)
-    - replay marker dock visibility preference persistence now working reliably (`replay/markersVisible`) after deterministic sync-guard updates
-    - timeline marker rendering now uses the same merged marker set as the Replay Markers list, so list/timeline stay in sync
-  - Dockable replay workspace iteration 1 is now implemented on `feature/replay-dockable-workspace`:
-    - replay controls and replay timeline are now dockable/floatable panels with View menu toggles
-    - replay controls/timeline now have right-click context menus matching Replay Markers (`Float`, `Dock Left`, `Dock Right`, `Dock Bottom`)
-    - selecting `Dock Bottom` on either controls or timeline restores default bottom side-by-side split for both panels
-    - visibility preferences for controls/timeline are persisted via `QSettings` (`replay/controlsVisible`, `replay/timelineVisible`)
-  - Dockable workspace iteration 2 polish is partially implemented:
-    - added `Reset Replay Layout` action to replay controls/timeline context menus
-    - replay controls row is top-anchored in floating mode to avoid centered empty vertical space
-    - controls/timeline visibility persistence now uses the same deterministic guard pattern used for replay markers
-    - timeline readouts (`t=`, `window=`) are now moved to status bar labels to reduce timeline panel vertical pressure
-    - docked replay panel height lock now uses tuned ratio `44/86` (controls/timeline), including reset-layout path
-  - Playback timeline regression coverage now includes:
-    - cursor/window clamp behavior
-    - tick-step adaptation across zoom spans
-    - readable time/span label formatting
-  - Finalization status: dockable replay workspace iteration is validated and ready for merge to `main`
+- Repository baseline is local `main`; `feature/replay-dockable-workspace` has been merged.
+- Core dashboard architecture is stable: transport-agnostic main window (`Direct`, `NetworkTables`, `Replay`) + `VariableStore` + Qt widget tiles.
+- Editable mode is layout-only; non-editable mode restores live writable controls.
+- Layout workflows are in place: file-dialog save/load, dirty tracking, startup apply, and close prompt.
+- Direct transport includes retained latest-value fallback for cross-run config/state retrieval.
+- Replay stack is broadly in place on `main`:
+  - recording to newline-delimited JSON events under `logs/session_<timestamp>.json`
+  - replay load path accepts both event-stream and capture-session JSON shapes
+  - timeline scrub/zoom/pan, adaptive tick labels, cursor/window readouts, marker jumps, marker dock, keyboard stepping, bookmarks, anomaly markers, and visible-window marker summary
+  - dockable `Replay Controls`, `Replay Timeline`, and `Replay Markers` panels with persisted visibility and `Reset Replay Layout`
+- `docs/project_history.md` is the authoritative milestone log; keep this file to current-state handoff only.
+- Compatibility direction for simulator work is now documented: keep legacy NT behavior as a stable baseline and treat Shuffleboard-oriented additions as additive profiles.
+- Direct survive/restart slice is now working again with Robot_Simulation pairing:
+  - dashboard startup loads remembered operator-owned control values from `QSettings`
+  - remembered values are applied after layout load and again after Direct retained replay so dashboard intent wins over stale startup defaults
+  - sequence tracking is cleared before retained replay so synthetic startup `seq=0` values repaint tiles after a dashboard restart
+  - retained replay now includes `TestMove` / `Test/TestMove` in addition to the numeric `AutonTest` baseline
+  - control edits now persist immediately when dashboard-owned values change instead of waiting for a later session write
+- Chooser compatibility slice remains implemented for Direct pairing:
+  - chooser metadata routing handles direct string-array `/options`
+  - chooser reconnect no longer clobbers robot-owned selection on dashboard reopen
+  - chooser tile churn was reduced by avoiding redundant chooser-mode resets on repeated metadata updates.
+- New Direct transport/harness status:
+  - SmartDashboard direct telemetry now uses independent subscriber read cursors rather than one shared consumed cursor
+  - UI callback path was switched from one queued lambda per update to a batched queued drain on the Qt thread
+  - process-control helper exists at `tools/smartdashboard_process.py` so sessions can deterministically launch/check/close the dashboard during transport experiments
+  - `tools/survive_sequence.py` now automates dashboard-survive followed by robot-survive validation
+  - focused CLIs now exist for direct probing/capture:
+    - `DirectStateProbeCli` seeds and verifies chooser + `TestMove`
+    - `DirectWatchCli` passively records direct updates during a run
+  - a fixed harness workspace now places `Test/AutoChooser`, `TestMove`, `Timer`, and `Y_ft` in visible positions for manual paint checks
+- Current practical conclusion:
+  - real single-dashboard Direct survive now passes again for remembered `TestMove`, chooser survival, and robot restart handoff
+  - an attempted inbound-protection tweak in `OnVariableUpdateReceived` was a regression and should stay reverted unless rethought more carefully
+  - repeated robot restart stress improved after fixing publisher free-space accounting against the active consumer cursor
+  - passive extra observers still expose race/session weaknesses, so transport is still not treated as truly multi-observer safe
+  - the short immediate post-dashboard-restart probe window can still miss early telemetry (`Timer` / `Y_ft`), even when the later robot-survive phase passes cleanly
+- Next simulator-facing goal: finish hardening repeated robot-survive stress for the real single-dashboard path, then document the harness/debugging workflow as a student-friendly systems-debugging example.
 
 ## Known constraints / active considerations
 
 - Current direct ring transport is effectively single-consumer due to shared read cursor.
 - Deployment remains vcpkg/Qt-DLL based; static Qt distribution is not a current goal.
 - Event-bus decoupling (topic subscriptions + rate limiting + coalescing) is documented as future work, not implemented.
-- Main window now uses a transport-agnostic adapter interface (`dashboard_transport`) with Connection menu actions (Connect/Disconnect, Direct vs NetworkTables selection, NT host/team settings persisted in QSettings).
-- NetworkTables menu path now uses an in-tree NT2-compatible client implementation (socket + message framing/handshake), so no external source dependency is required for build.
-- Robot_Simulation is used as interoperability validation target, not as a build-time library dependency.
-- NT UX tweak: setting explicit host now automatically disables `NT: Use team number`; setting team auto-enables team mode.
-- NT key normalization: incoming keys with `/SmartDashboard/` prefix are normalized to layout keys by stripping that prefix on ingest.
-- NT write-path fix: existing keys now publish as `FIELD_UPDATE` (0x11) using server-assigned entry id/seq, while first-time keys publish as `ENTRY_ASSIGNMENT` (0x10) under `/SmartDashboard/` wire namespace.
-- Direct ring payload path is still single-consumer; retained store introduces shared latest-value ownership but does not yet change stream fan-out semantics.
 - If startup false-dirty (`*`) behavior regresses, add a focused startup regression test that validates initial title/dirty state before any editable interaction.
 
 ## Next-session checklist
 
-1. Pick one focused roadmap item from `README.md` and `docs/requirements.md`.
-2. Define acceptance criteria first, then implement in a small slice.
-3. Run automated tests (`docs/testing.md`) plus one targeted manual validation loop.
-4. Record durable milestone details in `docs/project_history.md`.
+1. Keep `Agent_Session_Notes.md` lean; record durable milestones in `docs/project_history.md`.
+2. If replay docs change, keep `docs/replay_parity_roadmap.md`, `docs/replay_user_manual.md`, and `docs/project_history.md` in sync.
+3. Pick one focused roadmap item from `README.md` and `docs/requirements.md`.
+4. Define acceptance criteria first, then implement in a small slice.
+5. Run automated tests (`docs/testing.md`) plus one targeted manual validation loop.
+6. Record durable milestone details in `docs/project_history.md`.
+
+## Active follow-up log
+
+- Manual paired testing status with Robot_Simulation Direct:
+  - chooser operator flow works (`Just Move Forward` executes correctly)
+  - dashboard reopen no longer overwrites robot-owned chooser selection
+  - remembered numeric control state (`TestMove`) now survives dashboard restart again in the validated paired flow
+  - real single-dashboard restart behavior is much healthier, though immediate telemetry paint after dashboard restart could still use follow-up hardening
+  - extra concurrent observer/watch tooling can still perturb repeated runs, which is acceptable for now if direct mode remains effectively single-real-client
+- Keep an eye on additional dashboard-owned keys that may need explicit scoped alias conventions documented for mixed legacy layouts.
+- Official WPILib SmartDashboard did support `SendableChooser`; upcoming work should treat chooser support as a compatibility requirement, not a Shuffleboard-only feature.

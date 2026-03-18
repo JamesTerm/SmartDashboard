@@ -89,7 +89,7 @@ namespace sd::transport
                 pubConfig.mappingName = L"Local\\SmartDashboard.Direct.Command.Buffer";
                 pubConfig.dataEventName = L"Local\\SmartDashboard.Direct.Command.DataAvailable";
                 pubConfig.heartbeatEventName = L"Local\\SmartDashboard.Direct.Command.Heartbeat";
-                pubConfig.autoFlushThread = false;
+                pubConfig.autoFlushThread = true;
                 m_commandPublisher = sd::direct::CreateDirectPublisher(pubConfig);
             }
 
@@ -97,6 +97,7 @@ namespace sd::transport
             {
                 m_onVariableUpdate = std::move(onVariableUpdate);
                 m_onConnectionState = std::move(onConnectionState);
+                m_latestByKey.clear();
 
                 if (!m_subscriber || !m_commandPublisher)
                 {
@@ -132,15 +133,31 @@ namespace sd::transport
                             case sd::direct::ValueType::String:
                                 converted.value = QString::fromStdString(update.value.stringValue);
                                 break;
+                            case sd::direct::ValueType::StringArray:
+                            {
+                                QStringList list;
+                                for (const std::string& item : update.value.stringArrayValue)
+                                {
+                                    list.push_back(QString::fromStdString(item));
+                                }
+                                converted.value = list;
+                                break;
+                            }
                             default:
                                 converted.value = QVariant();
                                 break;
                         }
 
                         m_onVariableUpdate(converted);
+
+                        m_latestByKey[update.key] = update;
                     },
                     [this](sd::direct::ConnectionState state)
                     {
+                        if (state == sd::direct::ConnectionState::Connected)
+                        {
+                            m_connectedSeen.store(true);
+                        }
                         if (m_onConnectionState)
                         {
                             m_onConnectionState(ToConnectionState(state));
@@ -153,6 +170,8 @@ namespace sd::transport
                     m_commandPublisher->Stop();
                     return false;
                 }
+
+                m_connectedSeen.store(false);
 
                 return true;
             }
@@ -168,6 +187,14 @@ namespace sd::transport
                 {
                     m_commandPublisher->Stop();
                 }
+
+                m_latestByKey.clear();
+                m_connectedSeen.store(false);
+            }
+
+            bool HasSeenConnected() const
+            {
+                return m_connectedSeen.load();
             }
 
             bool PublishBool(const QString& key, bool value) override
@@ -200,11 +227,50 @@ namespace sd::transport
                 return m_commandPublisher->FlushNow();
             }
 
+            void ReplayRetainedControls(const std::function<void(const QString& key, int valueType, const QVariant& value)>& replayFn) override
+            {
+                if (!replayFn)
+                {
+                    return;
+                }
+
+                const auto replayNumeric = [&](const QString& key)
+                {
+                    const std::string stdKey = key.toStdString();
+                    const auto it = m_latestByKey.find(stdKey);
+                    if (it == m_latestByKey.end())
+                    {
+                        return;
+                    }
+
+                    if (it->second.type == sd::direct::ValueType::Double)
+                    {
+                        replayFn(key, static_cast<int>(sd::direct::ValueType::Double), QVariant(it->second.value.doubleValue));
+                    }
+                    else if (it->second.type == sd::direct::ValueType::String)
+                    {
+                        bool ok = false;
+                        const double parsed = QString::fromStdString(it->second.value.stringValue).toDouble(&ok);
+                        if (ok)
+                        {
+                            replayFn(key, static_cast<int>(sd::direct::ValueType::Double), QVariant(parsed));
+                        }
+                    }
+                };
+
+                replayNumeric(QStringLiteral("AutonTest"));
+                replayNumeric(QStringLiteral("Test/AutonTest"));
+                replayNumeric(QStringLiteral("TestMove"));
+                replayNumeric(QStringLiteral("Test/TestMove"));
+            }
+
         private:
             std::unique_ptr<sd::direct::IDirectSubscriber> m_subscriber;
             std::unique_ptr<sd::direct::IDirectPublisher> m_commandPublisher;
             VariableUpdateCallback m_onVariableUpdate;
             ConnectionStateCallback m_onConnectionState;
+            std::unordered_map<std::string, sd::direct::VariableUpdate> m_latestByKey;
+            std::atomic<bool> m_connectedSeen {false};
         };
 
         class NetworkTablesDashboardTransport final : public IDashboardTransport
@@ -645,6 +711,41 @@ namespace sd::transport
                     }
 
                     outValue = QString::fromStdString(std::string(bytes.begin(), bytes.end()));
+                    return true;
+                }
+
+                // NT string array (0x12): 1-byte element count followed by
+                // repeated [u16 length + UTF-8 bytes] elements.
+                // We expose this as QStringList QVariant so chooser option
+                // metadata can be consumed without lossy string flattening.
+                if (typeId == 0x12)
+                {
+                    std::uint8_t elementCount = 0;
+                    if (!ReadExact(socket, &elementCount, 1))
+                    {
+                        return false;
+                    }
+
+                    QStringList values;
+                    values.reserve(static_cast<int>(elementCount));
+                    for (std::uint8_t i = 0; i < elementCount; ++i)
+                    {
+                        std::uint16_t len = 0;
+                        if (!ReadU16FromSocket(socket, len))
+                        {
+                            return false;
+                        }
+
+                        std::vector<std::uint8_t> bytes(len);
+                        if (len > 0 && !ReadExact(socket, bytes.data(), bytes.size()))
+                        {
+                            return false;
+                        }
+
+                        values.push_back(QString::fromStdString(std::string(bytes.begin(), bytes.end())));
+                    }
+
+                    outValue = values;
                     return true;
                 }
 

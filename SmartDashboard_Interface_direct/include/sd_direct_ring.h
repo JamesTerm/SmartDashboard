@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <vector>
 
 namespace sd::direct
 {
@@ -26,5 +27,6 @@ namespace sd::direct
         std::uint64_t timestampUs,
         std::uint64_t& outDroppedCount
     );
+    bool ReadNextUpsert(const RingAttachResult& ring, std::uint32_t& readCursor, VariableUpdate& outUpdate);
     bool ReadNextUpsert(RingAttachResult& ring, VariableUpdate& outUpdate);
 }

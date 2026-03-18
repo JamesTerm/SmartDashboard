@@ -9,18 +9,41 @@ This document is the human-generated source of truth for product intent.
 
 Build an educational, community-friendly C++ dashboard prototype for FRC that demonstrates a clear, high-performance alternative to NetworkTables-style dashboard coupling.
 
+## Product direction
+
+- Primary audience: FRC teams who would otherwise use `Shuffleboard`/`SmartDashboard` for daily robot interaction.
+- Primary goal: deliver a dependable live dashboard/control workflow teams can adopt without friction.
+- Secondary goal: provide built-in recording/replay as a differentiator, without turning the product into an analysis-only tool.
+- Comparison baseline:
+  - first: `Shuffleboard` for day-to-day team usefulness
+  - second: selected `AdvantageScope`-style replay ergonomics where they clearly improve practical debugging
+- Planning filter for future work:
+  - prioritize features that help teams during normal robot development and match-day use
+  - avoid deep analytics work unless it clearly supports real team workflows
+  - prefer compatibility and migration ease over purity of internal implementation
+
+## Adoption principle
+
+- Teams should be able to use this dashboard with minimal or no robot-code changes.
+- Existing `SmartDashboard`/`Shuffleboard`-style publishing patterns should work whenever reasonably possible.
+- If the dashboard keeps a cleaner internal/native transport model, provide compatibility/translation adapters so teams are not forced to rewrite working robot code.
+- Compatibility and migration smoothness are higher priority than exposing the native protocol directly to teams.
+
 ## Primary goals
 
 - Provide reliable two-way communication for bool/double/string telemetry and commands.
 - Keep the architecture simple enough for students to reason about end-to-end.
 - Support dashboard workflows teams expect: view values, choose widget presentation, save/load layout.
 - Make engineering trade-offs visible and teachable through docs and tests.
+- Be practical for real FRC teams to adopt as a `Shuffleboard`-class live dashboard.
+- Preserve room for replay/telemetry features that improve debugging without displacing the live-dashboard focus.
 
 ## Non-goals (current phase)
 
 - Full SmartDashboard feature parity.
 - Multi-consumer direct transport support in current ring-buffer mode.
 - Production deployment packaging for every team environment.
+- Trying to out-feature every dedicated telemetry-analysis tool.
 
 ## Functional requirements
 
@@ -50,6 +73,7 @@ Build an educational, community-friendly C++ dashboard prototype for FRC that de
 
 6. **Stability and reconnect behavior**
    - Sequence reset/reconnect paths should recover and continue updates.
+   - Dashboard-owned controls should survive reconnects without forcing operators to restart the dashboard.
 
 ## Quality requirements
 
@@ -66,11 +90,16 @@ Build an educational, community-friendly C++ dashboard prototype for FRC that de
 - [x] Editable mode prevents control writes.
 - [x] Non-editable mode restores control interactions, including gauge command writes.
 - [x] Layout serialization persists geometry and widget type.
+- [ ] Dashboard-owned control values replay/re-publish correctly across simulator reconnects in direct mode.
 
 ## Open items
 
 - Clarify final deployment contract and reproducibility expectations.
 - Expand test coverage around UI interaction state transitions.
+- Define the compatibility/migration contract for teams coming from `SmartDashboard`/`Shuffleboard` publishing patterns:
+  - what works unchanged
+  - what requires an adapter/bridge
+  - what remains intentionally unsupported
 - Evaluate long-term line-plot architecture direction for higher-scale telemetry UX:
   - option A: many independent lightweight line-plot widgets (legacy SmartDashboard style)
   - option B: one high-performance telemetry panel with multiple traces/axes and shared timeline controls
@@ -86,6 +115,79 @@ Build an educational, community-friendly C++ dashboard prototype for FRC that de
   - transport-agnostic playback controls (`play`, `pause`, `seek`, speed)
   - timeline model exposing current time, duration, and playback speed
   - UI-ready integration points for future playback controls (without coupling UI to data source type)
+
+## Prioritized product checklist
+
+Order these from most important to least important unless a later item becomes a hard dependency for an earlier one.
+
+1. **Compatibility first**
+   - Teams can leave robot code as-is, or very nearly as-is, when adopting this dashboard.
+   - Existing `SmartDashboard`/`Shuffleboard`/`NetworkTables` publishing workflows are supported directly or through a clear adapter/translation layer.
+   - Acceptance: a team can connect an existing robot project with little or no code churn and see expected values/widgets.
+
+2. **Strong `Shuffleboard`-class live dashboard baseline**
+   - Reliable live telemetry, clear connection state, practical writable controls, and stable layout workflows.
+   - Acceptance: teams can use the dashboard confidently during regular robot development and testing.
+
+3. **NetworkTables interoperability and migration smoothness**
+   - NetworkTables behavior should feel solid enough that teams do not see this dashboard as a special-case tool.
+   - Acceptance: common FRC keys and update patterns behave as teams expect.
+
+4. **High-value widget coverage**
+   - Prioritize the widgets teams most commonly need before adding niche analysis surfaces.
+   - Include graph/plot support that satisfies normal `Shuffleboard`-class day-to-day telemetry visibility needs.
+
+5. **Enhanced multi-trace plotting**
+   - After basic graph compatibility is solid, add a stronger plot experience that can show multiple related signals together when that meaningfully improves debugging.
+   - This remains a personal priority for product usefulness, but should be treated as enhancement work beyond minimum `Shuffleboard`-class plotting coverage.
+   - Acceptance: users can inspect several related signals in one plotting surface without losing readability.
+
+6. **Replay as a differentiator**
+   - Keep recording/replay and timeline analysis improving, but in service of practical team debugging rather than tool sprawl.
+   - Acceptance: replay remains a clear reason to choose this dashboard over `Shuffleboard`, not a separate product direction.
+
+7. **Deeper analytics only when justified**
+   - Add advanced analysis helpers only when they clearly help normal team workflows.
+   - Acceptance: each addition saves real time during incident review instead of adding novelty.
+
+## Foundation before enabling NetworkTables broadly
+
+Treat this as the readiness gate before presenting NetworkTables support as a core team-facing feature.
+
+- **Must-have before broad NT rollout**
+  - Existing common scalar widgets feel complete for normal team use:
+    - bool indicators/text/control
+    - numeric text/bar/slider/dial
+    - string text/edit views
+  - `SendableChooser`-style autonomous selection is supported.
+  - Layout/edit/save/load workflow feels dependable enough for daily use.
+  - Connection/reconnect/status behavior is trustworthy and unsurprising.
+  - Common `SmartDashboard`/`Shuffleboard` publishing patterns are documented as:
+    - works unchanged
+    - works through adapter/translation layer
+    - not yet supported
+  - Legacy compatibility baseline is explicit:
+    - preserve a stable `legacy-smartdashboard-baseline` behavior profile for validation
+    - allow `shuffleboard-additive` behaviors only when they do not break legacy baseline behavior
+  - Key migration policy is explicit for operator-controlled values:
+    - canonical scoped keys (for example `Test/AutonTest`) are preferred
+    - legacy flat aliases (for example `AutonTest`) remain supported during migration
+    - read scoped first, then alias fallback where needed
+
+- **High-priority near-foundation items**
+  - Graph/plot support that covers normal `Shuffleboard` expectations for numeric telemetry.
+  - Camera stream support for teams that rely on driver/diagnostic video in dashboard workflows.
+  - Visual control variants where they materially improve migration comfort (`Toggle Button`, `Toggle Switch`, voltage-view-style presentation if needed).
+
+- **Not required to unblock NT rollout**
+  - Enhanced multi-trace plotting beyond normal `Shuffleboard` graph expectations.
+  - Compass widget.
+  - Deep replay-analysis additions beyond the current practical workflow.
+  - Broader specialty `Shuffleboard`/WPILib widgets such as `Field2d`, `Mechanism2d`, command/subsystem panels, or other advanced sendable surfaces.
+
+- **Readiness question**
+  - If a typical FRC team points an existing robot project at this dashboard, can they accomplish their everyday dashboard tasks without first asking what is missing?
+  - If the honest answer is no, keep the focus on foundation work before advertising NT support broadly.
 
 ## Next feature acceptance checklist (recording/playback)
 

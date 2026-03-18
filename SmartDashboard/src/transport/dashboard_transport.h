@@ -74,6 +74,11 @@ namespace sd::transport
         virtual bool PublishDouble(const QString& key, double value) = 0;
         virtual bool PublishString(const QString& key, const QString& value) = 0;
 
+        virtual void ReplayRetainedControls(const std::function<void(const QString& key, int valueType, const QVariant& value)>& replayFn)
+        {
+            static_cast<void>(replayFn);
+        }
+
         virtual bool SupportsPlayback() const
         {
             return false;

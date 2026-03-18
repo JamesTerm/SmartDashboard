@@ -152,25 +152,6 @@ namespace sd::layout
             entry["variableKey"] = widget->property("variableKey").toString();
             entry["widgetType"] = widget->property("widgetType").toString();
 
-            auto* tile = qobject_cast<const sd::widgets::VariableTile*>(widget);
-            if (tile != nullptr)
-            {
-                switch (tile->GetType())
-                {
-                    case sd::widgets::VariableType::Bool:
-                        entry["boolValue"] = tile->GetBoolValue();
-                        break;
-                    case sd::widgets::VariableType::Double:
-                        entry["doubleValue"] = tile->GetDoubleValue();
-                        break;
-                    case sd::widgets::VariableType::String:
-                        entry["stringValue"] = tile->GetStringValue();
-                        break;
-                    default:
-                        break;
-                }
-            }
-
             const QVariant gaugeLower = widget->property("gaugeLowerLimit");
             const QVariant gaugeUpper = widget->property("gaugeUpperLimit");
             const QVariant gaugeTick = widget->property("gaugeTickInterval");
@@ -193,6 +174,8 @@ namespace sd::layout
             const QVariant textFontPointSize = widget->property("textFontPointSize");
             const QVariant doubleNumericEditable = widget->property("doubleNumericEditable");
             const QVariant boolCheckboxShowLabel = widget->property("boolCheckboxShowLabel");
+            const QVariant stringChooserMode = widget->property("stringChooserMode");
+            const QVariant stringChooserOptions = widget->property("stringChooserOptions");
             if (gaugeLower.isValid())
             {
                 entry["gaugeLowerLimit"] = gaugeLower.toDouble();
@@ -281,6 +264,14 @@ namespace sd::layout
             {
                 entry["boolCheckboxShowLabel"] = boolCheckboxShowLabel.toBool();
             }
+            if (stringChooserMode.isValid())
+            {
+                entry["stringChooserMode"] = stringChooserMode.toBool();
+            }
+            if (stringChooserOptions.isValid())
+            {
+                entry["stringChooserOptions"] = QJsonArray::fromStringList(stringChooserOptions.toStringList());
+            }
 
             QJsonObject geo;
             geo["x"] = geometry.x();
@@ -337,6 +328,9 @@ namespace sd::layout
                 continue;
             }
 
+            // Ian: Layout files store widget arrangement/config only. Do not
+            // restore live robot values from disk or the dashboard can overwrite
+            // current session state on startup.
             const QJsonObject geo = entry.value("geometry").toObject();
             WidgetLayoutEntry layoutEntry;
             layoutEntry.variableKey = variableKey;
@@ -435,17 +429,20 @@ namespace sd::layout
             {
                 layoutEntry.boolCheckboxShowLabel = entry.value("boolCheckboxShowLabel").toBool();
             }
-            if (entry.contains("boolValue"))
+            if (entry.contains("stringChooserMode"))
             {
-                layoutEntry.boolValue = entry.value("boolValue").toBool();
+                layoutEntry.stringChooserMode = entry.value("stringChooserMode").toBool();
             }
-            if (entry.contains("doubleValue"))
+            if (entry.contains("stringChooserOptions"))
             {
-                layoutEntry.doubleValue = entry.value("doubleValue").toDouble();
-            }
-            if (entry.contains("stringValue"))
-            {
-                layoutEntry.stringValue = entry.value("stringValue").toString();
+                const QJsonArray options = entry.value("stringChooserOptions").toArray();
+                QStringList optionList;
+                optionList.reserve(options.size());
+                for (const QJsonValue& optionValue : options)
+                {
+                    optionList.push_back(optionValue.toString());
+                }
+                layoutEntry.stringChooserOptions = optionList;
             }
             outEntries.push_back(layoutEntry);
         }

@@ -93,7 +93,36 @@ Use these checks when validating end-to-end UX behavior.
    - toggle checkbox
 4. Expect sample success message.
 
-### Legacy NT2 simulator check (Robot_Simulation)
+### Robot_Simulation transport checks
+
+Use these checks when validating paired dashboard behavior against `Robot_Simulation`.
+
+Detailed simulator-facing transport requirements and chooser contract:
+
+- `docs/robot_simulation_transport_guide.md`
+
+#### Direct mode reconnect check
+
+Use this check when validating dashboard-owned control persistence across simulator restarts.
+
+Suggested loop:
+
+1. Start `Robot_Simulation` in `Direct` mode.
+2. Start dashboard:
+   - `build/SmartDashboard/Debug/SmartDashboardApp.exe`
+3. In dashboard menu:
+   - `Connection` -> `Use Direct transport`
+4. Verify:
+   - status transitions to `Connected`
+   - direct scalar keys update normally
+   - dashboard-owned control values such as `AutonTest`, `Test/AutonTest`, or `TestMove` can be set from the dashboard
+5. Restart `Robot_Simulation` without restarting dashboard.
+6. Verify after reconnect:
+   - status returns to `Connected`
+   - remembered control values are replayed/re-published as needed
+   - chooser selections continue using `<base>/selected`
+
+#### Legacy NT2 simulator check
 
 Use this check when validating NetworkTables transport against the cloned legacy simulator stack.
 

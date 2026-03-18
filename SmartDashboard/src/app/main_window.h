@@ -8,6 +8,7 @@
 #include <QMainWindow>
 #include <QByteArray>
 #include <QVariant>
+#include <QVector>
 
 #include <condition_variable>
 #include <deque>
@@ -17,6 +18,8 @@
 
 #include <cstdint>
 #include <memory>
+#include <fstream>
+#include <unordered_set>
 #include <unordered_map>
 #include <vector>
 
@@ -111,6 +114,9 @@ private:
     void MarkLayoutDirty();
     void ApplyTransportMenuChecks();
     void PersistConnectionSettings() const;
+    void LoadRememberedControlValues();
+    void SaveRememberedControlValues() const;
+    void ApplyRememberedControlValuesToTiles();
     QString BuildDisplayLabel(const QString& key) const;
     void StartTransport();
     void StopTransport();
@@ -128,6 +134,9 @@ private:
     void RecordVariableEvent(const QString& key, int valueType, const QVariant& value, quint64 seq);
     void RecordConnectionEvent(int state);
     bool IsRecordingTransportKind(sd::transport::TransportKind kind) const;
+    void PublishRememberedControlValues();
+    void DebugLogUiEvent(const QString& line) const;
+    void DrainPendingUiUpdates();
 
     QWidget* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
@@ -181,6 +190,16 @@ private:
     sd::model::VariableStore m_variableStore;
     sd::transport::ConnectionConfig m_connectionConfig;
     std::unique_ptr<sd::transport::IDashboardTransport> m_transport;
+    struct RememberedControlValue
+    {
+        int valueType = 3;
+        QVariant value;
+    };
+    std::unordered_map<std::string, RememberedControlValue> m_rememberedControlValues;
+    mutable std::ofstream m_uiDebugLog;
+    std::mutex m_pendingUiUpdatesMutex;
+    QVector<sd::transport::VariableUpdate> m_pendingUiUpdates;
+    bool m_uiDrainScheduled = false;
 
     std::mutex m_recordingMutex;
     std::condition_variable m_recordingCv;

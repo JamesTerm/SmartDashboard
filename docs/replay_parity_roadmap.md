@@ -9,7 +9,7 @@ Teaching intent:
 
 ## Parity baseline (must-have)
 
-These are required for practical match-debug usability and are mostly complete.
+These are required for practical match-debug usability and are complete in the current baseline.
 
 - Shared global replay cursor across all widgets.
 - Timeline scrub/zoom/pan.
@@ -17,7 +17,7 @@ These are required for practical match-debug usability and are mostly complete.
 - Deterministic replay at a given cursor.
 - Basic recording and replay load path.
 
-Status: mostly complete in current branch.
+Status: complete in local `main`.
 
 ## Competitive parity (should-have)
 
@@ -35,23 +35,25 @@ These are the next capabilities typically found in mature analysis dashboards.
   - keyboard stepping and fixed-step scrub actions
   - resilient fast seek behavior on larger files
 
-Status: planned next.
+Status: implemented in local `main` for the current scope.
 
 ## Advanced parity (nice-to-have)
 
 These are high-value but not required for initial parity.
 
-- User bookmarks/annotations.
-- Auto anomaly markers (brownout threshold, comm drop heuristics).
-- Selection window statistics (min/max/avg over selected range).
+- User bookmarks are implemented; richer freeform annotations remain future work.
+- Auto anomaly markers are implemented (event flags + brownout-style heuristics).
+- Selection-window statistics are partially implemented via visible-window marker summary; min/max/avg over arbitrary selected ranges remain future work.
 - Export/share helpers for incident review snapshots.
-- Dockable replay workspace panels (controls/timeline/markers with persistent panel composition).
+- Dockable replay workspace panels (controls/timeline/markers with persistent panel composition) are implemented.
 
-Status: future iteration set.
+Status: partially implemented; remaining work is centered on richer annotations/stats and export/share helpers.
 
 ## Iteration plan
 
 ## Iteration A - Timeline readability and affordances
+
+Status: implemented in local `main`.
 
 Scope:
 
@@ -70,6 +72,8 @@ Acceptance:
 
 ## Iteration B - System markers and jump workflow
 
+Status: implemented in local `main`.
+
 Scope:
 
 - Emit and store system markers from replay stream (`connect`, `disconnect`, `stale`).
@@ -87,6 +91,8 @@ Acceptance:
 
 ## Iteration C - Marker list and keyboard navigation
 
+Status: implemented in local `main`.
+
 Scope:
 
 - Add marker list panel (time/type summary).
@@ -101,6 +107,8 @@ Acceptance:
 - Users can move quickly between coarse incidents and fine-grained moments.
 
 ## Iteration D - Analysis helpers
+
+Status: partially implemented in local `main`.
 
 Scope:
 
@@ -128,14 +136,17 @@ If those are competitive, UI appearance can evolve without blocking functionalit
 
 ## Dockable workspace note (2026-03-14)
 
-Iteration-1 implementation is now in progress/completed on branch `feature/replay-dockable-workspace`:
+Dockable replay workspace implementation is complete and merged to local `main`:
 
 - replay controls and replay timeline are now panelized as dock widgets
+- replay markers continue to participate in the same dockable workspace flow
 - panel visibility can be toggled from `View`
 - panel context menus support `Float`, `Dock Left`, `Dock Right`, and `Dock Bottom`
 - choosing `Dock Bottom` restores default side-by-side bottom replay layout
+- `Reset Replay Layout` restores the default replay workspace arrangement
+- replay visibility preferences persist between sessions
 
-Planned iteration-2 follow-up:
+Follow-up polish that also landed:
 
-- timeline/header readout layout polish for floating panels
-- cross-panel ergonomics and persistence validation under repeated dock/float workflows
+- timeline/header readout pressure was reduced by moving `t=` / `window=` readouts to status-bar labels
+- repeated dock/float workflows now use the same deterministic persistence guard pattern used by replay markers

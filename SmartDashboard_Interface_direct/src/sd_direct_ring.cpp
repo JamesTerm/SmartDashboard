@@ -5,9 +5,16 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <cstring>
+#include <sstream>
 #include <string>
 #include <utility>
+#include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace sd::direct
 {
@@ -15,11 +22,42 @@ namespace sd::direct
     {
         constexpr std::size_t kHeaderSize = sizeof(wire::RingHeader);
 
+		void DebugLog(const std::string& text)
+		{
+#ifdef _WIN32
+			OutputDebugStringA(text.c_str());
+#else
+			(void)text;
+#endif
+		}
+
+		bool IsPrintableKey(const std::string& key)
+		{
+			for (unsigned char ch : key)
+			{
+				if (!(std::isalnum(ch) || ch == '/' || ch == '_' || ch == '.' || ch == '-' || ch == ' '))
+					return false;
+			}
+			return true;
+		}
+
+		std::string DescribeType(ValueType type)
+		{
+			switch (type)
+			{
+			case ValueType::Bool: return "bool";
+			case ValueType::Double: return "double";
+			case ValueType::String: return "string";
+			case ValueType::StringArray: return "string_array";
+			default: return "unknown";
+			}
+		}
+    
         // Circular buffer (ring buffer) occupancy calculation.
         std::uint32_t RingUsed(const RingAttachResult& ring)
         {
             const std::uint32_t writeIndex = ring.header->writeIndex.load(std::memory_order_acquire);
-            const std::uint32_t readIndex = ring.header->readIndex.load(std::memory_order_acquire);
+            const std::uint32_t readIndex = ring.header->consumerReadIndex.load(std::memory_order_acquire);
 
             if (writeIndex >= readIndex)
             {
@@ -44,7 +82,7 @@ namespace sd::direct
                 return;
             }
 
-            const std::uint32_t firstPart = std::min(count, ring.capacity - index);
+            const std::uint32_t firstPart = (std::min)(count, ring.capacity - index);
             std::memcpy(ring.payload + index, bytes, firstPart);
 
             if (count > firstPart)
@@ -61,7 +99,7 @@ namespace sd::direct
                 return;
             }
 
-            const std::uint32_t firstPart = std::min(count, ring.capacity - index);
+            const std::uint32_t firstPart = (std::min)(count, ring.capacity - index);
             std::memcpy(outBytes, ring.payload + index, firstPart);
 
             if (count > firstPart)
@@ -81,6 +119,17 @@ namespace sd::direct
                     return 8;
                 case ValueType::String:
                     return static_cast<std::uint16_t>(std::min<std::size_t>(value.stringValue.size(), wire::kStringMax));
+                case ValueType::StringArray:
+                {
+                    std::size_t total = 1;
+                    const std::size_t count = std::min<std::size_t>(value.stringArrayValue.size(), wire::kStringArrayMaxCount);
+                    for (std::size_t i = 0; i < count; ++i)
+                    {
+                        total += 2;
+                        total += std::min<std::size_t>(value.stringArrayValue[i].size(), wire::kStringMax);
+                    }
+                    return static_cast<std::uint16_t>(total);
+                }
                 default:
                     return 0;
             }
@@ -96,6 +145,8 @@ namespace sd::direct
                     return wire::WireValueType::Double;
                 case ValueType::String:
                     return wire::WireValueType::String;
+                case ValueType::StringArray:
+                    return wire::WireValueType::StringArray;
                 default:
                     return wire::WireValueType::String;
             }
@@ -111,6 +162,8 @@ namespace sd::direct
                     return ValueType::Double;
                 case wire::WireValueType::String:
                     return ValueType::String;
+                case wire::WireValueType::StringArray:
+                    return ValueType::StringArray;
                 default:
                     return ValueType::String;
             }
@@ -153,6 +206,8 @@ namespace sd::direct
             const std::uint64_t nowUs = GetSteadyNowUs();
             header->lastProducerHeartbeatUs.store(nowUs, std::memory_order_release);
             header->lastConsumerHeartbeatUs.store(nowUs, std::memory_order_release);
+            header->consumerInstanceId.store(0, std::memory_order_release);
+            header->consumerReadIndex.store(0, std::memory_order_release);
         }
 
         outRing.header = header;
@@ -250,6 +305,32 @@ namespace sd::direct
                     cursor = (cursor + valueLen) % ring.capacity;
                     break;
                 }
+                case ValueType::StringArray:
+                {
+                    const std::uint8_t count = static_cast<std::uint8_t>(std::min<std::size_t>(value.stringArrayValue.size(), wire::kStringArrayMaxCount));
+                    CopyToRing(ring, cursor, &count, 1);
+                    cursor = (cursor + 1) % ring.capacity;
+
+                    for (std::size_t i = 0; i < count; ++i)
+                    {
+                        const std::uint16_t itemLen = static_cast<std::uint16_t>(std::min<std::size_t>(value.stringArrayValue[i].size(), wire::kStringMax));
+                        std::array<std::uint8_t, 2> lenBytes {};
+                        std::memcpy(lenBytes.data(), &itemLen, sizeof(itemLen));
+                        CopyToRing(ring, cursor, lenBytes.data(), static_cast<std::uint32_t>(lenBytes.size()));
+                        cursor = (cursor + static_cast<std::uint32_t>(lenBytes.size())) % ring.capacity;
+                        if (itemLen > 0)
+                        {
+                            CopyToRing(
+                                ring,
+                                cursor,
+                                reinterpret_cast<const std::uint8_t*>(value.stringArrayValue[i].data()),
+                                itemLen
+                            );
+                            cursor = (cursor + itemLen) % ring.capacity;
+                        }
+                    }
+                    break;
+                }
                 default:
                     break;
             }
@@ -262,14 +343,14 @@ namespace sd::direct
         return true;
     }
 
-    bool ReadNextUpsert(RingAttachResult& ring, VariableUpdate& outUpdate)
+    bool ReadNextUpsert(const RingAttachResult& ring, std::uint32_t& readCursor, VariableUpdate& outUpdate)
     {
         if (ring.header == nullptr || ring.payload == nullptr || ring.capacity == 0)
         {
             return false;
         }
 
-        const std::uint32_t readIndex = ring.header->readIndex.load(std::memory_order_acquire);
+        const std::uint32_t readIndex = readCursor;
         const std::uint32_t writeIndex = ring.header->writeIndex.load(std::memory_order_acquire);
         if (readIndex == writeIndex)
         {
@@ -285,15 +366,23 @@ namespace sd::direct
         // This is a resynchronization strategy to keep consumer alive.
         if (msg.messageBytes < sizeof(wire::MessageHeader))
         {
-            ring.header->readIndex.store(writeIndex, std::memory_order_release);
+			std::ostringstream out;
+			out << "[DirectRing] malformed header: messageBytes=" << msg.messageBytes
+				<< " readIndex=" << readIndex << " writeIndex=" << writeIndex << "\n";
+			DebugLog(out.str());
+            readCursor = writeIndex;
             return false;
         }
 
         // Skip unsupported frame types while keeping read cursor consistent.
         if (msg.messageType != static_cast<std::uint8_t>(wire::MsgType::Upsert))
         {
+			std::ostringstream out;
+			out << "[DirectRing] skipping unsupported messageType=" << static_cast<int>(msg.messageType)
+				<< " bytes=" << msg.messageBytes << "\n";
+            DebugLog(out.str());
             const std::uint32_t nextRead = (readIndex + msg.messageBytes) % ring.capacity;
-            ring.header->readIndex.store(nextRead, std::memory_order_release);
+            readCursor = nextRead;
             return false;
         }
 
@@ -301,7 +390,12 @@ namespace sd::direct
         const std::uint32_t payloadBytes = static_cast<std::uint32_t>(msg.keyLen + msg.valueLen);
         if (static_cast<std::uint32_t>(msg.messageBytes) != sizeof(wire::MessageHeader) + payloadBytes)
         {
-            ring.header->readIndex.store(writeIndex, std::memory_order_release);
+			std::ostringstream out;
+			out << "[DirectRing] payload mismatch: messageBytes=" << msg.messageBytes
+				<< " keyLen=" << msg.keyLen << " valueLen=" << msg.valueLen
+				<< " readIndex=" << readIndex << " writeIndex=" << writeIndex << "\n";
+			DebugLog(out.str());
+            readCursor = writeIndex;
             return false;
         }
 
@@ -351,6 +445,33 @@ namespace sd::direct
                 cursor = (cursor + msg.valueLen) % ring.capacity;
                 break;
             }
+            case ValueType::StringArray:
+            {
+                if (msg.valueLen > 0)
+                {
+                    std::vector<std::uint8_t> bytes(msg.valueLen);
+                    CopyFromRing(ring, cursor, bytes.data(), msg.valueLen);
+
+                    std::size_t offset = 0;
+                    const std::uint8_t count = bytes[offset++];
+                    value.stringArrayValue.clear();
+                    value.stringArrayValue.reserve(count);
+                    for (std::uint8_t i = 0; i < count && offset + 2 <= bytes.size(); ++i)
+                    {
+                        std::uint16_t itemLen = 0;
+                        std::memcpy(&itemLen, bytes.data() + offset, sizeof(itemLen));
+                        offset += 2;
+                        const std::size_t boundedLen = std::min<std::size_t>(itemLen, bytes.size() - offset);
+                        value.stringArrayValue.emplace_back(
+                            reinterpret_cast<const char*>(bytes.data() + offset),
+                            boundedLen
+                        );
+                        offset += boundedLen;
+                    }
+                }
+                cursor = (cursor + msg.valueLen) % ring.capacity;
+                break;
+            }
             default:
                 cursor = (cursor + msg.valueLen) % ring.capacity;
                 break;
@@ -362,8 +483,32 @@ namespace sd::direct
         outUpdate.seq = msg.seq;
         outUpdate.sourceTimestampUs = msg.sourceTimestampUs;
 
-        ring.header->readIndex.store(cursor, std::memory_order_release);
+		if (!IsPrintableKey(outUpdate.key))
+		{
+			std::ostringstream out;
+			out << "[DirectRing] suspicious key decoded: size=" << outUpdate.key.size()
+				<< " seq=" << outUpdate.seq
+				<< " type=" << DescribeType(outUpdate.type)
+				<< " readIndex=" << readIndex << " writeIndex=" << writeIndex << " keyBytes=";
+			for (unsigned char ch : outUpdate.key)
+				out << static_cast<int>(ch) << ' ';
+			out << "\n";
+			DebugLog(out.str());
+		}
+
+        readCursor = cursor;
         ring.header->lastConsumerHeartbeatUs.store(GetSteadyNowUs(), std::memory_order_release);
         return true;
+    }
+
+    bool ReadNextUpsert(RingAttachResult& ring, VariableUpdate& outUpdate)
+    {
+        std::uint32_t cursor = ring.header->consumerReadIndex.load(std::memory_order_acquire);
+        const bool read = ReadNextUpsert(static_cast<const RingAttachResult&>(ring), cursor, outUpdate);
+        if (read)
+        {
+            ring.header->consumerReadIndex.store(cursor, std::memory_order_release);
+        }
+        return read;
     }
 }

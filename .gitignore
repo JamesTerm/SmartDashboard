@@ -49,3 +49,6 @@ out/
 
 # Local CMake user presets
 CMakeUserPresets.json
+
+# Repo-local debug output
+.debug/

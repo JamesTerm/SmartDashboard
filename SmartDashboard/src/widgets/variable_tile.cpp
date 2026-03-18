@@ -1,5 +1,7 @@
 #include "widgets/variable_tile.h"
 
+#include "app/debug_log_paths.h"
+
 #include "widgets/line_plot_widget.h"
 #include "widgets/tile_control_widget.h"
 
@@ -27,11 +29,21 @@
 #include <QProgressBar>
 #include <QCheckBox>
 #include <QPushButton>
+#include <QComboBox>
+
+#include <fstream>
 
 namespace sd::widgets
 {
     namespace
     {
+        void DebugTileLog(const QString& line)
+        {
+            static std::ofstream log(sd::app::GetDebugLogPath("direct_tile_debug_log.txt").toStdString(), std::ios::out | std::ios::trunc);
+            log << line.toStdString() << '\n';
+            log.flush();
+        }
+
         QString GetDefaultWidgetType(VariableType type)
         {
             switch (type)
@@ -193,6 +205,7 @@ namespace sd::widgets
         SetBoolCheckboxShowLabel(m_boolCheckboxShowLabel);
         UpdateWidgetPresentation();
         UpdateValueDisplay();
+        DebugTileLog(QString("tile.create key=%1 widget=%2 type=%3").arg(m_key).arg(m_widgetType).arg(static_cast<int>(m_type)));
     }
 
     void VariableTile::SetEditable(bool editable)
@@ -455,6 +468,36 @@ namespace sd::widgets
         UpdateWidgetPresentation();
     }
 
+    void VariableTile::SetStringChooserMode(bool chooserMode)
+    {
+        if (m_stringChooserMode == chooserMode)
+        {
+            return;
+        }
+
+        m_stringChooserMode = chooserMode;
+        DebugTileLog(QString("tile.set_chooser_mode key=%1 chooser=%2 widget=%3").arg(m_key).arg(m_stringChooserMode ? 1 : 0).arg(m_widgetType));
+        setProperty("stringChooserMode", m_stringChooserMode);
+        if (m_controlWidget != nullptr)
+        {
+            m_controlWidget->SetStringChooserMode(m_stringChooserMode);
+        }
+        UpdateWidgetPresentation();
+        UpdateValueDisplay();
+    }
+
+    void VariableTile::SetStringChooserOptions(const QStringList& options)
+    {
+        m_stringChooserOptions = options;
+        DebugTileLog(QString("tile.set_chooser_options key=%1 count=%2 widget=%3").arg(m_key).arg(options.size()).arg(m_widgetType));
+        setProperty("stringChooserOptions", m_stringChooserOptions);
+        if (m_controlWidget != nullptr)
+        {
+            m_controlWidget->SetStringOptions(m_stringChooserOptions);
+        }
+        UpdateValueDisplay();
+    }
+
     void VariableTile::ResetLinePlotGraph()
     {
         if (m_linePlot != nullptr)
@@ -486,18 +529,21 @@ namespace sd::widgets
     void VariableTile::SetBoolValue(bool value)
     {
         m_boolValue = value;
+        DebugTileLog(QString("tile.set_bool key=%1 value=%2 widget=%3").arg(m_key).arg(m_boolValue ? 1 : 0).arg(m_widgetType));
         UpdateValueDisplay();
     }
 
     void VariableTile::SetDoubleValue(double value)
     {
         m_doubleValue = value;
+        DebugTileLog(QString("tile.set_double key=%1 value=%2 widget=%3").arg(m_key).arg(m_doubleValue).arg(m_widgetType));
         UpdateValueDisplay();
     }
 
     void VariableTile::SetStringValue(const QString& value)
     {
         m_stringValue = value;
+        DebugTileLog(QString("tile.set_string key=%1 value=%2 widget=%3 chooser=%4").arg(m_key).arg(m_stringValue).arg(m_widgetType).arg(m_stringChooserMode ? 1 : 0));
         UpdateValueDisplay();
     }
 
@@ -529,6 +575,16 @@ namespace sd::widgets
     QString VariableTile::GetStringValue() const
     {
         return m_stringValue;
+    }
+
+    bool VariableTile::GetStringChooserMode() const
+    {
+        return m_stringChooserMode;
+    }
+
+    QStringList VariableTile::GetStringChooserOptions() const
+    {
+        return m_stringChooserOptions;
     }
 
     void VariableTile::SetWidgetType(const QString& widgetType)
@@ -894,6 +950,7 @@ namespace sd::widgets
                 addWidgetAction("Read-only label", "string.text");
                 addWidgetAction("Read-only multiline", "string.multiline");
                 addWidgetAction("Writable edit box", "string.edit");
+                addWidgetAction("Chooser dropdown", "string.chooser");
                 break;
             default:
                 break;
@@ -959,6 +1016,7 @@ namespace sd::widgets
         const bool isStringText = (m_widgetType == "string.text");
         const bool isStringMultiline = (m_widgetType == "string.multiline");
         const bool isStringEdit = (m_widgetType == "string.edit");
+        const bool isStringChooser = (m_widgetType == "string.chooser");
 
         const bool showBoolLed = (m_type == VariableType::Bool && isBoolLed);
         const bool showBoolText = (m_type == VariableType::Bool && isBoolText);
@@ -971,6 +1029,11 @@ namespace sd::widgets
         const bool showStringText = (m_type == VariableType::String && isStringText);
         const bool showStringMultiline = (m_type == VariableType::String && isStringMultiline);
         const bool showStringEdit = (m_type == VariableType::String && isStringEdit);
+        const bool showStringChooser = (m_type == VariableType::String && isStringChooser);
+
+        m_stringChooserMode = showStringChooser;
+        m_controlWidget->SetStringChooserMode(m_stringChooserMode);
+        m_controlWidget->SetStringOptions(m_stringChooserOptions);
 
         m_boolLed->setVisible(showBoolLed);
         if (showBoolLed)
@@ -999,7 +1062,7 @@ namespace sd::widgets
         }
         m_titleLabel->setVisible(!showDoubleGauge);
 
-        const bool showControl = showBoolCheckbox || showDoubleSlider || showStringEdit;
+        const bool showControl = showBoolCheckbox || showDoubleSlider || showStringEdit || showStringChooser;
         m_controlWidget->setVisible(showControl);
 
         if (showBoolCheckbox)
@@ -1107,7 +1170,8 @@ namespace sd::widgets
         const bool isBoolCheckbox = (m_type == VariableType::Bool && m_widgetType == "bool.checkbox");
         const bool isDoubleSlider = (m_type == VariableType::Double && m_widgetType == "double.slider");
         const bool isStringEdit = (m_type == VariableType::String && m_widgetType == "string.edit");
-        const bool usesControlWidget = isBoolCheckbox || isDoubleSlider || isStringEdit;
+        const bool isStringChooser = (m_type == VariableType::String && m_widgetType == "string.chooser");
+        const bool usesControlWidget = isBoolCheckbox || isDoubleSlider || isStringEdit || isStringChooser;
 
         if (usesControlWidget)
         {
@@ -1486,10 +1550,10 @@ namespace sd::widgets
             return;
         }
 
-        if (m_widgetType == "string.edit")
+        if (m_widgetType == "string.edit" || m_widgetType == "string.chooser")
         {
             QDialog dialog(this);
-            dialog.setWindowTitle("Text Edit Properties");
+            dialog.setWindowTitle(m_widgetType == "string.chooser" ? "Chooser Properties" : "Text Edit Properties");
 
             auto* form = new QFormLayout(&dialog);
             auto* fontSizeSpin = new QSpinBox(&dialog);
@@ -1497,6 +1561,15 @@ namespace sd::widgets
             fontSizeSpin->setSpecialValueText("Default");
             fontSizeSpin->setValue(m_textFontPointSize);
             form->addRow("Font Size", fontSizeSpin);
+
+            QLineEdit* optionsEdit = nullptr;
+            if (m_widgetType == "string.chooser")
+            {
+                optionsEdit = new QLineEdit(&dialog);
+                optionsEdit->setPlaceholderText("Option1, Option2, Option3");
+                optionsEdit->setText(m_stringChooserOptions.join(","));
+                form->addRow("Options", optionsEdit);
+            }
 
             auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
             form->addRow(buttons);
@@ -1510,6 +1583,21 @@ namespace sd::widgets
             }
 
             SetTextFontPointSize(fontSizeSpin->value());
+            if (m_widgetType == "string.chooser" && optionsEdit != nullptr)
+            {
+                const QStringList rawOptions = optionsEdit->text().split(',', Qt::SkipEmptyParts);
+                QStringList options;
+                options.reserve(rawOptions.size());
+                for (const QString& raw : rawOptions)
+                {
+                    const QString trimmed = raw.trimmed();
+                    if (!trimmed.isEmpty())
+                    {
+                        options.push_back(trimmed);
+                    }
+                }
+                SetStringChooserOptions(options);
+            }
             return;
         }
 
