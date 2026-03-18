@@ -9,8 +9,8 @@ Build a focused C++ dashboard inspired by WPILib SmartDashboard, but intentional
 - Render live variables of `bool`, `double`, and `string`
 - Let users choose/change widget type per variable
 - Let users move/arrange widgets and save/load layout
-- Use direct transport as the baseline and preserve a clean adapter boundary for optional NetworkTables support
-- Keep compatibility ecosystems (`Legacy NT`, future Elastic-style bridges, etc.) as optional transport plugins rather than baking every legacy stack into the core executable
+- Use direct transport as the baseline and preserve a clean adapter boundary for optional compatibility transports
+- Keep compatibility ecosystems (`Legacy NT`, future bridges, etc.) as optional transport plugins rather than baking every legacy stack into the core executable
 
 This document defines scope, architecture, first-iteration boundaries, and implementation-ready decisions.
 
@@ -55,6 +55,7 @@ The dashboard should distinguish between:
 - Forces cleaner boundaries so compatibility code does not leak helper behavior into the core app.
 - Creates a teaching-friendly example of real plugin loading and ABI design for students.
 - Lets each ecosystem bridge own its own constraints (for example multi-client support) behind the common transport contract.
+- Creates room for a future native generic plugin that can model stronger multi-client and ownership semantics without being forced to inherit every legacy compatibility behavior.
 
 ### ABI direction
 
@@ -62,10 +63,22 @@ For plugin-facing transport boundaries, prefer a small versioned **C interface**
 
 - exported entry point returns a versioned plugin descriptor
 - descriptor exposes metadata (`id`, display name, capability flags)
+- descriptor can answer shared extensible property queries for additive capabilities
+- descriptor can describe host-rendered connection/settings fields so the host stays UI-owner
 - transport instances use opaque handles plus function tables
 - configuration crosses the boundary as plain C structs / strings
 
 This is intentionally conservative. The goal is long-lived binary survivability and a teachable example of why many production plugin systems avoid exposing raw C++ ABI across DLL boundaries.
+
+### Current implementation status
+
+- `Direct` and `Replay` are built into the core app.
+- `Legacy NT` is now implemented as a real in-repo plugin loaded from `plugins/` beside the executable.
+- The old built-in NT transport implementation has been removed from the core executable.
+- Connection UI is now transport-schema driven for plugin transports:
+  - the host renders a separate settings dialog from transport-declared field metadata
+  - the core app no longer hardcodes NT-specific menu actions such as `Set host` / `Set team`
+  - this keeps Qt/UI ownership in the host while letting each transport describe its own connection model.
 
 ## Project Structure (Solution)
 
@@ -521,15 +534,14 @@ namespace sd::direct::wire
 
 namespace sd::transport
 {
-    enum class TransportKind { Direct, NetworkTables };
+    enum class TransportKind { Direct, Plugin, Replay };
     enum class ConnectionState { Disconnected, Connecting, Connected, Stale };
 
     struct ConnectionConfig
     {
         TransportKind kind = TransportKind::Direct;
-        QString ntHost = "127.0.0.1";
-        int ntTeam = 0;
-        bool ntUseTeam = true;
+        QString transportId = "direct";
+        QString pluginSettingsJson;
     };
 
     class IDashboardTransport
@@ -549,7 +561,7 @@ Implementation note:
 
 - `dashboard_transport` is the Qt-facing transport boundary used by `MainWindow`.
 - Direct transport implementation remains Qt-free in `*_direct` and is wrapped behind the adapter interface.
-- NT transport can be added without changing widget/model flow.
+- Compatibility transports can be added as plugins without changing widget/model flow.
 
 ## Threading Model
 
@@ -602,24 +614,25 @@ Non-goals for iteration 1:
 - Improved transport diagnostics and error handling
 - Bidirectional command channel (dashboard -> app) for editable widgets
 
-## Iteration 3 (next focus)
+## Iteration 3 (current compatibility/plugin focus)
 
-- Optional alternate transport(s), starting with classic NetworkTables TCP/IP client mode
+- Optional alternate transport(s) through the transport plugin boundary, starting with `Legacy NT`
+- Host-rendered transport settings dialog driven by transport field schemas
 - Plugin-like widget extension points
 - Import/export profiles and richer preferences
-- Transport-parity tests (direct + NetworkTables adapters should pass the same retained/command semantics where applicable)
+- Transport-parity tests where applicable across built-ins and compatibility plugins
 - Connection UX: explicit transport selection + manual connect/disconnect flow
 
-### Iteration 3 Definition of Done (NetworkTables transport slice)
+### Iteration 3 Definition of Done (Legacy NT plugin slice)
 
-- `Transport` selector exists in UI and supports `Direct` and `NetworkTables`
-- NT mode supports explicit endpoint config (team number and/or host/IP) with connect/disconnect actions
-- Dashboard connection state indicator correctly reflects NT lifecycle (`Disconnected`, `Connecting`, `Connected`, `Stale`)
+- `Transport` selector exists in UI and supports `Direct`, discovered plugins, and `Replay`
+- `Legacy NT` runs as a real plugin rather than built-in transport code
+- Plugin transport settings are rendered by the host from transport-declared field metadata
+- Dashboard connection state indicator correctly reflects plugin lifecycle (`Disconnected`, `Connecting`, `Connected`, `Stale`)
 - Existing widget/layout behavior remains unchanged when switching transports
-- Automated parity tests pass for direct adapter baseline and NT adapter telemetry/command roundtrip (bool/double/string)
-- Automated reconnect test passes for NT adapter and verifies latest-value replay after reconnect
-- Localhost simulation test path is documented and runnable in CI/dev workflow
-- Design and testing docs are updated with commands and expected outcomes for NT validation
+- `Legacy NT` telemetry/command roundtrip works for bool/double/string and chooser-relevant string arrays
+- Localhost/simulator validation path is documented and runnable for plugin-based `Legacy NT`
+- Design and testing docs are updated with commands and expected outcomes for plugin-based compatibility validation
 
 ## Bidirectional Support Status (Dashboard -> Application)
 
@@ -659,23 +672,23 @@ Each channel can be its own ring buffer + event pair, or one mapping with two ri
 
 Because v1 already has transport abstraction and message framing, this extension remained additive and low-risk to the existing receive path.
 
-## NetworkTables Adapter Direction (next)
+## Compatibility Transport Direction (next)
 
-The next transport milestone is a classic NT TCP/IP adapter while keeping the current direct path intact.
+The next compatibility milestone is to keep `Legacy NT` stable as the baseline plugin while layering broader Shuffleboard-oriented compatibility on top without polluting the core app.
 
 Key alignment points:
 
-- Robot program is expected to run the NT server role in normal FRC operation.
-- Dashboard runs as an NT client and connects to robot host/team-address (or explicit host override).
-- NT server retains cached topic values and replays latest values to late-joining subscribers.
-- Dashboard-side retained cache remains useful for adapter parity and reconnect UX, but server-retained values remain source-of-truth for NT sessions.
+- Robot program is expected to run the legacy compatibility server role in baseline interoperability scenarios.
+- Dashboard runs as the selected compatibility plugin client and connects using plugin-defined settings.
+- Compatibility server retains cached topic values and replays latest values to late-joining subscribers where that ecosystem supports it.
+- Dashboard-side retained cache remains useful for adapter parity and reconnect UX, but server-retained values remain source-of-truth for compatibility sessions.
 
 Initial implementation slice:
 
 1. Add a transport adapter contract test suite that can run against each adapter implementation.
-2. Implement an NT-backed subscriber/publisher adapter pair behind the existing dashboard/model boundaries.
-3. Add explicit connect/disconnect UX (manual connect button + endpoint/team settings).
-4. Validate with localhost simulation using a real NT server/client pair in automated tests and manual dashboard loop.
+2. Keep the existing `Legacy NT` plugin stable while moving more ecosystem-specific behavior fully behind the plugin boundary.
+3. Extend plugin-declared settings/capabilities only when the host contract genuinely needs them.
+4. Validate with localhost/simulator compatibility runs using the plugin menu path and host-rendered settings dialog.
 
 ## Connection UX Direction (for transport switching)
 
@@ -683,8 +696,8 @@ To keep interfaces clean while enabling transport growth, the UI should treat co
 
 Recommended v1 of this UX:
 
-- Transport selector: `Direct (local IPC)` | `NetworkTables (NT4 TCP/IP)`
-- NT connection fields: Team Number and/or Host/IP, optional Client Name
+- Transport selector: built-in transports plus discovered compatibility plugins
+- Connection fields come from transport-declared metadata instead of hardcoded protocol-specific menu items
 - Explicit action buttons: Connect, Disconnect
 - Status display remains adapter-agnostic (`Disconnected`, `Connecting`, `Connected`, `Stale`)
 - Widget/layout behavior is unchanged when transport changes; only backend adapter wiring changes
@@ -702,7 +715,7 @@ Validation baseline for this slice:
 
 Current implementation note:
 
-- A legacy NT2-compatible client transport is now implemented in-tree (inside this repository), removing build dependency on external Robot_Simulation sources.
+- A legacy NT2-compatible client transport is now implemented as the in-repo `Legacy NT` plugin, removing the need to keep legacy NT socket logic inside the core app.
 - Robot_Simulation remains the validation target/reference server for behavioral parity checks.
 
 ## NetworkTables Source References
@@ -789,7 +802,7 @@ Rationale:
 - Preserves existing model/widget flow (`MainWindow` + `VariableStore` + tiles)
 - Avoids transport-specific branches in widget logic
 - Keeps the teaching story clean: "live and replay are different sources behind one contract"
-- Supports future parity tests across `Direct`, `NetworkTables`, and `Replay`
+- Supports future parity tests across `Direct`, compatibility plugins, and `Replay`
 
 Alternatives considered:
 

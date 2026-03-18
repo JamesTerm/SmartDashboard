@@ -31,7 +31,7 @@
 ## Quick context for next session
 
 - Repository baseline is local `main`; `feature/replay-dockable-workspace` has been merged.
-- Core dashboard architecture is stable: transport-agnostic main window (`Direct`, `NetworkTables`, `Replay`) + `VariableStore` + Qt widget tiles.
+- Core dashboard architecture is stable: transport-agnostic main window (`Direct`, plugin compatibility transports, `Replay`) + `VariableStore` + Qt widget tiles.
 - Editable mode is layout-only; non-editable mode restores live writable controls.
 - Layout workflows are in place: file-dialog save/load, dirty tracking, startup apply, and close prompt.
 - Direct transport includes retained latest-value fallback for cross-run config/state retrieval.
@@ -41,7 +41,14 @@
   - timeline scrub/zoom/pan, adaptive tick labels, cursor/window readouts, marker jumps, marker dock, keyboard stepping, bookmarks, anomaly markers, and visible-window marker summary
   - dockable `Replay Controls`, `Replay Timeline`, and `Replay Markers` panels with persisted visibility and `Reset Replay Layout`
 - `docs/project_history.md` is the authoritative milestone log; keep this file to current-state handoff only.
-- Compatibility direction for simulator work is now documented: keep legacy NT behavior as a stable baseline and treat Shuffleboard-oriented additions as additive profiles.
+- Compatibility direction for simulator work is now documented: keep legacy NT behavior as a stable plugin baseline and treat Shuffleboard-oriented additions as additive profiles.
+- Current transport-plugin status:
+  - `Legacy NT` now runs as a real optional plugin discovered from `plugins/`
+  - the old built-in NT transport implementation has been removed from the core app
+  - transport capabilities now support shared extensible property queries (`supports_chooser`, `supports_multi_client`)
+  - transport connection settings are now described by transport field schemas and rendered by the host in a separate transport-specific settings dialog
+  - selected transport identity is shown in status/title text so active backend is visible during testing.
+  - manual validation on this branch confirmed the plugin path works well enough to treat it as the new compatibility baseline.
 - Direct survive/restart slice is now working again with Robot_Simulation pairing:
   - dashboard startup loads remembered operator-owned control values from `QSettings`
   - remembered values are applied after layout load and again after Direct retained replay so dashboard intent wins over stale startup defaults
@@ -67,7 +74,11 @@
   - repeated robot restart stress improved after fixing publisher free-space accounting against the active consumer cursor
   - passive extra observers still expose race/session weaknesses, so transport is still not treated as truly multi-observer safe
   - the short immediate post-dashboard-restart probe window can still miss early telemetry (`Timer` / `Y_ft`), even when the later robot-survive phase passes cleanly
-- Next simulator-facing goal: finish hardening repeated robot-survive stress for the real single-dashboard path, then document the harness/debugging workflow as a student-friendly systems-debugging example.
+- Next simulator-facing goal: continue Shuffleboard-oriented compatibility work on top of the new plugin boundary, while preserving the stable `Legacy NT` baseline and the real single-dashboard Direct survive path.
+- Next architecture/design goal after merge: start a new `Native Link` feature branch for a product-owned generic plugin transport.
+  - intent: design a more robust multi-client-capable native transport/plugin example without inheriting all legacy NetworkTables shared-state trade-offs
+  - research direction: study strengths of dashboards like `Shuffleboard`, `Glass`, `Elastic`, and similar tools for workflow lessons only, not imitation
+  - likely design themes: server authority, explicit topic descriptors, state-vs-command separation, reconnect snapshot + live delta flow, and stronger freshness/ownership semantics.
 
 ## Known constraints / active considerations
 

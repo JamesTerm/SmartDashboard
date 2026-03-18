@@ -124,11 +124,11 @@ Suggested loop:
 
 #### Legacy NT2 simulator check
 
-Use this check when validating NetworkTables transport against the cloned legacy simulator stack.
+Use this check when validating the `Legacy NT` plugin against the cloned legacy simulator stack.
 
 Prerequisites:
 
-- no external NT source dependency is required for dashboard build
+- the `Legacy NT` plugin should be built and copied beside `SmartDashboardApp`
 - robot simulation/server should expose legacy NT2 endpoint on expected host/team settings
 
 Suggested loop:
@@ -137,7 +137,8 @@ Suggested loop:
 2. Start dashboard:
    - `build/SmartDashboard/Debug/SmartDashboardApp.exe`
 3. In dashboard menu:
-   - `Connection` -> `Use NetworkTables transport`
+   - `Connection` -> `Use Legacy NT transport`
+   - `Connection` -> `Legacy NT Settings...`
    - set team/host values as needed
    - `Connection` -> `Connect`
 4. Verify:

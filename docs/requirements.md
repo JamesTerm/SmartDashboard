@@ -22,6 +22,7 @@ Build an educational, community-friendly C++ dashboard prototype for FRC that de
   - avoid deep analytics work unless it clearly supports real team workflows
   - prefer compatibility and migration ease over purity of internal implementation
   - evaluate outside tools for ideas, but only adopt feature directions that fit this product's own identity
+  - study popular dashboards (`Shuffleboard`, `Glass`, `Elastic`, and similar tools) for workflow lessons, but avoid cloning another product's feature surface or branding story
 
 ## Adoption principle
 
@@ -146,6 +147,7 @@ Use these buckets to keep roadmap discussions grounded in product identity.
    - NetworkTables behavior should feel solid enough that teams do not see this dashboard as a special-case tool.
    - Acceptance: common FRC keys and update patterns behave as teams expect.
    - Architecture direction: legacy ecosystem compatibility should be packaged as optional per-ecosystem transport plugins so teams can keep robot code patterns while deploying only the bridge they need.
+   - Current baseline: `Legacy NT` is the first real compatibility plugin and should remain the stable comparison oracle while broader Shuffleboard-oriented additions are layered carefully on top.
 
 4. **High-value everyday widget coverage**
    - Prioritize the widgets teams most commonly need before adding niche analysis surfaces.
@@ -199,6 +201,7 @@ Treat this as the readiness gate before presenting NetworkTables support as a co
     - legacy/interoperability transports are discoverable plugins loaded from `plugins/`
     - each plugin owns its own compatibility scope, reconnect semantics, and multi-client story unless the core contract explicitly guarantees more
     - plugin ABI should prefer a small versioned C interface so examples remain teachable and binary compatibility is easier to preserve across builds
+    - plugin settings UI should be host-rendered from transport-declared field metadata rather than by embedding transport-specific Qt UI into the plugin boundary
   - Existing common scalar widgets feel complete for normal team use:
     - bool indicators/text/control
     - numeric text/bar/slider/dial

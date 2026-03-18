@@ -6,9 +6,17 @@ Lightweight C++ dashboard for FRC, inspired by WPILib SmartDashboard.
 
 - Built as a community-friendly path forward as legacy SmartDashboard approaches end-of-life (2027).
 - Focused scope: fast live values (`bool`, `double`, `string`), editable widgets, and saved layouts.
-- Uses direct local transport as the current production path, with a transport-selection UI scaffold for upcoming NetworkTables support.
+- Uses native `Direct` and `Replay` transports in the core app, with optional compatibility transports loaded as plugins.
 - Product direction: become a practical `Shuffleboard`-class dashboard replacement first, while keeping built-in replay/telemetry as a strong differentiator.
 - Adoption principle: teams should be able to keep existing robot publishing patterns whenever possible; compatibility/translation adapters are preferred over forcing robot-code rewrites.
+- Product research is selective, not imitative: we study ideas from dashboards like `Shuffleboard`, `Glass`, `Elastic`, and other popular tools, then adopt only the parts that fit this product's identity.
+
+## Transition Strategy
+
+- `Direct` and `Replay` stay native to the core app.
+- Compatibility ecosystems are handled as optional plugins so teams can bring only the bridge they need.
+- Current baseline plugin is `Legacy NT`, which exists to reduce migration friction for teams that do not want to rewrite robot code immediately.
+- Long-term, this plugin architecture also creates room for a future native generic transport plugin that is designed around this project's own goals instead of inheriting every historical trade-off of NetworkTables-style shared state.
 
 ## Architecture Overview
 
@@ -36,7 +44,7 @@ Qt UI Rendering (tiles/widgets)
 Notes:
 - The dashboard now routes telemetry/commands through a transport-agnostic interface in the UI layer.
 - Direct transport is implemented and fully test-backed.
-- NetworkTables transport now includes an in-tree NT2-compatible client implementation (no external source dependency required).
+- Legacy NetworkTables compatibility now lives in the in-repo `Legacy NT` plugin instead of being baked into the core executable.
 
 Future consideration (not implemented yet):
 - introduce a decoupled telemetry event bus between ingestion and UI rendering
@@ -102,7 +110,7 @@ See `docs/development_workflow.md` and `docs/ai_development_guidelines.md` for p
 Current product-direction priorities:
 
 - compatibility with existing team publishing workflows
-- foundation-first readiness before broad `NetworkTables` rollout
+- foundation-first readiness before broad `Legacy NT` / compatibility-plugin rollout
 - strong live dashboard usefulness compared with `Shuffleboard`
 - `SendableChooser`-class compatibility and other common team workflows
 - reconnect-safe dashboard-owned controls during simulator/robot restarts
@@ -187,7 +195,7 @@ Potential next steps:
 - additional telemetry widgets and interaction patterns
 - richer layout customization and editing ergonomics
 - performance profiling and update-path optimization
-- plugin architecture exploration for extensibility
+- compatibility-plugin hardening and broader transport extensibility
 - improved deployment packaging and reproducibility
 - decoupled telemetry event bus with topic subscriptions and rate-limited UI delivery
 

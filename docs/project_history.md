@@ -7,6 +7,28 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-18 - Legacy NT plugin boundary and transport settings schema completed
+
+- Completed the first real compatibility-plugin slice instead of leaving it as a scaffold:
+  - `Legacy NT` now runs as a real optional plugin discovered from `plugins/`
+  - the old built-in NT transport client was removed from the core app
+  - the plugin now owns the legacy NT socket/connect/publish/receive behavior behind the versioned C ABI.
+- Transport plugin ABI and host contract were expanded in a controlled way:
+  - added heavily documented, Doxygen-style teaching comments to the transport ABI and host transport headers
+  - added extensible shared capability/property queries (for example chooser support)
+  - added transport-declared connection field schemas so plugins can describe connection requirements without owning Qt UI.
+- Connection UX was refactored to fit the new architecture:
+  - replaced hardcoded NT menu actions with a generic host-rendered `Transport Settings...` dialog
+  - settings dialog now renders transport-specific bool/int/string fields from descriptor metadata
+  - transport selection/status text now clearly shows the currently selected transport.
+- Product/design docs were realigned to this architecture:
+  - `Direct` and `Replay` remain native core transports
+  - compatibility ecosystems are optional plugins with one plugin per ecosystem
+  - `Legacy NT` is now the stable compatibility baseline while future Shuffleboard-oriented additions remain additive work above that baseline.
+- Product framing now explicitly reflects selective inspiration and transition strategy:
+  - README/requirements language now says the project studies ideas from tools like `Shuffleboard`, `Glass`, and `Elastic` without trying to copy another dashboard wholesale
+  - README now explains the plugin strategy as a transitional way to support many teams while leaving room for a future native generic transport plugin designed around SmartDashboard's own goals.
+
 ## 2026-03-18 - Transport plugin foundation direction started
 
 - Recorded a new compatibility-architecture direction for future growth:
