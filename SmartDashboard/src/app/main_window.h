@@ -114,6 +114,9 @@ private:
     void MarkLayoutDirty();
     void ApplyTransportMenuChecks();
     void PersistConnectionSettings() const;
+    void LoadRememberedControlValues();
+    void SaveRememberedControlValues() const;
+    void ApplyRememberedControlValuesToTiles();
     QString BuildDisplayLabel(const QString& key) const;
     void StartTransport();
     void StopTransport();

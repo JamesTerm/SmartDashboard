@@ -148,6 +148,7 @@ namespace
         const QString widgetType = tile->GetWidgetType();
         return (widgetType == "bool.checkbox") ||
                (widgetType == "double.numeric") ||
+               (widgetType == "double.slider") ||
                (widgetType == "string.edit") ||
                (widgetType == "string.chooser");
     }
@@ -908,6 +909,8 @@ MainWindow::MainWindow(QWidget* parent)
         m_recordButton->setChecked(m_recordRequested);
     }
 
+    LoadRememberedControlValues();
+
     SetTimelineDockMode(m_playbackTimeline, m_replayTimelineDock != nullptr && m_replayTimelineDock->isFloating());
 
     LoadUserReplayBookmarks();
@@ -933,6 +936,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     m_layoutFilePath = GetInitialLayoutPath();
     LoadLayoutFromPath(m_layoutFilePath, true);
+    ApplyRememberedControlValuesToTiles();
     LoadWindowGeometry();
     StartTransport();
 }
@@ -1046,7 +1050,10 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
             sd::widgets::VariableTile* chooserTile = GetOrCreateTile(chooserBase, sd::widgets::VariableType::String);
             if (chooserTile != nullptr)
             {
-                chooserTile->SetWidgetType("string.chooser");
+                if (chooserTile->GetWidgetType() != "string.chooser")
+                {
+                    chooserTile->SetWidgetType("string.chooser");
+                }
                 chooserTile->SetStringChooserMode(true);
                 chooserTile->SetTitleText(BuildDisplayLabel(chooserBase));
             }
@@ -1059,7 +1066,10 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
             sd::widgets::VariableTile* chooserTile = GetOrCreateTile(chooserBase, sd::widgets::VariableType::String);
             if (chooserTile != nullptr)
             {
-                chooserTile->SetWidgetType("string.chooser");
+                if (chooserTile->GetWidgetType() != "string.chooser")
+                {
+                    chooserTile->SetWidgetType("string.chooser");
+                }
                 chooserTile->SetStringChooserMode(true);
                 chooserTile->SetTitleText(BuildDisplayLabel(chooserBase));
 
@@ -1103,7 +1113,10 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
             sd::widgets::VariableTile* chooserTile = GetOrCreateTile(chooserBase, sd::widgets::VariableType::String);
             if (chooserTile != nullptr)
             {
-                chooserTile->SetWidgetType("string.chooser");
+                if (chooserTile->GetWidgetType() != "string.chooser")
+                {
+                    chooserTile->SetWidgetType("string.chooser");
+                }
                 chooserTile->SetStringChooserMode(true);
                 chooserTile->SetTitleText(BuildDisplayLabel(chooserBase));
 
@@ -1176,6 +1189,7 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
             remembered.valueType = static_cast<int>(sd::direct::ValueType::Bool);
             remembered.value = record.value.toBool();
             m_rememberedControlValues[keyStd] = remembered;
+            SaveRememberedControlValues();
             m_transport->PublishBool(key, record.value.toBool());
         }
         else if (record.type == sd::widgets::VariableType::Double)
@@ -1183,6 +1197,7 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
             remembered.valueType = static_cast<int>(sd::direct::ValueType::Double);
             remembered.value = record.value.toDouble();
             m_rememberedControlValues[keyStd] = remembered;
+            SaveRememberedControlValues();
             m_transport->PublishDouble(key, record.value.toDouble());
         }
         else if (record.type == sd::widgets::VariableType::String && tile->GetWidgetType() != "string.chooser")
@@ -1190,24 +1205,9 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
             remembered.valueType = static_cast<int>(sd::direct::ValueType::String);
             remembered.value = record.value.toString();
             m_rememberedControlValues[keyStd] = remembered;
+            SaveRememberedControlValues();
             m_transport->PublishString(key, record.value.toString());
         }
-    }
-
-    if (m_connectionConfig.kind == sd::transport::TransportKind::Direct
-        && (key == "AutonTest" || key == "Test/AutonTest" || key == "TestMove"))
-    {
-        RememberedControlValue remembered;
-        remembered.valueType = static_cast<int>(sd::direct::ValueType::Double);
-        remembered.value = QVariant(record.value.toDouble());
-        m_rememberedControlValues[keyStd] = remembered;
-
-        if (m_transport != nullptr)
-        {
-            m_transport->PublishDouble(key, record.value.toDouble());
-        }
-
-        DebugLogUiEvent(QString("retain direct numeric key=%1 value=%2").arg(key).arg(record.value.toDouble()));
     }
 
     RecordVariableEvent(key, valueType, value, seq);
@@ -1698,6 +1698,7 @@ void MainWindow::OnControlBoolEdited(const QString& key, bool value)
         remembered.valueType = static_cast<int>(sd::direct::ValueType::Bool);
         remembered.value = QVariant(value);
         m_rememberedControlValues[key.toStdString()] = remembered;
+        SaveRememberedControlValues();
     }
 
     if (m_transport)
@@ -1733,6 +1734,7 @@ void MainWindow::OnControlDoubleEdited(const QString& key, double value)
         remembered.valueType = static_cast<int>(sd::direct::ValueType::Double);
         remembered.value = QVariant(value);
         m_rememberedControlValues[key.toStdString()] = remembered;
+        SaveRememberedControlValues();
     }
 
     if (m_transport)
@@ -1749,6 +1751,7 @@ void MainWindow::OnControlStringEdited(const QString& key, const QString& value)
         remembered.valueType = static_cast<int>(sd::direct::ValueType::String);
         remembered.value = QVariant(value);
         m_rememberedControlValues[key.toStdString()] = remembered;
+        SaveRememberedControlValues();
     }
 
     if (m_transport)
@@ -2430,6 +2433,73 @@ void MainWindow::PersistConnectionSettings() const
     settings.setValue("telemetry/recordEnabled", m_recordRequested);
 }
 
+void MainWindow::LoadRememberedControlValues()
+{
+    m_rememberedControlValues.clear();
+
+    QSettings settings("SmartDashboard", "SmartDashboardApp");
+    const int size = settings.beginReadArray("directRememberedControls");
+    for (int i = 0; i < size; ++i)
+    {
+        settings.setArrayIndex(i);
+        const QString key = settings.value("key").toString();
+        if (key.isEmpty())
+        {
+            continue;
+        }
+
+        RememberedControlValue remembered;
+        remembered.valueType = settings.value("valueType", static_cast<int>(sd::direct::ValueType::String)).toInt();
+        remembered.value = settings.value("value");
+        m_rememberedControlValues[key.toStdString()] = remembered;
+    }
+    settings.endArray();
+}
+
+void MainWindow::SaveRememberedControlValues() const
+{
+    QSettings settings("SmartDashboard", "SmartDashboardApp");
+    settings.beginWriteArray("directRememberedControls");
+    int index = 0;
+    for (const auto& [key, remembered] : m_rememberedControlValues)
+    {
+        settings.setArrayIndex(index++);
+        settings.setValue("key", QString::fromStdString(key));
+        settings.setValue("valueType", remembered.valueType);
+        settings.setValue("value", remembered.value);
+    }
+    settings.endArray();
+}
+
+void MainWindow::ApplyRememberedControlValuesToTiles()
+{
+    for (const auto& [keyStd, remembered] : m_rememberedControlValues)
+    {
+        const auto tileIt = m_tiles.find(keyStd);
+        if (tileIt == m_tiles.end() || tileIt->second == nullptr)
+        {
+            continue;
+        }
+
+        sd::widgets::VariableTile* tile = tileIt->second;
+        if (remembered.valueType == static_cast<int>(sd::direct::ValueType::Bool)
+            && tile->GetType() == sd::widgets::VariableType::Bool)
+        {
+            tile->SetBoolValue(remembered.value.toBool());
+        }
+        else if (remembered.valueType == static_cast<int>(sd::direct::ValueType::Double)
+                 && tile->GetType() == sd::widgets::VariableType::Double)
+        {
+            tile->SetDoubleValue(remembered.value.toDouble());
+        }
+        else if (remembered.valueType == static_cast<int>(sd::direct::ValueType::String)
+                 && tile->GetType() == sd::widgets::VariableType::String)
+        {
+            tile->SetStringValue(remembered.value.toString());
+        }
+    }
+}
+
 void MainWindow::StartTransport()
 {
     StopTransport();
@@ -2475,12 +2545,26 @@ void MainWindow::StartTransport()
     {
         if (m_transport)
         {
+            // Ian: Retained replay uses synthetic seq=0 values on startup.
+            // Clear per-key sequence gates first so a dashboard restart accepts
+            // those values and visibly repaints tiles instead of treating them
+            // as older than the previous live session.
+            m_variableStore.ResetSequenceTracking();
+
             m_transport->ReplayRetainedControls(
                 [this](const QString& key, int valueType, const QVariant& value)
                 {
                     OnVariableUpdateReceived(key, valueType, value, 0);
                 }
             );
+
+            // Ian: Numeric operator controls are dashboard-owned state.
+            // Retained transport replay can still carry a stale default from an
+            // earlier startup before the dashboard reapplies its remembered UI
+            // value. Re-apply remembered controls here so the visible tile state
+            // and the republished command value both prefer the dashboard's last
+            // operator intent on restart.
+            ApplyRememberedControlValuesToTiles();
 
             // Ensure dashboard-owned control widgets publish their current values on connect.
             // This makes operator intent available to freshly connected robot processes even

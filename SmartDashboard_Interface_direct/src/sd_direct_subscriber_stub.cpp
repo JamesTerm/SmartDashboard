@@ -260,7 +260,15 @@ namespace sd::direct
         static std::uint64_t NextInstanceId()
         {
             static std::atomic<std::uint64_t> nextId {1};
-            return nextId.fetch_add(1, std::memory_order_relaxed);
+            const std::uint64_t localId = nextId.fetch_add(1, std::memory_order_relaxed);
+            const std::uint64_t nowUs = GetSteadyNowUs();
+
+#ifdef _WIN32
+            const std::uint64_t pidPart = static_cast<std::uint64_t>(::GetCurrentProcessId()) << 32;
+            return pidPart ^ nowUs ^ localId;
+#else
+            return nowUs ^ (localId << 32);
+#endif
         }
 
         SubscriberConfig m_config;

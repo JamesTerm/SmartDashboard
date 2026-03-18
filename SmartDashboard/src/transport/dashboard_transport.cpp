@@ -260,6 +260,8 @@ namespace sd::transport
 
                 replayNumeric(QStringLiteral("AutonTest"));
                 replayNumeric(QStringLiteral("Test/AutonTest"));
+                replayNumeric(QStringLiteral("TestMove"));
+                replayNumeric(QStringLiteral("Test/TestMove"));
             }
 
         private:

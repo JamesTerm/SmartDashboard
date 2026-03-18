@@ -42,28 +42,31 @@
   - dockable `Replay Controls`, `Replay Timeline`, and `Replay Markers` panels with persisted visibility and `Reset Replay Layout`
 - `docs/project_history.md` is the authoritative milestone log; keep this file to current-state handoff only.
 - Compatibility direction for simulator work is now documented: keep legacy NT behavior as a stable baseline and treat Shuffleboard-oriented additions as additive profiles.
-- Direct reconnect improvement now in progress/validated with Robot_Simulation pairing:
-  - replay retained control values at transport start
-  - republish remembered control widget values on `Connected` transitions
-  - direct publisher now also replays retained command values when a robot consumer appears after dashboard startup
-  - goal remains: dashboard-owned controls survive repeated simulator restarts without restarting dashboard.
-- Chooser compatibility slice is now implemented for Direct pairing:
+- Direct survive/restart slice is now working again with Robot_Simulation pairing:
+  - dashboard startup loads remembered operator-owned control values from `QSettings`
+  - remembered values are applied after layout load and again after Direct retained replay so dashboard intent wins over stale startup defaults
+  - sequence tracking is cleared before retained replay so synthetic startup `seq=0` values repaint tiles after a dashboard restart
+  - retained replay now includes `TestMove` / `Test/TestMove` in addition to the numeric `AutonTest` baseline
+  - control edits now persist immediately when dashboard-owned values change instead of waiting for a later session write
+- Chooser compatibility slice remains implemented for Direct pairing:
   - chooser metadata routing handles direct string-array `/options`
   - chooser reconnect no longer clobbers robot-owned selection on dashboard reopen
-  - current reference-point bug shifted from basic chooser behavior to restart/session robustness and paint verification under repeated Robot_Simulation smoke cycles.
+  - chooser tile churn was reduced by avoiding redundant chooser-mode resets on repeated metadata updates.
 - New Direct transport/harness status:
   - SmartDashboard direct telemetry now uses independent subscriber read cursors rather than one shared consumed cursor
   - UI callback path was switched from one queued lambda per update to a batched queued drain on the Qt thread
   - process-control helper exists at `tools/smartdashboard_process.py` so sessions can deterministically launch/check/close the dashboard during transport experiments
+  - `tools/survive_sequence.py` now automates dashboard-survive followed by robot-survive validation
   - focused CLIs now exist for direct probing/capture:
     - `DirectStateProbeCli` seeds and verifies chooser + `TestMove`
     - `DirectWatchCli` passively records direct updates during a run
   - a fixed harness workspace now places `Test/AutoChooser`, `TestMove`, `Timer`, and `Y_ft` in visible positions for manual paint checks
 - Current practical conclusion:
-  - real single-dashboard direct runs are much healthier after the transport fixes
+  - real single-dashboard Direct survive now passes again for remembered `TestMove`, chooser survival, and robot restart handoff
+  - an attempted inbound-protection tweak in `OnVariableUpdateReceived` was a regression and should stay reverted unless rethought more carefully
   - repeated robot restart stress improved after fixing publisher free-space accounting against the active consumer cursor
-  - passive extra observers still expose race/session weaknesses, so transport is not yet truly multi-observer safe
-  - when robot behavior is correct but chooser/TestMove look static, those may simply be setup-state values; `Timer` and `Y_ft` are better indicators for smoke-phase paint health
+  - passive extra observers still expose race/session weaknesses, so transport is still not treated as truly multi-observer safe
+  - the short immediate post-dashboard-restart probe window can still miss early telemetry (`Timer` / `Y_ft`), even when the later robot-survive phase passes cleanly
 - Next simulator-facing goal: finish hardening repeated robot-survive stress for the real single-dashboard path, then document the harness/debugging workflow as a student-friendly systems-debugging example.
 
 ## Known constraints / active considerations
@@ -87,7 +90,8 @@
 - Manual paired testing status with Robot_Simulation Direct:
   - chooser operator flow works (`Just Move Forward` executes correctly)
   - dashboard reopen no longer overwrites robot-owned chooser selection
-  - real single-dashboard restart behavior is improved but still somewhat flaky over repeated robot restarts
+  - remembered numeric control state (`TestMove`) now survives dashboard restart again in the validated paired flow
+  - real single-dashboard restart behavior is much healthier, though immediate telemetry paint after dashboard restart could still use follow-up hardening
   - extra concurrent observer/watch tooling can still perturb repeated runs, which is acceptable for now if direct mode remains effectively single-real-client
 - Keep an eye on additional dashboard-owned keys that may need explicit scoped alias conventions documented for mixed legacy layouts.
 - Official WPILib SmartDashboard did support `SendableChooser`; upcoming work should treat chooser support as a compatibility requirement, not a Shuffleboard-only feature.

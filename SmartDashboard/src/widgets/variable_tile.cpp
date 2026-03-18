@@ -470,6 +470,11 @@ namespace sd::widgets
 
     void VariableTile::SetStringChooserMode(bool chooserMode)
     {
+        if (m_stringChooserMode == chooserMode)
+        {
+            return;
+        }
+
         m_stringChooserMode = chooserMode;
         DebugTileLog(QString("tile.set_chooser_mode key=%1 chooser=%2 widget=%3").arg(m_key).arg(m_stringChooserMode ? 1 : 0).arg(m_widgetType));
         setProperty("stringChooserMode", m_stringChooserMode);

@@ -47,3 +47,28 @@ This is a useful example of how modern debugging should work whether code is wri
 - preserve a baseline
 - log the exact handoff points
 - keep commits small enough to compare behavior over time.
+
+## Follow-up: the restart bug was mostly ordering, not a giant transport rewrite
+
+The next part of the session looked at why a dashboard restart still sometimes lost `TestMove` even after the earlier retained-control work.
+
+The tempting explanation was "the transport is still corrupting state on reconnect." That was only part of the picture.
+
+After tracing the real startup path, the more important fix was:
+
+- load remembered dashboard-owned control values early
+- apply them after layout creation so tiles start from operator intent
+- clear sequence tracking before retained replay so synthetic startup values are not rejected as older than the previous live session
+- apply remembered values again after retained replay so stale retained defaults do not win over the operator's last chosen value.
+
+That is a useful debugging lesson: when a distributed system looks broken, the problem is not always the wire format or the queue. Sometimes the bug is the order in which otherwise-correct pieces are allowed to run.
+
+There was also a failed experiment worth remembering. I tried protecting remembered controls from later inbound updates inside `OnVariableUpdateReceived`. It sounded reasonable, but it regressed startup badly and hid legitimate early values. Reverting that idea was part of the final fix.
+
+So the durable lesson is:
+
+- preserve the small baseline (`AutonTest`)
+- keep chooser state isolated
+- distrust first theories about "transport corruption"
+- test startup ordering explicitly
+- treat failed experiments as data, not wasted work.

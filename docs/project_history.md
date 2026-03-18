@@ -7,6 +7,30 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-17 - Direct survive restart fix and remembered-control recovery
+
+- Restored the Direct dashboard-survive path for Robot_Simulation pairing without changing the compatibility baseline:
+  - numeric `AutonTest` baseline remains preserved for simple/legacy validation
+  - chooser flow stays on the scoped `Test/Auton_Selection/AutoChooser` path.
+- Fixed remembered dashboard-owned control recovery in `MainWindow`:
+  - load remembered control values from `QSettings` on startup
+  - apply them after layout load and again after Direct retained replay
+  - persist control edits immediately when bool/double/string operator widgets change.
+- Hardened Direct startup ordering around retained replay:
+  - clear variable sequence tracking before replaying retained startup values so synthetic `seq=0` updates are allowed to repaint tiles after restart
+  - extend retained numeric replay coverage to include `TestMove` / `Test/TestMove` as well as `AutonTest`.
+- Reduced Direct chooser/widget churn during reconnects:
+  - avoid redundant chooser widget-type resets in `MainWindow`
+  - make `VariableTile::SetStringChooserMode()` a no-op when mode is unchanged.
+- Improved direct subscriber instance isolation for multi-process observers by deriving subscriber instance ids from process/time-local entropy instead of a simple in-process counter.
+- Added end-to-end validation tooling:
+  - new `tools/survive_sequence.py` automates dashboard-survive followed by robot-survive verification.
+- Validation/result:
+  - paired survive flow now restores `TestMove=3.5`
+  - chooser selection survives dashboard restart
+  - subsequent robot-survive phase passes cleanly
+  - immediate post-restart telemetry paint can still be sparse in the shortest probe window, so that remains a follow-up polish item rather than a blocker.
+
 ## 2026-03-17 - Direct numeric control recovery, layout-value cleanup, and debugging workflow note
 
 - Stopped layout save/load from persisting live widget values:
