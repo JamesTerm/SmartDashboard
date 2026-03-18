@@ -20,11 +20,22 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
+#include <optional>
 #include <memory>
 #include <vector>
 
 namespace sd::transport
 {
+    inline constexpr const char* kTransportPropertySupportsChooser = "supports_chooser";
+    inline constexpr const char* kTransportPropertySupportsMultiClient = "supports_multi_client";
+
+    /// @brief Shared transport property names used by host-side code.
+    ///
+    /// These constants mirror the plugin ABI property names so the rest of the
+    /// dashboard can ask transport descriptors about optional capabilities
+    /// without scattering raw string literals throughout the UI.
+
     /// @brief Broad transport categories known to the dashboard host.
     ///
     /// `TransportKind` is intentionally coarse. The stable user-selectable
@@ -103,6 +114,15 @@ namespace sd::transport
     /// - what should the Connection menu call them?
     /// - does the transport support recording or playback?
     /// - should keys be displayed in shortened form?
+    /// - what optional extensible properties does the transport advertise?
+    ///
+    /// Property-query design rules:
+    /// - use shared host-defined property-name constants when a property needs
+    ///   to influence common UI or workflow logic
+    /// - treat unknown properties as "use the supplied default"
+    /// - keep properties additive and side-effect free
+    /// - do not move core transport identity into ad hoc properties when a
+    ///   normal field already expresses it clearly
     struct TransportDescriptor
     {
         /// @brief Stable id used for selection and settings persistence.
@@ -125,6 +145,24 @@ namespace sd::transport
 
         /// @brief Settings-profile identifier used to gate settings/UI behavior.
         QString settingsProfileId;
+
+        /// @brief Extensible boolean property overrides keyed by shared string id.
+        std::map<QString, bool> boolProperties;
+
+        /// @brief Query an extensible bool property with a default fallback.
+        /// @param propertyName Stable property key such as `supports_chooser`.
+        /// @param defaultValue Value to use when the property is not present.
+        /// @return Property value if present, otherwise `defaultValue`.
+        bool GetBoolProperty(const QString& propertyName, bool defaultValue = false) const
+        {
+            const auto it = boolProperties.find(propertyName);
+            if (it == boolProperties.end())
+            {
+                return defaultValue;
+            }
+
+            return it->second;
+        }
     };
 
     /// @brief Normalized variable update delivered to the dashboard.

@@ -1642,6 +1642,7 @@ namespace sd::transport
             descriptor.useShortDisplayKeys = true;
             descriptor.supportsRecording = true;
             descriptor.settingsProfileId = "direct";
+            descriptor.boolProperties.insert_or_assign(QString::fromUtf8(kTransportPropertySupportsChooser), true);
             return descriptor;
         }
 
@@ -1655,6 +1656,20 @@ namespace sd::transport
             descriptor.supportsPlayback = true;
             descriptor.settingsProfileId = "replay";
             return descriptor;
+        }
+
+        bool QueryPluginBoolProperty(
+            const sd_transport_plugin_descriptor_v1* pluginDescriptor,
+            const char* propertyName,
+            bool defaultValue
+        )
+        {
+            if (pluginDescriptor == nullptr || pluginDescriptor->get_bool_property == nullptr || propertyName == nullptr)
+            {
+                return defaultValue;
+            }
+
+            return pluginDescriptor->get_bool_property(propertyName, defaultValue ? 1 : 0) != 0;
         }
 
         class PluginDashboardTransport final : public IDashboardTransport
@@ -1926,6 +1941,14 @@ namespace sd::transport
                 plugin.descriptor.supportsPlayback = false;
                 plugin.descriptor.settingsProfileId = QString::fromUtf8(
                     pluginDescriptor->settings_profile_id != nullptr ? pluginDescriptor->settings_profile_id : pluginDescriptor->plugin_id
+                );
+                plugin.descriptor.boolProperties.insert_or_assign(
+                    QString::fromUtf8(kTransportPropertySupportsChooser),
+                    QueryPluginBoolProperty(pluginDescriptor, SD_TRANSPORT_PROPERTY_SUPPORTS_CHOOSER, false)
+                );
+                plugin.descriptor.boolProperties.insert_or_assign(
+                    QString::fromUtf8(kTransportPropertySupportsMultiClient),
+                    QueryPluginBoolProperty(pluginDescriptor, SD_TRANSPORT_PROPERTY_SUPPORTS_MULTI_CLIENT, false)
                 );
                 descriptors.push_back(plugin.descriptor);
                 plugins.push_back(std::move(plugin));

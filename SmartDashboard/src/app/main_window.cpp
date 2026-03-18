@@ -1085,7 +1085,7 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
             return;
         }
 
-        if (key.endsWith("/.type") && value.toString() == "String Chooser")
+        if (CurrentTransportSupportsChooser() && key.endsWith("/.type") && value.toString() == "String Chooser")
         {
             const QString chooserBase = key.left(key.length() - QString("/.type").length());
             sd::widgets::VariableTile* chooserTile = GetOrCreateTile(chooserBase, sd::widgets::VariableType::String);
@@ -1101,7 +1101,7 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
             return;
         }
 
-        if (key.endsWith("/options"))
+        if (CurrentTransportSupportsChooser() && key.endsWith("/options"))
         {
             const QString chooserBase = key.left(key.length() - QString("/options").length());
             sd::widgets::VariableTile* chooserTile = GetOrCreateTile(chooserBase, sd::widgets::VariableType::String);
@@ -1139,7 +1139,7 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
             return;
         }
 
-        if (key.endsWith("/active") || key.endsWith("/selected") || key.endsWith("/default"))
+        if (CurrentTransportSupportsChooser() && (key.endsWith("/active") || key.endsWith("/selected") || key.endsWith("/default")))
         {
             QString suffix = "/selected";
             if (key.endsWith("/active"))
@@ -3448,4 +3448,15 @@ bool MainWindow::CurrentTransportUsesLegacyNtSettings() const
     }
 
     return descriptor->settingsProfileId == "legacy-nt";
+}
+
+bool MainWindow::CurrentTransportSupportsChooser() const
+{
+    const sd::transport::TransportDescriptor* descriptor = GetSelectedTransportDescriptor();
+    if (descriptor == nullptr)
+    {
+        return false;
+    }
+
+    return descriptor->GetBoolProperty(QString::fromUtf8(sd::transport::kTransportPropertySupportsChooser), false);
 }

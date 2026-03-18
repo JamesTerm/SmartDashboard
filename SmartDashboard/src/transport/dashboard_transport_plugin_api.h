@@ -19,6 +19,15 @@
 ///   plugin library remains loaded
 /// - future ABI revisions should add new versioned structs/functions instead of
 ///   mutating the layout or meaning of existing ones
+///
+/// Property-query design rules:
+/// - use shared host-defined property-name constants for cross-plugin meaning
+/// - keep property names stable, lowercase, and `snake_case`
+/// - return the supplied default value for unknown properties
+/// - property queries should be cheap, side-effect free, and safe to call more
+///   than once
+/// - keep a few fundamental fixed fields/flags for core host behavior, and use
+///   property queries for extensible feature growth
 
 #include <stddef.h>
 #include <stdint.h>
@@ -46,6 +55,12 @@ enum
     /// incompatible binaries up front instead of guessing how to call them.
     SD_TRANSPORT_PLUGIN_API_VERSION_1 = 1u
 };
+
+/// @brief Shared property-name constant for chooser/sendable chooser support.
+static const char SD_TRANSPORT_PROPERTY_SUPPORTS_CHOOSER[] = "supports_chooser";
+
+/// @brief Shared property-name constant for multi-client support.
+static const char SD_TRANSPORT_PROPERTY_SUPPORTS_MULTI_CLIENT[] = "supports_multi_client";
 
 /// @brief Capability flags reported by a plugin descriptor.
 ///
@@ -180,6 +195,17 @@ struct sd_transport_connection_config_v1
 /// entirely by the plugin implementation.
 typedef void* sd_transport_instance_v1;
 
+/// @brief Bool-property query used for extensible transport capabilities.
+///
+/// @param property_name
+/// UTF-8 property name. Host-defined shared constants should be preferred.
+/// @param default_value
+/// Value the host wants back when the property is unknown.
+/// @return Non-zero for true, zero for false.
+///
+/// @note Unknown properties should return `default_value` unchanged.
+typedef int (*sd_transport_get_bool_property_v1_fn)(const char* property_name, int default_value);
+
 /// @brief Callback used by the plugin to deliver a variable update.
 ///
 /// @param user_data
@@ -294,6 +320,7 @@ struct sd_transport_api_v1
 /// - which ABI version the plugin implements
 /// - what the plugin should be called in the UI
 /// - which capability flags it advertises
+/// - how the host can query extensible boolean properties
 /// - which function table should be used for runtime operations
 ///
 /// Lifetime rule:
@@ -327,6 +354,13 @@ struct sd_transport_plugin_descriptor_v1
 
     /// @brief Capability flags from `sd_transport_plugin_flags_v1`.
     uint32_t flags;
+
+    /// @brief Optional extensible bool-property query callback.
+    ///
+    /// This lets the host ask about feature support without consuming more fixed
+    /// flag bits for every future capability. A null pointer means "use host
+    /// defaults for all bool properties".
+    sd_transport_get_bool_property_v1_fn get_bool_property;
 
     /// @brief Pointer to the plugin's runtime function table.
     const struct sd_transport_api_v1* transport_api;

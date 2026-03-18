@@ -140,6 +140,7 @@ private:
     const sd::transport::TransportDescriptor* GetSelectedTransportDescriptor() const;
     bool CurrentTransportUsesShortDisplayKeys() const;
     bool CurrentTransportUsesLegacyNtSettings() const;
+    bool CurrentTransportSupportsChooser() const;
 
     QWidget* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;

@@ -2,8 +2,30 @@
 
 #include "transport/dashboard_transport_plugin_api.h"
 
+#include <string_view>
+
 namespace
 {
+    int GetLegacyNtBoolProperty(const char* propertyName, int defaultValue)
+    {
+        if (propertyName == nullptr)
+        {
+            return defaultValue;
+        }
+
+        const std::string_view name(propertyName);
+        if (name == SD_TRANSPORT_PROPERTY_SUPPORTS_CHOOSER)
+        {
+            return 1;
+        }
+        if (name == SD_TRANSPORT_PROPERTY_SUPPORTS_MULTI_CLIENT)
+        {
+            return 0;
+        }
+
+        return defaultValue;
+    }
+
     struct LegacyNtTransportStub
     {
         sd_transport_callbacks_v1 callbacks {};
@@ -107,6 +129,7 @@ namespace
         "Legacy NT",
         "legacy-nt",
         SD_TRANSPORT_PLUGIN_FLAG_SUPPORTS_RECORDING,
+        &GetLegacyNtBoolProperty,
         &kLegacyNtTransportApi
     };
 }
