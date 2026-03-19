@@ -7,6 +7,22 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-19 - Native Link IPC carrier hardening checkpoint
+
+- Continued the SmartDashboard-side real IPC transition after the earlier in-process scaffold removal.
+- Hardened the shared carrier contract in `plugins/NativeLinkTransport/include/native_link_ipc_protocol.h`:
+  - removed the packed-struct dependency around cross-process atomics
+  - added explicit alignment assertions
+  - added a dedicated `snapshotCompleteSessionId` marker so snapshot completion is no longer overloaded onto client write-ack state.
+- Propagated the same carrier/layout update into the SmartDashboard IPC client/test-harness code and the paired `Robot_Simulation` branch so both checkpoints still agree on the v1 mapping shape.
+- Added focused `Ian:` comments and extra SmartDashboard-side tests for the remaining startup/restart ordering bug:
+  - `plugins/NativeLinkTransport/tests/native_link_ipc_client_tests.cpp`
+  - `SmartDashboard/tests/dashboard_transport_registry_tests.cpp`
+- Current checkpoint result:
+  - the carrier/layout cleanup is worth keeping and `Robot_Simulation` Native Link unit coverage still passes
+  - but SmartDashboard real IPC startup/restart ordering is still not fully deterministic
+  - the remaining blocker is still concentrated in the SmartDashboard client handshake / `Connected` transition path rather than in the old in-memory scaffold.
+
 ## 2026-03-18 - Native Link design baseline captured
 
 - Added the initial in-repo design note for the future `Native Link` plugin at `plugins/NativeLinkTransport/README.md`.

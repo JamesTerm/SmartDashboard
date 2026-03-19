@@ -231,6 +231,18 @@ namespace sd::nativelink
                 || topicId == ipc::kSnapshotEndTopicId
                 || topicId == ipc::kLiveBeginTopicId;
         }
+
+        bool IsClientSlotReady(const ipc::SharedClientSlot& slot)
+        {
+            return slot.clientTag.load(std::memory_order_acquire) != 0
+                && slot.lastHeartbeatUs.load(std::memory_order_acquire) != 0
+                && slot.clientId[0] != '\0';
+        }
+
+        bool HasServerFinishedSnapshotForClient(const ipc::SharedClientSlot& slot)
+        {
+            return slot.snapshotCompleteSessionId.load(std::memory_order_acquire) != 0;
+        }
     }
 
     struct NativeLinkIpcClient::Impl
@@ -313,37 +325,27 @@ namespace sd::nativelink
                 if (slot.clientTag.compare_exchange_strong(expected, clientTag, std::memory_order_acq_rel))
                 {
                     slotIndex = i;
-                    CopyUtf8(slot.clientId, sizeof(slot.clientId), config.clientId);
-                    slot.lastHeartbeatUs.store(GetSteadyNowUs(), std::memory_order_release);
+                    slot.snapshotCompleteSessionId.store(0, std::memory_order_release);
                     slot.lastAckedSequence.store(0, std::memory_order_release);
                     slot.serverWriteIndex.store(0, std::memory_order_release);
                     slot.clientReadIndex.store(0, std::memory_order_release);
                     slot.clientWriteSequence.store(0, std::memory_order_release);
                     memset(&slot.clientWriteMessage, 0, sizeof(slot.clientWriteMessage));
+
+                    // Ian: Claiming the slot is not the same as advertising a live
+                    // client. Finish resetting the per-client cursors/message slot
+                    // first, then publish `clientId` and heartbeat last so the
+                    // server never snapshots against half-old, half-new slot state.
+                    CopyUtf8(slot.clientId, sizeof(slot.clientId), config.clientId);
+                    slot.lastHeartbeatUs.store(GetSteadyNowUs(), std::memory_order_release);
+
                     shared->clientCount.fetch_add(1, std::memory_order_acq_rel);
                     lastSubmittedWriteSequence = 0;
                     snapshotPhase = SnapshotPhase::Descriptors;
                     running.store(true);
                     stopRequested.store(false);
                     worker = std::thread(&Impl::RunLoop, this);
-
-                    // Ian: Treat `Start()` as a real connect handshake, not just
-                    // "the mapping opened." Waiting for the snapshot->live
-                    // boundary here makes test/runtime behavior deterministic and
-                    // avoids early host publishes racing the first authoritative
-                    // snapshot pass from the simulator-owned server.
-                    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2000);
-                    while (std::chrono::steady_clock::now() < deadline)
-                    {
-                        if (connected.load(std::memory_order_acquire))
-                        {
-                            return true;
-                        }
-                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                    }
-
-                    Stop();
-                    return false;
+                    return true;
                 }
             }
 
@@ -390,6 +392,10 @@ namespace sd::nativelink
             }
 
             ipc::SharedClientSlot& slot = shared->clients[slotIndex];
+            if (!IsClientSlotReady(slot) || !connected.load(std::memory_order_acquire))
+            {
+                return false;
+            }
 
             if (lastSubmittedWriteSequence != 0)
             {
@@ -432,7 +438,20 @@ namespace sd::nativelink
             slot.clientWriteSequence.store(writeSequence, std::memory_order_release);
             lastSubmittedWriteSequence = writeSequence;
             slot.lastHeartbeatUs.store(GetSteadyNowUs(), std::memory_order_release);
-            return SetEvent(clientDataEvent.Get()) != FALSE;
+
+            bool signaled = false;
+            const auto signalDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+            while (std::chrono::steady_clock::now() < signalDeadline)
+            {
+                signaled = SetEvent(clientDataEvent.Get()) != FALSE || signaled;
+                if (slot.lastAckedSequence.load(std::memory_order_acquire) >= writeSequence)
+                {
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+
+            return signaled;
         }
 
         void RunLoop()
@@ -459,6 +478,7 @@ namespace sd::nativelink
                 {
                     serverAlive = false;
                     snapshotPhase = SnapshotPhase::Descriptors;
+                    lastSubmittedWriteSequence = 0;
                     if (connected.exchange(false) && onConnectionState)
                     {
                         onConnectionState(kConnectionStateStale);
@@ -472,8 +492,36 @@ namespace sd::nativelink
                 DrainMessages();
 
                 ipc::SharedClientSlot& slot = shared->clients[slotIndex];
+                MaybePublishConnected(slot);
                 slot.lastHeartbeatUs.store(nowUs, std::memory_order_release);
                 WaitForSingleObject(heartbeatEvent.Get(), config.waitTimeoutMs);
+            }
+        }
+
+        void MaybePublishConnected(const ipc::SharedClientSlot& slot)
+        {
+            if (!serverAlive || snapshotPhase != SnapshotPhase::Live)
+            {
+                return;
+            }
+
+            const std::uint64_t currentServerSessionId = shared != nullptr
+                ? shared->serverSessionId.load(std::memory_order_acquire)
+                : 0;
+            if (currentServerSessionId == 0
+                || slot.snapshotCompleteSessionId.load(std::memory_order_acquire) != currentServerSessionId)
+            {
+                return;
+            }
+
+            // Ian: `__live_begin__` only means the authority queued the live
+            // boundary into this slot. Do not surface `Connected` until the
+            // server-side snapshot bookkeeping has also advanced, or immediate
+            // dashboard publishes can beat the final handshake step and become a
+            // flaky startup race instead of a deterministic first live write.
+            if (!connected.exchange(true) && onConnectionState)
+            {
+                onConnectionState(kConnectionStateConnected);
             }
         }
 
@@ -490,6 +538,7 @@ namespace sd::nativelink
                 if (topicPath == "__snapshot_begin__")
                 {
                     snapshotPhase = SnapshotPhase::Descriptors;
+                    lastSubmittedWriteSequence = 0;
                     if (connected.exchange(false) && onConnectionState)
                     {
                         onConnectionState(kConnectionStateConnecting);
@@ -516,15 +565,6 @@ namespace sd::nativelink
                 if (topicPath == "__live_begin__")
                 {
                     snapshotPhase = SnapshotPhase::Live;
-                    // Ian: Treat the client as fully connected only after the
-                    // authority has finished snapshot delivery and announced the
-                    // live boundary. SmartDashboard replays remembered controls on
-                    // `Connected`; firing that callback earlier would race the
-                    // snapshot phase and can lose the first authoritative write.
-                    if (serverAlive && !connected.exchange(true) && onConnectionState)
-                    {
-                        onConnectionState(kConnectionStateConnected);
-                    }
                     ++readIndex;
                     continue;
                 }
@@ -543,6 +583,7 @@ namespace sd::nativelink
                 ++readIndex;
             }
             slot.clientReadIndex.store(readIndex, std::memory_order_release);
+            MaybePublishConnected(slot);
         }
 
         void CleanupMappingOnly()

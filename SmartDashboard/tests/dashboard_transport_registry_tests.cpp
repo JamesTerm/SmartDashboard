@@ -96,12 +96,47 @@ TEST(DashboardTransportRegistryTests, NativeLinkPluginTransportStartsAndPublishe
     std::unique_ptr<sd::transport::IDashboardTransport> transport = registry.CreateTransport(config);
     ASSERT_NE(transport, nullptr);
 
+    std::mutex mutex;
+    std::vector<sd::transport::ConnectionState> states;
+    std::vector<sd::transport::VariableUpdate> updates;
+
     const bool started = transport->Start(
-        [](const sd::transport::VariableUpdate&) {},
-        [](sd::transport::ConnectionState) {}
+        [&mutex, &updates](const sd::transport::VariableUpdate& update)
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            updates.push_back(update);
+        },
+        [&mutex, &states](sd::transport::ConnectionState state)
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            states.push_back(state);
+        }
     );
 
     ASSERT_TRUE(started);
+    ASSERT_TRUE(WaitForCondition([&mutex, &states, &updates]()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        bool connected = false;
+        bool sawRetainedState = false;
+        for (sd::transport::ConnectionState state : states)
+        {
+            if (state == sd::transport::ConnectionState::Connected)
+            {
+                connected = true;
+            }
+        }
+        for (const sd::transport::VariableUpdate& update : updates)
+        {
+            if (update.key == "TestMove" || update.key == "Test/Auton_Selection/AutoChooser/selected")
+            {
+                sawRetainedState = true;
+                break;
+            }
+        }
+        return connected && sawRetainedState;
+    }, 2000));
+
     ASSERT_TRUE(server.PublishDouble("Timer", 12.5));
 
     EXPECT_TRUE(transport->PublishString("Test/Auton_Selection/AutoChooser/selected", "Move Forward"));

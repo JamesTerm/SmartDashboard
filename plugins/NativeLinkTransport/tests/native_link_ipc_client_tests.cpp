@@ -165,6 +165,19 @@ namespace sd::nativelink
             }
         ));
 
+        ASSERT_TRUE(WaitForCondition([&mutex, &states]()
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            for (int state : states)
+            {
+                if (state == kConnectionStateConnected)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }, 2000));
+
         ASSERT_TRUE(client.Publish("TestMove", TopicValue::Double(3.5)));
 
         TopicValue latest;
@@ -173,6 +186,63 @@ namespace sd::nativelink
             return server.TryGetLatestValue("TestMove", latest)
                 && latest.type == ValueType::Double
                 && latest.doubleValue == 3.5;
+        }, 2000));
+
+        client.Stop();
+        server.Stop();
+    }
+
+    TEST(NativeLinkIpcClientTests, DashboardPublishSucceedsAfterServerSessionRestart)
+    {
+        std::lock_guard<std::mutex> suiteLock(GetIpcTestMutex());
+        const std::string channelId = MakeUniqueChannel("native-link-ipc-restart-test");
+        testsupport::NativeLinkIpcTestServer server(channelId);
+        ASSERT_TRUE(server.Start());
+        server.RegisterDefaultDashboardTopics();
+
+        NativeLinkIpcClient client;
+        std::mutex mutex;
+        std::vector<int> states;
+        NativeLinkIpcClient::Config config;
+        config.channelId = channelId;
+        config.clientId = "dashboard-a";
+
+        ASSERT_TRUE(client.Start(
+            config,
+            [](const UpdateEnvelope&)
+            {
+            },
+            [&mutex, &states](int state)
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                states.push_back(state);
+            }
+        ));
+
+        server.RestartSession();
+
+        EXPECT_TRUE(WaitForCondition([&mutex, &states]()
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            int connectedCount = 0;
+            for (int state : states)
+            {
+                if (state == kConnectionStateConnected)
+                {
+                    ++connectedCount;
+                }
+            }
+            return connectedCount >= 2;
+        }, 2000));
+
+        ASSERT_TRUE(client.Publish("TestMove", TopicValue::Double(4.5)));
+
+        TopicValue latest;
+        EXPECT_TRUE(WaitForCondition([&server, &latest]()
+        {
+            return server.TryGetLatestValue("TestMove", latest)
+                && latest.type == ValueType::Double
+                && latest.doubleValue == 4.5;
         }, 2000));
 
         client.Stop();

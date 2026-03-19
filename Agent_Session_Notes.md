@@ -111,6 +111,12 @@
     - but the full combined Native Link/registry `ctest` slice is still flaky/failing in some runs because the real IPC client/server handshake around initial snapshot/live readiness and post-start publish timing is not yet deterministic enough
     - especially watch `NativeLinkIpcClientTests.DashboardPublishReachesAuthoritativeServer` and `DashboardTransportRegistryTests.NativeLinkPluginTransportStartsAndPublishesInitialState`; they expose remaining startup-order races in the SmartDashboard-side validation harness even after replacing the in-memory bridge
     - do not update docs/testing claims to say the new real IPC path is fully stable until that full-suite flake is fixed
+  - latest checkpoint findings on this branch:
+    - tried hardening the shared carrier by aligning the mapped atomics properly and removing the packed-layout dependency; that change is now in both repos and should stay because packed atomics were a bad foundation for further debugging
+    - also split snapshot bookkeeping from write-ack intent in the carrier shape by adding `snapshotCompleteSessionId`, but the SmartDashboard client/test harness startup race is still not fully resolved
+    - current remaining failure pattern is still SmartDashboard-side: the client sometimes never reports `Connected` / never observes the post-restart reconnect, and first dashboard publishes can still miss the authoritative server in `NativeLinkIpcClientTests.DashboardPublishReachesAuthoritativeServer`, `NativeLinkIpcClientTests.DashboardPublishSucceedsAfterServerSessionRestart`, and `DashboardTransportRegistryTests.NativeLinkPluginTransportStartsAndPublishesInitialState`
+    - focused Robot_Simulation Native Link unit tests still pass after the protocol/layout updates (`robot_unit_tests.exe --gtest_filter=*NativeLink*`)
+    - likely next debugging target: inspect the SmartDashboard IPC client worker/connection-state path around `snapshotPhase`, `MaybePublishConnected`, and repeated `SetEvent`/heartbeat handling rather than continuing to only adjust tests
 
 ## Known constraints / active considerations
 

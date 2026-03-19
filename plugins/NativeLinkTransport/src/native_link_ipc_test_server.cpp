@@ -219,6 +219,13 @@ namespace sd::nativelink::testsupport
             descriptor.replayOnSubscribe = replayOnSubscribe;
             return descriptor;
         }
+
+        bool IsClientSlotReady(const ipc::SharedClientSlot& slot)
+        {
+            return slot.clientTag.load(std::memory_order_acquire) != 0
+                && slot.lastHeartbeatUs.load(std::memory_order_acquire) != 0
+                && slot.clientId[0] != '\0';
+        }
     }
 
     struct NativeLinkIpcTestServer::Impl
@@ -461,12 +468,11 @@ namespace sd::nativelink::testsupport
             std::lock_guard<std::mutex> lock(mutex);
             core.BeginNewSession();
             PublishSessionMetadataLocked();
-            lastProcessedClientWriteSequence.fill(0);
             for (std::uint32_t i = 0; i < ipc::kMaxClients; ++i)
             {
-                shared->clients[i].lastAckedSequence.store(0, std::memory_order_release);
-                shared->clients[i].serverWriteIndex.store(0, std::memory_order_release);
-                shared->clients[i].clientReadIndex.store(0, std::memory_order_release);
+                ipc::SharedClientSlot& slot = shared->clients[i];
+                slot.snapshotCompleteSessionId.store(0, std::memory_order_release);
+                lastProcessedClientWriteSequence[i] = slot.clientWriteSequence.load(std::memory_order_acquire);
             }
         }
 
@@ -504,8 +510,7 @@ namespace sd::nativelink::testsupport
             for (std::uint32_t i = 0; i < ipc::kMaxClients; ++i)
             {
                 ipc::SharedClientSlot& slot = shared->clients[i];
-                const std::uint64_t tag = slot.clientTag.load(std::memory_order_acquire);
-                if (tag == 0)
+                if (!IsClientSlotReady(slot))
                 {
                     continue;
                 }
@@ -531,10 +536,13 @@ namespace sd::nativelink::testsupport
                     continue;
                 }
 
-                if (slot.lastAckedSequence.load(std::memory_order_acquire) == 0)
+                if (slot.snapshotCompleteSessionId.load(std::memory_order_acquire) != core.GetServerSessionId())
                 {
-                    PublishSnapshotForClientLocked(clientId);
-                    slot.lastAckedSequence.store(1, std::memory_order_release);
+                    PublishSnapshotForClientLocked(i, clientId);
+                    // Ian: Snapshot readiness and write acknowledgements are
+                    // separate concerns. Reusing one counter for both let the
+                    // first real dashboard publish collide with startup state.
+                    slot.snapshotCompleteSessionId.store(core.GetServerSessionId(), std::memory_order_release);
                     if (heartbeatEvent.Get() != nullptr)
                     {
                         SetEvent(heartbeatEvent.Get());
@@ -550,7 +558,7 @@ namespace sd::nativelink::testsupport
                     // first post-snapshot dashboard write is never mistaken for a
                     // snapshot bookkeeping value and dropped.
                     const ipc::SharedMessage message = slot.clientWriteMessage;
-                    HandleClientWriteLocked(clientId, message);
+                    HandleClientWriteLocked(i, clientId, message);
                     lastProcessedClientWriteSequence[i] = clientWriteSequence;
                     slot.lastAckedSequence.store(clientWriteSequence, std::memory_order_release);
                     if (heartbeatEvent.Get() != nullptr)
@@ -568,7 +576,7 @@ namespace sd::nativelink::testsupport
             shared->lastServerHeartbeatUs.store(GetSteadyNowUs(), std::memory_order_release);
         }
 
-        void PublishSnapshotForClientLocked(const std::string& clientId)
+        void PublishSnapshotForClientLocked(std::uint32_t slotIndex, const std::string& clientId)
         {
             const std::vector<SnapshotEvent> snapshot = core.ConnectClient(clientId).snapshotEvents;
             for (const SnapshotEvent& event : snapshot)
@@ -616,11 +624,11 @@ namespace sd::nativelink::testsupport
                     }
                 }
 
-                PublishEnvelopeToSingleClientLocked(clientId, envelope);
+                PublishEnvelopeToClientSlotLocked(slotIndex, envelope);
             }
         }
 
-        void HandleClientWriteLocked(const std::string& clientId, const ipc::SharedMessage& message)
+        void HandleClientWriteLocked(std::uint32_t slotIndex, const std::string& clientId, const ipc::SharedMessage& message)
         {
             TopicValue value;
             if (!DeserializeValue(
@@ -640,7 +648,7 @@ namespace sd::nativelink::testsupport
             const WriteResult result = core.Publish(message.topicPath, value, clientId);
             for (const UpdateEnvelope& clientEvent : core.DrainClientEvents(clientId))
             {
-                PublishEnvelopeToSingleClientLocked(clientId, clientEvent);
+                PublishEnvelopeToClientSlotLocked(slotIndex, clientEvent);
             }
 
             if (!result.accepted)
@@ -676,45 +684,49 @@ namespace sd::nativelink::testsupport
                 {
                     continue;
                 }
-                const std::string clientId = ReadUtf8(shared->clients[i].clientId, sizeof(shared->clients[i].clientId));
-                PublishEnvelopeToSingleClientLocked(clientId, envelope);
-            }
-        }
-
-        void PublishEnvelopeToSingleClientLocked(const std::string& clientId, const UpdateEnvelope& envelope)
-        {
-            for (std::uint32_t i = 0; i < ipc::kMaxClients; ++i)
-            {
-                ipc::SharedClientSlot& slot = shared->clients[i];
-                if (ReadUtf8(slot.clientId, sizeof(slot.clientId)) != clientId)
+                if (!IsClientSlotReady(shared->clients[i]))
                 {
                     continue;
                 }
+                PublishEnvelopeToClientSlotLocked(i, envelope);
+            }
+        }
 
-                ipc::SharedMessage message;
-                memset(&message, 0, sizeof(message));
-                message.size = sizeof(message);
-                message.topicId = static_cast<std::uint32_t>(envelope.topicId);
-                message.deliveryKind = static_cast<std::uint32_t>(envelope.deliveryKind);
-                message.valueType = static_cast<std::uint32_t>(envelope.value.type);
-                message.serverSessionId = envelope.serverSessionId;
-                message.serverSequence = envelope.serverSequence;
-                CopyUtf8(message.topicPath, sizeof(message.topicPath), envelope.topicPath);
-                CopyUtf8(message.sourceClientId, sizeof(message.sourceClientId), envelope.sourceClientId);
-
-                const std::vector<unsigned char> payload = SerializeValue(envelope.value);
-                const std::size_t payloadBytes = (std::min<std::size_t>)(payload.size(), sizeof(message.payload));
-                if (payloadBytes > 0)
-                {
-                    memcpy(message.payload, payload.data(), payloadBytes);
-                }
-                message.flags = static_cast<std::uint64_t>(payloadBytes);
-
-                const std::uint32_t writeIndex = slot.serverWriteIndex.load(std::memory_order_acquire);
-                slot.messages[writeIndex % ipc::kMaxMessages] = message;
-                slot.serverWriteIndex.store(writeIndex + 1, std::memory_order_release);
+        void PublishEnvelopeToClientSlotLocked(std::uint32_t slotIndex, const UpdateEnvelope& envelope)
+        {
+            if (slotIndex >= ipc::kMaxClients)
+            {
                 return;
             }
+
+            ipc::SharedClientSlot& slot = shared->clients[slotIndex];
+            if (!IsClientSlotReady(slot))
+            {
+                return;
+            }
+
+            ipc::SharedMessage message;
+            memset(&message, 0, sizeof(message));
+            message.size = sizeof(message);
+            message.topicId = static_cast<std::uint32_t>(envelope.topicId);
+            message.deliveryKind = static_cast<std::uint32_t>(envelope.deliveryKind);
+            message.valueType = static_cast<std::uint32_t>(envelope.value.type);
+            message.serverSessionId = envelope.serverSessionId;
+            message.serverSequence = envelope.serverSequence;
+            CopyUtf8(message.topicPath, sizeof(message.topicPath), envelope.topicPath);
+            CopyUtf8(message.sourceClientId, sizeof(message.sourceClientId), envelope.sourceClientId);
+
+            const std::vector<unsigned char> payload = SerializeValue(envelope.value);
+            const std::size_t payloadBytes = (std::min<std::size_t>)(payload.size(), sizeof(message.payload));
+            if (payloadBytes > 0)
+            {
+                memcpy(message.payload, payload.data(), payloadBytes);
+            }
+            message.flags = static_cast<std::uint64_t>(payloadBytes);
+
+            const std::uint32_t writeIndex = slot.serverWriteIndex.load(std::memory_order_acquire);
+            slot.messages[writeIndex % ipc::kMaxMessages] = message;
+            slot.serverWriteIndex.store(writeIndex + 1, std::memory_order_release);
         }
     };
 
