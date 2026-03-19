@@ -79,6 +79,27 @@
   - intent: design a more robust multi-client-capable native transport/plugin example without inheriting all legacy NetworkTables shared-state trade-offs
   - research direction: study strengths of dashboards like `Shuffleboard`, `Glass`, `Elastic`, and similar tools for workflow lessons only, not imitation
   - likely design themes: server authority, explicit topic descriptors, state-vs-command separation, reconnect snapshot + live delta flow, and stronger freshness/ownership semantics.
+  - initial design baseline now lives at `plugins/NativeLinkTransport/README.md`
+  - concrete contract + test-plan docs now live at `plugins/NativeLinkTransport/CONTRACT.md` and `plugins/NativeLinkTransport/TEST_PLAN.md`
+  - first documented carry-forward lessons from `Direct`: do not repeat shared-consumer assumptions, make reconnect/session ordering explicit, and treat diagnostics/introspection as core transport features
+  - first test-driven implementation scaffold now exists in `plugins/NativeLinkTransport/` with a small `NativeLinkTransportCore` library and focused contract tests for descriptor validation, snapshot ordering, lease policy, TTL stale marking, and session reset behavior
+  - autonomous survive stress is now partially recreated in-process in `plugins/NativeLinkTransport/tests/native_link_core_tests.cpp`: chooser selection + `TestMove` replay, `Timer` countdown telemetry, conditional `Y_ft` movement, server restart x5, and dashboard reconnect x5 all pass in the current harness
+  - next intended Native Link stress slice: explicit multi-client validation (two dashboards + watcher in harness first, then later real SmartDashboard multi-process validation gated by plugin-advertised multi-client capability)
+  - host integration direction for later: keep SmartDashboard single-instance by default, but allow a transport-specific bypass only when the selected plugin explicitly advertises multi-client support
+  - first host-side startup gate slice is now in progress via `SmartDashboard/src/app/startup_instance_gate.*` and `SmartDashboard/src/main.cpp`: an explicit `--allow-multi-instance` flag is only honored when the selected transport advertises `supports_multi_client`
+  - first Native Link plugin scaffold now exists at `plugins/NativeLinkTransport/src/native_link_transport_plugin.cpp`; it is intentionally small but already exports a real `native-link` plugin descriptor and builds/deploys next to `SmartDashboardApp`
+  - SmartDashboard-side discovery coverage now exists in `SmartDashboard/tests/dashboard_transport_registry_tests.cpp`, giving a focused smoke test that the built `native-link` plugin can actually be discovered by the host registry
+  - top-level build ordering now makes `SmartDashboardApp` and `SmartDashboard_tests` depend on `NativeLinkTransportPlugin`, so the discovery path no longer relies on test-time fallback copying
+  - host-side runtime smoke coverage now also exists in `SmartDashboard/tests/dashboard_transport_registry_tests.cpp`: the host can start a real `native-link` transport instance, receive initial retained state, and publish values back through the plugin path
+  - first real two-process startup helper now exists at `tools/native_link_multi_instance_smoke.py`; it is intended as the first SmartDashboard-vs-SmartDashboard smoke step before deeper shared-state validation
+  - that helper now also forces persisted startup transport selection to `native-link`, so the two-process smoke specifically exercises the Native Link startup gate path
+  - next real two-process shared-state helper now exists at `tools/native_link_shared_state_probe.py`; it uses per-instance UI debug logs to confirm both dashboards observe the same initial Native Link retained state
+  - that second-dashboard UI-log gap is now fixed: the root cause was checking transport/plugin multi-client capability before `QApplication` existed, which made Native Link appear non-multi-client during the singleton decision path
+  - `tools/native_link_shared_state_probe.py` is now passing repeatedly and confirms both real dashboard processes observe the same initial Native Link retained chooser + `TestMove` state
+  - Native Link plugin scaffold now uses one shared in-process authority for the default channel so two real dashboard processes can also observe cross-process `TestMove` propagation during early validation, not just matching startup defaults
+  - important caveat for the next session: that shared authority is still an early SmartDashboard-side scaffold for `native-link-default`, not the final external/shared transport architecture; keep it as a validation bridge, not as proof that the long-term transport design is finished
+  - build-default strategy is now aligned with the future merge plan: `SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK` should stay `OFF` by default so `main` can absorb the architecture/test work without exposing unfinished plugin behavior; enable it explicitly on the feature branch when validating Native Link
+  - future merge strategy for this line of work: when we are ready to start the separate `Robot_Simulation` branch, squash-merge the SmartDashboard Native Link work into `main` but keep the new plugin disabled in project build settings so `main` stays stable without exposing unfinished plugin behavior
 
 ## Known constraints / active considerations
 
@@ -86,6 +107,12 @@
 - Deployment remains vcpkg/Qt-DLL based; static Qt distribution is not a current goal.
 - Event-bus decoupling (topic subscriptions + rate limiting + coalescing) is documented as future work, not implemented.
 - If startup false-dirty (`*`) behavior regresses, add a focused startup regression test that validates initial title/dirty state before any editable interaction.
+
+## Standing conventions
+
+- Add `Ian:` why-comments in code whenever a fix depends on non-obvious reasoning, ordering, lifecycle behavior, cross-process debugging lessons, or any context that would be expensive to rediscover in a later session.
+- Prefer adding those comments at the time the code is written or immediately after the bug is understood, not as a later cleanup.
+- Before ending a session or making a checkpoint commit, quickly review the changed code for any missing `Ian:` comments in the tricky paths.
 
 ## Next-session checklist
 

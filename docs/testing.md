@@ -142,9 +142,52 @@ Suggested loop:
    - set team/host values as needed
    - `Connection` -> `Connect`
 4. Verify:
-   - status transitions to `Connected` when simulator is reachable
-   - bool/double/string values appear/update from simulator keys
-   - writable controls publish updates back to simulator when edited
+    - status transitions to `Connected` when simulator is reachable
+    - bool/double/string values appear/update from simulator keys
+    - writable controls publish updates back to simulator when edited
+
+### Native Link two-dashboard startup smoke
+
+Use this check before deeper multi-process validation.
+
+Prerequisites:
+
+- configure/build with `SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK=ON`
+- `native-link` plugin is built and deployed beside `SmartDashboardApp`
+- SmartDashboard was built from the current `feature/native-link` work so startup gating honors `--allow-multi-instance` only for multi-client transports
+
+Suggested loop:
+
+1. Build the app and plugin:
+   - `cmake -S . -B build -DSMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK=ON`
+   - `cmake --build build --config Debug --target SmartDashboardApp NativeLinkTransportPlugin`
+2. Make sure SmartDashboard is not already running.
+3. Launch the helper:
+   - `python tools/native_link_multi_instance_smoke.py`
+4. Expected result:
+   - helper reports `native_link_multi_instance_smoke=ok`
+   - two `SmartDashboardApp.exe` processes exist briefly at the same time
+   - helper reports `transport_id=native-link`
+   - helper closes both instances when complete.
+
+This is only a startup/multi-instance smoke check. It does not yet validate shared live state across two UI processes.
+
+### Native Link two-dashboard shared-state smoke
+
+Use this follow-up check after the startup smoke.
+
+1. Build the app and plugin:
+   - `cmake -S . -B build -DSMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK=ON`
+   - `cmake --build build --config Debug --target SmartDashboardApp NativeLinkTransportPlugin`
+2. Run:
+   - `python tools/native_link_shared_state_probe.py`
+3. Expected result:
+   - helper reports `native_link_shared_state_probe=ok`
+   - both dashboard instance logs show `transport_start id=native-link`
+   - both dashboard instance logs show the same initial retained values for chooser selection and `TestMove`
+   - both dashboard instance logs also show the shared cross-process `TestMove = 3.5` update
+
+This still uses the current in-process Native Link scaffold, but it now validates that two real SmartDashboard processes observe the same initial shared state path and the same early cross-process state propagation path.
 
 ## Validation expectations
 

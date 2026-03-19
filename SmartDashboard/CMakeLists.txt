@@ -16,6 +16,8 @@ qt_add_executable(SmartDashboardApp WIN32
     src/app/main_window.cpp
     src/app/debug_log_paths.h
     src/app/debug_log_paths.cpp
+    src/app/startup_instance_gate.h
+    src/app/startup_instance_gate.cpp
     src/model/variable_store.h
     src/model/variable_store.cpp
     src/layout/layout_serializer.h
@@ -70,8 +72,14 @@ if(BUILD_TESTING)
         tests/playback_timeline_widget_tests.cpp
         tests/tile_control_widget_tests.cpp
         tests/variable_tile_tests.cpp
+        tests/startup_instance_gate_tests.cpp
+        tests/dashboard_transport_registry_tests.cpp
         src/app/debug_log_paths.h
         src/app/debug_log_paths.cpp
+        src/app/startup_instance_gate.h
+        src/app/startup_instance_gate.cpp
+        src/transport/dashboard_transport.h
+        src/transport/dashboard_transport.cpp
         src/widgets/variable_tile.cpp
         src/widgets/line_plot_widget.cpp
         src/widgets/playback_timeline_widget.cpp
@@ -89,6 +97,8 @@ if(BUILD_TESTING)
             Qt6::Gui
             Qt6::Widgets
             Qt6::Test
+            SmartDashboard_Interface_direct
+            ClientInterface_direct
             GTest::gtest_main
     )
 

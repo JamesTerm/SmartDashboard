@@ -7,6 +7,74 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-18 - Native Link design baseline captured
+
+- Added the initial in-repo design note for the future `Native Link` plugin at `plugins/NativeLinkTransport/README.md`.
+- The note captures the intended product-owned transport direction before implementation starts:
+  - server-authoritative multi-client semantics from day one
+  - explicit topic descriptors with schema, replay, freshness, and ownership metadata
+  - explicit separation between replayable state topics and non-replayed command/event topics
+  - snapshot-first then delta-stream reconnect behavior
+  - per-update provenance and explicit writable-topic conflict handling
+  - stronger diagnostics/introspection as a core requirement instead of afterthought.
+- The note also records the most important lessons to carry forward from `Direct`:
+  - multi-observer safety must be designed in early
+  - reconnect reliability depends on explicit session/order semantics
+  - retained data is only safe when ownership/freshness policies are documented
+  - atomic reliability tests should be part of the transport plan from the beginning.
+- Followed the baseline note with a concrete first transport-contract slice:
+  - `plugins/NativeLinkTransport/CONTRACT.md` defines the recommended session model, descriptor schema, topic classes, provenance envelope, reconnect rules, writer-lease model, and diagnostics expectations
+  - `plugins/NativeLinkTransport/TEST_PLAN.md` defines the first atomic/unit/integration validation targets, including multi-observer, restart-survive, command-vs-state replay, and future `Robot_Simulation` paired validation loops
+- Started the first test-driven implementation slice without involving simulator integration yet:
+  - added `NativeLinkTransportCore` as a small in-memory core library under `plugins/NativeLinkTransport/`
+  - added focused tests covering descriptor validation, snapshot ordering, lease-based write acceptance/rejection, TTL-based stale marking, and new-session lease reset behavior
+  - this keeps the first iteration centered on unit-level correctness before plugin/client/server wiring or `Robot_Simulation` changes
+- Extended the Native Link tests with an in-memory autonomous survive scenario modeled after the earlier Direct stress workflow:
+  - dashboard-side replayable control state for chooser selection and `TestMove`
+  - server-side `Timer` countdown and `Y_ft` motion telemetry
+  - repeated server restart loop x5
+  - repeated dashboard reconnect loop x5
+  - all current Native Link core tests now pass in the local test harness before any simulator-side integration changes
+- Captured the next intended validation direction in the Native Link docs:
+  - explicit multi-client stress (two dashboards plus watcher) should be proved in the in-memory harness next
+  - later real multi-process SmartDashboard validation should be gated by plugin-advertised multi-client capability so the app can safely relax its single-instance guard only for transports that support it
+- Began the first SmartDashboard host-side startup gate slice for future real multi-process validation:
+  - added `SmartDashboard/src/app/startup_instance_gate.h` and `SmartDashboard/src/app/startup_instance_gate.cpp`
+  - `SmartDashboard/src/main.cpp` now parses `--allow-multi-instance` and only bypasses the Win32 single-instance guard when the selected transport descriptor advertises multi-client support
+  - added focused tests in `SmartDashboard/tests/startup_instance_gate_tests.cpp`
+  - current startup-gate tests and Native Link core tests both pass locally
+- Added the first actual Native Link plugin scaffold behind the existing C ABI:
+  - added `plugins/NativeLinkTransport/src/native_link_transport_plugin.cpp`
+  - plugin descriptor now advertises `native-link`, chooser support, and multi-client capability
+  - plugin currently bridges host publishes into the in-memory Native Link core and registers a small default topic set for early discovery/runtime validation
+  - added `plugins/NativeLinkTransport/tests/native_link_plugin_tests.cpp` to verify descriptor/capability export behavior
+  - SmartDashboard app, Native Link plugin, and Native Link tests all build successfully together
+- Added a focused SmartDashboard-side discovery test for the new plugin path:
+  - `SmartDashboard/tests/dashboard_transport_registry_tests.cpp` verifies that `native-link` can be discovered by `DashboardTransportRegistry`
+  - this gives a lightweight host/plugin smoke check before moving to real two-process dashboard validation
+- Tightened plugin deployment/build ordering for the host-side path:
+  - top-level `CMakeLists.txt` now makes `SmartDashboardApp` and `SmartDashboard_tests` depend on `NativeLinkTransportPlugin` when that plugin is enabled
+  - the discovery test now expects the plugin DLL to already be deployed next to the runtime instead of copying it on demand
+  - this makes the discovery path closer to the real app/test environment we will use for later two-process validation
+- Added a first host-side plugin runtime smoke test:
+  - `SmartDashboard/tests/dashboard_transport_registry_tests.cpp` now also starts a real `native-link` transport instance through `DashboardTransportRegistry`
+  - the test confirms initial retained state is delivered from the plugin scaffold and that host publishes update the transport state through the plugin path
+  - this gives a lightweight end-to-end host/plugin/runtime check before two-process SmartDashboard validation
+- Added the first helper for real two-process SmartDashboard startup validation:
+  - `tools/native_link_multi_instance_smoke.py` launches two `SmartDashboardApp` processes
+  - the helper first forces persisted transport selection to `native-link`
+  - the helper expects the second process to succeed only through the new Native Link multi-instance startup path
+  - `docs/testing.md` now documents this as the first real multi-process Native Link smoke step before deeper shared-state validation
+- Added the next real two-process shared-state probe:
+  - `tools/native_link_shared_state_probe.py` inspects per-instance UI debug logs from two SmartDashboard processes
+  - this verifies both dashboards start on `native-link` and observe the same initial retained chooser + `TestMove` state
+  - this is the first real shared-state confirmation across two dashboard processes before bringing in `Robot_Simulation`
+- That shared-state probe also exposed a current gap worth solving next:
+  - the second dashboard process is launching successfully through the Native Link multi-instance startup path
+  - but per-instance UI log capture is not yet reliably proving the second process's observed state
+  - this gives a concrete next debugging target before claiming full two-dashboard shared-state validation
+- Added a documentation-only `plugins/NativeLinkTransport/` scaffold and top-level CMake option so the future plugin has a dedicated home without pretending the implementation is started already.
+
 ## 2026-03-18 - Legacy NT plugin boundary and transport settings schema completed
 
 - Completed the first real compatibility-plugin slice instead of leaving it as a scaffold:

@@ -32,11 +32,13 @@
 #include <QLineEdit>
 #include <QMetaObject>
 #include <QPalette>
+#include <QCoreApplication>
 #include <QPushButton>
 #include <QSaveFile>
 #include <QSettings>
 #include <QStringList>
 #include <QStatusBar>
+#include <QProcessEnvironment>
 #include <QThread>
 #include <QToolButton>
 #include <QTimer>
@@ -61,7 +63,11 @@ namespace
 {
     bool IsHarnessFocusKey(const QString& key)
     {
-        return key == "Test/AutonTest" || key == "TestMove" || key == "Timer" || key == "Y_ft";
+        return key == "Test/AutonTest"
+            || key == "TestMove"
+            || key == "Timer"
+            || key == "Y_ft"
+            || key == "Test/Auton_Selection/AutoChooser/selected";
     }
 
     QString FormatReplayTimeUs(std::int64_t timeUs)
@@ -1000,7 +1006,43 @@ MainWindow::~MainWindow()
 
 void MainWindow::DebugLogUiEvent(const QString& line) const
 {
-    static_cast<void>(line);
+    if (!m_uiDebugLog.is_open())
+    {
+        const QString tag = QProcessEnvironment::systemEnvironment().value("SMARTDASHBOARD_INSTANCE_TAG").trimmed();
+        QString resolvedTag = tag;
+        if (resolvedTag.isEmpty())
+        {
+            const QStringList args = QCoreApplication::arguments();
+            for (int i = 0; i + 1 < args.size(); ++i)
+            {
+                if (args[i] == "--instance-tag")
+                {
+                    resolvedTag = args[i + 1].trimmed();
+                    break;
+                }
+            }
+        }
+        if (resolvedTag.isEmpty())
+        {
+            return;
+        }
+
+        // Ian: The shared-state probe needs one log file per dashboard
+        // process. We keep a last-resort argv fallback here because the probe's
+        // entire value is proving that the second process observed the same
+        // retained state, not just that it launched.
+        const QString logPath = sd::app::GetDebugLogPath(QString("native_link_ui_%1.log").arg(resolvedTag));
+        sd::app::AppendTaggedDebugLine("native_link_startup", resolvedTag, QString("ui_log_open=%1").arg(logPath));
+        m_uiDebugLog.open(logPath.toStdString(), std::ios::out | std::ios::app);
+        if (!m_uiDebugLog.is_open())
+        {
+            sd::app::AppendTaggedDebugLine("native_link_startup", resolvedTag, "ui_log_open_failed");
+            return;
+        }
+        sd::app::AppendTaggedDebugLine("native_link_startup", resolvedTag, "ui_log_opened");
+    }
+
+    m_uiDebugLog << line.toStdString() << std::endl;
 }
 
 void MainWindow::DrainPendingUiUpdates()
@@ -1079,6 +1121,22 @@ void MainWindow::OnSetMoveResizeMode()
 
 void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, const QVariant& value, quint64 seq)
 {
+    if (IsHarnessFocusKey(key))
+    {
+        QString valueText;
+        if (value.canConvert<QStringList>())
+        {
+            valueText = value.toStringList().join(",");
+        }
+        else
+        {
+            valueText = value.toString();
+        }
+
+        DebugLogUiEvent(QString("update key=%1 value=%2 seq=%3")
+            .arg(key, valueText, QString::number(seq)));
+    }
+
     if (valueType == static_cast<int>(sd::direct::ValueType::String)
         || valueType == static_cast<int>(sd::direct::ValueType::StringArray))
     {
@@ -2540,6 +2598,8 @@ void MainWindow::StartTransport()
     }
 
     m_transport = m_transportRegistry.CreateTransport(m_connectionConfig);
+    DebugLogUiEvent(QString("transport_start id=%1 kind=%2")
+        .arg(m_connectionConfig.transportId, QString::number(static_cast<int>(m_connectionConfig.kind))));
     if (!m_transport)
     {
         StopSessionRecording();

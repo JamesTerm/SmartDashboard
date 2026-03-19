@@ -143,6 +143,18 @@ This repo includes an automated GoogleTest suite for direct transport and client
 
 See `docs/testing.md` for test scope and focused test commands.
 
+Native Link multi-instance startup smoke:
+
+- configure first with `cmake -S . -B build -DSMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK=ON`
+- `python tools/native_link_multi_instance_smoke.py`
+- This configures `native-link` as the selected transport and verifies that two `SmartDashboardApp` processes can coexist only when that multi-client startup path is active.
+
+Native Link shared-state smoke:
+
+- configure first with `cmake -S . -B build -DSMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK=ON`
+- `python tools/native_link_shared_state_probe.py`
+- This verifies that two real SmartDashboard processes both start on `native-link` and observe the same initial retained state in their UI debug logs.
+
 Optional sample publisher:
 
 - `build/ClientInterface_direct/Debug/sd_direct_publisher_sample.exe`
