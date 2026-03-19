@@ -69,6 +69,7 @@ This test plan focuses on transport correctness before widget breadth.
 Recommended sequencing:
 
 - first prove the same behavior in the in-memory Native Link harness
+- then validate the real SmartDashboard IPC client against an authority-style shared-memory/event server
 - then validate two real SmartDashboard processes once the plugin path can explicitly advertise multi-client support and bypass single-instance enforcement for that transport.
 
 ### Many writers
@@ -107,6 +108,12 @@ Recommended first integration target:
 - add a Native Link server mode to `D:\code\Robot_Simulation`
 - keep `Legacy NT` as comparison oracle during validation
 - use SmartDashboard Native Link plugin as one client and optional probes/watchers as extra clients.
+
+Current SmartDashboard-side note:
+
+- the old SmartDashboard-owned in-memory authority bridge is no longer the target path
+- SmartDashboard tests should now cover the real shared-memory + named-events client path directly
+- until the full combined Native Link `ctest` slice is stable, treat startup/restart ordering as the primary bug-hunting area, not the finished state.
 
 ### Suggested paired baseline topics
 

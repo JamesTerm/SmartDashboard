@@ -187,7 +187,13 @@ Use this follow-up check after the startup smoke.
    - both dashboard instance logs show the same initial retained values for chooser selection and `TestMove`
    - both dashboard instance logs also show the shared cross-process `TestMove = 3.5` update
 
-This still uses the current in-process Native Link scaffold, but it now validates that two real SmartDashboard processes observe the same initial shared state path and the same early cross-process state propagation path.
+This no longer uses the old SmartDashboard-owned in-process authority scaffold. It now depends on a real authoritative Native Link server already running on the selected channel (normally `Robot_Simulation` in Native Link mode), and it validates that two real SmartDashboard processes observe the same retained/shared server state.
+
+Current practical note:
+
+- the SmartDashboard-side real IPC client/tests are in active stabilization
+- focused Native Link builds and several focused tests pass locally
+- if a full combined `ctest -R "NativeLink|DashboardTransportRegistryTests"` run is flaky, treat that as an active startup/ordering bug to fix before declaring the real IPC path fully stable.
 
 ## Validation expectations
 

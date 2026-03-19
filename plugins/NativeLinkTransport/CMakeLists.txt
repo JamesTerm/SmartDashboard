@@ -2,6 +2,8 @@ project(NativeLinkTransport LANGUAGES CXX)
 
 add_library(NativeLinkTransportCore STATIC
     src/native_link_core.cpp
+    src/native_link_ipc_client.cpp
+    src/native_link_ipc_test_server.cpp
 )
 
 target_include_directories(NativeLinkTransportCore
@@ -61,6 +63,7 @@ if(BUILD_TESTING)
     add_executable(NativeLinkTransport_tests
         tests/native_link_core_tests.cpp
         tests/native_link_plugin_tests.cpp
+        tests/native_link_ipc_client_tests.cpp
         src/native_link_transport_plugin.cpp
     )
 

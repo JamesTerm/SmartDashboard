@@ -158,27 +158,6 @@ namespace sd::nativelink
     public:
         using Clock = std::function<std::chrono::steady_clock::time_point(void)>;
 
-        explicit NativeLinkCore(Clock clock = {});
-
-        RegisterTopicResult RegisterTopic(const TopicDescriptor& descriptor);
-        bool AcquireLease(const std::string& topicPath, const std::string& clientId);
-        bool ReleaseLease(const std::string& topicPath, const std::string& clientId);
-        ClientSessionView ConnectClient(const std::string& clientId);
-        bool DisconnectClient(const std::string& clientId);
-
-        WriteResult Publish(const std::string& topicPath, const TopicValue& value, const std::string& sourceClientId);
-        WriteResult PublishFromServer(const std::string& topicPath, const TopicValue& value);
-
-        std::vector<SnapshotEvent> BuildSnapshotForClient(const std::string& clientId) const;
-        std::vector<UpdateEnvelope> DrainClientEvents(const std::string& clientId);
-        bool TryGetLatestValue(const std::string& topicPath, TopicValue& outValue) const;
-        TopicLeaseInfo GetTopicLeaseInfo(const std::string& topicPath) const;
-
-        void BeginNewSession();
-
-        std::uint64_t GetServerSessionId() const;
-
-    private:
         struct TopicRuntime
         {
             TopicDescriptor descriptor;
@@ -196,6 +175,31 @@ namespace sd::nativelink
             std::deque<UpdateEnvelope> pendingEvents;
         };
 
+        explicit NativeLinkCore(Clock clock = {});
+
+        RegisterTopicResult RegisterTopic(const TopicDescriptor& descriptor);
+        bool AcquireLease(const std::string& topicPath, const std::string& clientId);
+        bool ReleaseLease(const std::string& topicPath, const std::string& clientId);
+        ClientSessionView ConnectClient(const std::string& clientId);
+        bool DisconnectClient(const std::string& clientId);
+
+        WriteResult Publish(const std::string& topicPath, const TopicValue& value, const std::string& sourceClientId);
+        WriteResult PublishFromServer(const std::string& topicPath, const TopicValue& value);
+
+        std::vector<SnapshotEvent> BuildSnapshotForClient(const std::string& clientId) const;
+        std::vector<UpdateEnvelope> DrainClientEvents(const std::string& clientId);
+        bool TryGetLatestValue(const std::string& topicPath, TopicValue& outValue) const;
+        TopicLeaseInfo GetTopicLeaseInfo(const std::string& topicPath) const;
+        bool IsTopicRegistered(const std::string& topicPath) const;
+
+        void BeginNewSession();
+
+        std::uint64_t GetServerSessionId() const;
+
+        const struct TopicRuntime* LookupTopic(const std::string& topicPath) const;
+        DeliveryKind GetLiveDeliveryKind(TopicKind topicKind) const;
+
+    private:
         Clock m_clock;
         std::uint64_t m_serverSessionId = 1;
         std::uint64_t m_nextTopicId = 1;

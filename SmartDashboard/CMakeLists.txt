@@ -91,6 +91,13 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
 
+    if(SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK)
+        target_include_directories(SmartDashboard_tests
+            PRIVATE
+                ${CMAKE_SOURCE_DIR}/plugins/NativeLinkTransport/include
+        )
+    endif()
+
     target_link_libraries(SmartDashboard_tests
         PRIVATE
             Qt6::Core
@@ -101,6 +108,10 @@ if(BUILD_TESTING)
             ClientInterface_direct
             GTest::gtest_main
     )
+
+    if(SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK)
+        target_link_libraries(SmartDashboard_tests PRIVATE NativeLinkTransportCore)
+    endif()
 
     target_compile_features(SmartDashboard_tests PRIVATE cxx_std_20)
     target_compile_definitions(SmartDashboard_tests PRIVATE SMARTDASHBOARD_TESTS=1)

@@ -258,6 +258,12 @@ The next helper now exists too: `tools/native_link_shared_state_probe.py`. It us
 
 That probe is now passing for shared startup state, so the next real threshold is stronger: proving that one dashboard-originated write becomes visible to the other dashboard through the same Native Link authority.
 
-The next validation threshold after shared startup state is real cross-process write/read propagation. For that reason, the current Native Link plugin scaffold is now moving away from per-process isolated cores and toward one shared in-process authority for the `native-link-default` channel so both dashboard processes can observe the same retained writes during early real-process testing.
+That SmartDashboard-owned shared-authority bridge has now been replaced by a real shared-memory + named-events IPC client on the dashboard side. The authoritative Native Link server is expected to live outside SmartDashboard, with `Robot_Simulation` as the intended first real authority.
 
-Important caveat: this shared in-process authority is a SmartDashboard-side validation bridge for early real-process testing. It is useful because it lets us prove multi-dashboard semantics before involving `Robot_Simulation`, but it is not the final long-term Native Link transport topology we expect to keep.
+For SmartDashboard-side validation, this repo now also contains a focused IPC harness server used only by automated tests. It exists to exercise the real client/runtime/plugin path without reintroducing dashboard-owned production authority semantics.
+
+Current status note:
+
+- the architecture shift to real simulator-style authority is now in place on the SmartDashboard side
+- focused IPC tests and focused registry/plugin tests pass locally
+- one remaining area still needs stabilization: deterministic startup/restart ordering across the full combined Native Link test slice. Do not treat the real IPC path as fully finished until the combined suite is consistently green.

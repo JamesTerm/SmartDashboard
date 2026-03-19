@@ -331,6 +331,11 @@ namespace sd::nativelink
         return info;
     }
 
+    bool NativeLinkCore::IsTopicRegistered(const std::string& topicPath) const
+    {
+        return FindTopic(topicPath) != nullptr;
+    }
+
     void NativeLinkCore::BeginNewSession()
     {
         ++m_serverSessionId;
@@ -350,6 +355,16 @@ namespace sd::nativelink
     std::uint64_t NativeLinkCore::GetServerSessionId() const
     {
         return m_serverSessionId;
+    }
+
+    const NativeLinkCore::TopicRuntime* NativeLinkCore::LookupTopic(const std::string& topicPath) const
+    {
+        return FindTopic(topicPath);
+    }
+
+    DeliveryKind NativeLinkCore::GetLiveDeliveryKind(TopicKind topicKind) const
+    {
+        return DetermineLiveDeliveryKind(topicKind);
     }
 
     const NativeLinkCore::TopicRuntime* NativeLinkCore::FindTopic(const std::string& topicPath) const

@@ -100,6 +100,17 @@
   - important caveat for the next session: that shared authority is still an early SmartDashboard-side scaffold for `native-link-default`, not the final external/shared transport architecture; keep it as a validation bridge, not as proof that the long-term transport design is finished
   - build-default strategy is now aligned with the future merge plan: `SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK` should stay `OFF` by default so `main` can absorb the architecture/test work without exposing unfinished plugin behavior; enable it explicitly on the feature branch when validating Native Link
   - future merge strategy for this line of work: when we are ready to start the separate `Robot_Simulation` branch, squash-merge the SmartDashboard Native Link work into `main` but keep the new plugin disabled in project build settings so `main` stays stable without exposing unfinished plugin behavior
+  - newest Native Link slice replaced the SmartDashboard-side in-memory `native-link-default` authority scaffold with a real shared-memory + named-events client/server bridge shape in `plugins/NativeLinkTransport/`:
+    - new shared carrier contract header lives at `plugins/NativeLinkTransport/include/native_link_ipc_protocol.h`
+    - SmartDashboard plugin now starts a real IPC client (`native_link_ipc_client.*`) instead of creating an in-process authority in `native_link_transport_plugin.cpp`
+    - focused IPC harness server for SmartDashboard-side tests lives at `plugins/NativeLinkTransport/src/native_link_ipc_test_server.cpp`; it mirrors the simulator-owned v1 carrier enough for plugin/runtime validation without pretending the dashboard owns authority
+    - important `Ian:` cross-process lesson now captured in the test server: do not treat `clientTag != 0` as a fully initialized client slot before `clientId` + first heartbeat are visible, or the server can race and invalidate half-initialized clients before snapshot delivery
+  - current Native Link automated status is mixed and this is the main blocker for the next session:
+    - core tests still pass
+    - focused isolated IPC tests and focused registry runtime smoke can pass
+    - but the full combined Native Link/registry `ctest` slice is still flaky/failing in some runs because the real IPC client/server handshake around initial snapshot/live readiness and post-start publish timing is not yet deterministic enough
+    - especially watch `NativeLinkIpcClientTests.DashboardPublishReachesAuthoritativeServer` and `DashboardTransportRegistryTests.NativeLinkPluginTransportStartsAndPublishesInitialState`; they expose remaining startup-order races in the SmartDashboard-side validation harness even after replacing the in-memory bridge
+    - do not update docs/testing claims to say the new real IPC path is fully stable until that full-suite flake is fixed
 
 ## Known constraints / active considerations
 
