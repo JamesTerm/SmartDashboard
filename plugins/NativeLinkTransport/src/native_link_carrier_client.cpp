@@ -59,6 +59,9 @@ namespace sd::nativelink
             case NativeLinkCarrierKind::SharedMemory:
                 return std::make_unique<NativeLinkIpcClient>();
             case NativeLinkCarrierKind::Tcp:
+                // Ian: Carrier selection now decides only the transport medium.
+                // The snapshot/session/lease contract is shared above this
+                // factory, so adding TCP here must not fork the semantics.
                 return std::make_unique<NativeLinkTcpClient>();
         }
 

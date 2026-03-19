@@ -534,6 +534,10 @@ namespace sd::nativelink
 
             if (topicPath == "__snapshot_begin__")
             {
+                // Ian: Re-enter descriptor mode whenever the authority starts a
+                // fresh snapshot generation. TCP reconnects must rebuild state
+                // from the same explicit boundaries as SHM instead of inferring
+                // readiness from socket timing alone.
                 snapshotPhase = SnapshotPhase::Descriptors;
                 if (connected.exchange(false) && onConnectionState)
                 {
@@ -557,6 +561,10 @@ namespace sd::nativelink
             if (topicPath == "__live_begin__")
             {
                 snapshotPhase = SnapshotPhase::Live;
+                // Ian: Publish `Connected` only after the authority says the
+                // live boundary is open. That keeps TCP aligned with the Native
+                // Link contract of descriptor snapshot -> state snapshot -> live
+                // delta, rather than treating socket connect as semantic ready.
                 if (!connected.exchange(true) && onConnectionState)
                 {
                     onConnectionState(kConnectionStateConnected);

@@ -577,6 +577,10 @@ namespace sd::nativelink::testsupport
             const std::vector<SnapshotEvent> snapshot = core.ConnectClient(client.clientId).snapshotEvents;
             for (const SnapshotEvent& event : snapshot)
             {
+                // Ian: The TCP test harness intentionally emits the same
+                // snapshot sentinels the real SHM path uses. Keeping the test
+                // authority on the shared semantic contract makes carrier bugs
+                // easier to distinguish from protocol/ordering bugs.
                 UpdateEnvelope envelope;
                 if (event.kind == SnapshotEventKind::Update && event.hasUpdate)
                 {
