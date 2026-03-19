@@ -39,6 +39,7 @@ Curated milestone history for this repository.
   - the helper now rewrites the persisted client name between launches and auto-starts the local `DriverStation_TransportSmoke.exe` authority when available
   - after those helper fixes, the real two-dashboard shared-state probe now passes locally.
   - a final repeatability hardening pass also taught the helper to wait for retained-update markers, not just for the UI log files to exist, which removed a second-dashboard log-flush race in repeated probe runs.
+  - one last real-process probe race also surfaced during broader validation: the probe was stopping its temporary authority too early, before the slower dashboard had always finished draining retained startup state. Keeping the authority alive through the retained-marker checks removed that flake in local repeat runs.
 
 ## 2026-03-19 - Native Link stabilization and carrier roadmap
 

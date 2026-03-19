@@ -139,6 +139,7 @@
     - with those helper fixes, the paired real-process probe now passes locally: `python tools/native_link_shared_state_probe.py` reports `native_link_shared_state_probe=ok`
     - one more helper hardening pass was needed for repeatability: the probe originally treated "log file exists" as if it meant retained startup updates had already drained through the UI thread, but repeated runs showed the second dashboard can lag slightly and create a false failure even though it catches up moments later
     - `tools/native_link_shared_state_probe.py` now waits for the retained chooser marker itself instead of only waiting for non-empty log files; after that timing fix, the paired real-process probe passed 10/10 repeated runs locally
+    - another real probe race showed up during broader merge-readiness validation: the helper was tearing down the temporary authority as soon as the launcher returned, before the second dashboard had always finished draining retained startup state; keeping the authority alive until after retained-marker checks fixed that flake, and the paired probe again passed 10/10 repeats locally
   - roadmap note for follow-on sessions:
     - keep the current shared-memory + named-events carrier as the simpler diagnostic/reference backend even after adding TCP
     - planned direction is one Native Link protocol above multiple carriers, with TCP becoming the intended long-term default only after parity against the current focused slice and paired real-process probe is proven
