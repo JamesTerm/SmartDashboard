@@ -9,11 +9,11 @@
 
 namespace sd::nativelink::testsupport
 {
-    class NativeLinkIpcTestServer
+    class NativeLinkTcpTestServer
     {
     public:
-        explicit NativeLinkIpcTestServer(std::string channelId = "native-link-default");
-        ~NativeLinkIpcTestServer();
+        NativeLinkTcpTestServer(std::string channelId, std::uint16_t port, std::string host = "127.0.0.1");
+        ~NativeLinkTcpTestServer();
 
         bool Start();
         void Stop();
@@ -32,6 +32,4 @@ namespace sd::nativelink::testsupport
         struct Impl;
         std::unique_ptr<Impl> m_impl;
     };
-
-    using NativeLinkReferenceTestServer = NativeLinkIpcTestServer;
 }

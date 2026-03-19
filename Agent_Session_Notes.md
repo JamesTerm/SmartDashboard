@@ -143,6 +143,16 @@
   - roadmap note for follow-on sessions:
     - keep the current shared-memory + named-events carrier as the simpler diagnostic/reference backend even after adding TCP
     - planned direction is one Native Link protocol above multiple carriers, with TCP becoming the intended long-term default only after parity against the current focused slice and paired real-process probe is proven
+  - first carrier-abstraction checkpoint is now in place on `feature/native-link-tcpip-carrier`:
+    - SmartDashboard has a new internal carrier-client boundary in `plugins/NativeLinkTransport/include/native_link_carrier_client.h`
+    - the existing SHM IPC client now hangs off that boundary as the preserved reference backend instead of being the only implicit implementation path
+    - plugin settings can now name `{"carrier":"shm"}` explicitly, and unsupported `tcp` selection fails fast instead of silently falling back to SHM
+    - Robot_Simulation mirrors the same explicit carrier enum/config boundary in `Source/Application/DriverStation/DriverStation/NativeLink.h` so the simulator-owned authority path is ready for a later TCP carrier without changing session semantics again
+  - roadmap checkpoint after discussing FRC-community rollout strategy:
+    - `docs/native_link_rollout_strategy.md` now captures the intended long-term product shape: one Native Link semantic core, multiple carriers, and multiple dashboard/compatibility adapters
+    - important product rule: do not force early adoption to mean robot-code rewrites; preserve a compatibility-first path alongside a richer native-first Java/C++ SDK path
+    - cleanup decisions should now preserve both a carrier boundary and an adapter boundary so future SmartDashboard / Shuffleboard / Elastic / bridge work can share the same contract
+    - `Robot_Simulation` should continue as the first reference authority/example, but should not be treated as the permanent home of all authority-side logic
 
 ## Known constraints / active considerations
 

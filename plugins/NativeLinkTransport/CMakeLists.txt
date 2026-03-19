@@ -1,9 +1,12 @@
 project(NativeLinkTransport LANGUAGES CXX)
 
 add_library(NativeLinkTransportCore STATIC
+    src/native_link_carrier_client.cpp
     src/native_link_core.cpp
     src/native_link_ipc_client.cpp
     src/native_link_ipc_test_server.cpp
+    src/native_link_tcp_client.cpp
+    src/native_link_tcp_test_server.cpp
 )
 
 target_include_directories(NativeLinkTransportCore
@@ -12,6 +15,11 @@ target_include_directories(NativeLinkTransportCore
 )
 
 target_compile_features(NativeLinkTransportCore PUBLIC cxx_std_20)
+
+target_link_libraries(NativeLinkTransportCore
+    PUBLIC
+        ws2_32
+)
 
 add_library(NativeLinkTransportPlugin SHARED
     src/native_link_transport_plugin.cpp

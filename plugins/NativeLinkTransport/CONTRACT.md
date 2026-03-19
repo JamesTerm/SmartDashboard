@@ -365,6 +365,30 @@ Likely next ABI needs:
 
 These should be added as a new ABI revision rather than mutating the current v1 structs.
 
+## Carrier boundary checkpoint
+
+The current implementation checkpoint now treats carrier choice as an explicit
+internal boundary under the Native Link semantic contract.
+
+- protocol/session semantics remain shared above the carrier layer
+- `shm` remains the current reference backend for startup/restart debugging
+- `tcp` is intentionally not implemented yet, but carrier selection is already
+  explicit so the future socket path does not need to reshape session semantics
+- unsupported carrier selections should fail clearly instead of silently
+  downgrading to another medium.
+
+## Adapter boundary checkpoint
+
+Long-term rollout also requires an explicit adapter boundary above the transport
+contract, not only a carrier boundary below it.
+
+- carriers are responsible for moving Native Link frames/semantics
+- adapters are responsible for integrating Native Link with dashboard ecosystems
+  or compatibility workflows such as SmartDashboard, Shuffleboard, Elastic, or
+  a future NT bridge/service
+- adapter-specific naming or widget behavior should not become part of the core
+  semantic contract.
+
 ## Compatibility mapping for SmartDashboard host
 
 The dashboard host should map Native Link semantics as follows:

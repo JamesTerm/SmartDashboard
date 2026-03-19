@@ -1,6 +1,7 @@
 #include "transport/dashboard_transport.h"
 
 #include "native_link_ipc_test_server.h"
+#include "native_link_tcp_test_server.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -91,7 +92,7 @@ TEST(DashboardTransportRegistryTests, NativeLinkPluginTransportStartsAndPublishe
     config.kind = sd::transport::TransportKind::Plugin;
     config.transportId = "native-link";
     config.ntClientName = "RegistrySmokeTest";
-    config.pluginSettingsJson = QString::fromStdString(std::string("{\"channel_id\":\"") + channelId + "\"}");
+    config.pluginSettingsJson = QString::fromStdString(std::string("{\"carrier\":\"shm\",\"channel_id\":\"") + channelId + "\"}");
 
     std::unique_ptr<sd::transport::IDashboardTransport> transport = registry.CreateTransport(config);
     ASSERT_NE(transport, nullptr);
@@ -152,6 +153,123 @@ TEST(DashboardTransportRegistryTests, NativeLinkPluginTransportStartsAndPublishe
             && server.TryGetLatestValue("TestMove", latestMove)
             && latestMove.type == sd::nativelink::ValueType::Double
             && latestMove.doubleValue == 3.5;
+    }, 2000));
+
+    transport->Stop();
+    server.Stop();
+}
+
+TEST(DashboardTransportRegistryTests, NativeLinkPluginRejectsUnsupportedCarrierSelection)
+{
+    ASSERT_NE(EnsureCoreApp(), nullptr);
+
+    const std::string channelId = MakeUniqueChannel("native-link-registry-unsupported-carrier");
+    sd::nativelink::testsupport::NativeLinkIpcTestServer server(channelId);
+    ASSERT_TRUE(server.Start());
+    server.RegisterDefaultDashboardTopics();
+
+    sd::transport::DashboardTransportRegistry registry;
+
+    sd::transport::ConnectionConfig config;
+    config.kind = sd::transport::TransportKind::Plugin;
+    config.transportId = "native-link";
+    config.ntClientName = "RegistryUnsupportedCarrier";
+    config.pluginSettingsJson = QString::fromStdString(std::string("{\"carrier\":\"tcp\",\"channel_id\":\"") + channelId + "\"}");
+
+    std::unique_ptr<sd::transport::IDashboardTransport> transport = registry.CreateTransport(config);
+    ASSERT_NE(transport, nullptr);
+
+    const bool started = transport->Start(
+        [](const sd::transport::VariableUpdate&)
+        {
+        },
+        [](sd::transport::ConnectionState)
+        {
+        }
+    );
+
+    EXPECT_FALSE(started);
+
+    transport->Stop();
+    server.Stop();
+}
+
+TEST(DashboardTransportRegistryTests, NativeLinkPluginTcpTransportStartsAndPublishesInitialState)
+{
+    ASSERT_NE(EnsureCoreApp(), nullptr);
+
+    const std::string channelId = MakeUniqueChannel("native-link-registry-tcp-test");
+    const std::uint16_t port = 5813;
+    sd::nativelink::testsupport::NativeLinkTcpTestServer server(channelId, port);
+    ASSERT_TRUE(server.Start());
+    server.RegisterDefaultDashboardTopics();
+
+    sd::transport::DashboardTransportRegistry registry;
+
+    sd::transport::ConnectionConfig config;
+    config.kind = sd::transport::TransportKind::Plugin;
+    config.transportId = "native-link";
+    config.ntClientName = "RegistryTcpSmokeTest";
+    config.pluginSettingsJson = QString::fromStdString(
+        std::string("{\"carrier\":\"tcp\",\"host\":\"127.0.0.1\",\"port\":")
+        + std::to_string(port)
+        + std::string(",\"channel_id\":\"")
+        + channelId
+        + "\"}"
+    );
+
+    std::unique_ptr<sd::transport::IDashboardTransport> transport = registry.CreateTransport(config);
+    ASSERT_NE(transport, nullptr);
+
+    std::mutex mutex;
+    std::vector<sd::transport::ConnectionState> states;
+    std::vector<sd::transport::VariableUpdate> updates;
+
+    const bool started = transport->Start(
+        [&mutex, &updates](const sd::transport::VariableUpdate& update)
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            updates.push_back(update);
+        },
+        [&mutex, &states](sd::transport::ConnectionState state)
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            states.push_back(state);
+        }
+    );
+
+    ASSERT_TRUE(started);
+    ASSERT_TRUE(WaitForCondition([&mutex, &states, &updates]()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        bool connected = false;
+        bool sawRetainedState = false;
+        for (sd::transport::ConnectionState state : states)
+        {
+            if (state == sd::transport::ConnectionState::Connected)
+            {
+                connected = true;
+            }
+        }
+        for (const sd::transport::VariableUpdate& update : updates)
+        {
+            if (update.key == "TestMove" || update.key == "Test/Auton_Selection/AutoChooser/selected")
+            {
+                sawRetainedState = true;
+                break;
+            }
+        }
+        return connected && sawRetainedState;
+    }, 2000));
+
+    EXPECT_TRUE(transport->PublishDouble("TestMove", 9.0));
+
+    sd::nativelink::TopicValue latestMove;
+    ASSERT_TRUE(WaitForCondition([&server, &latestMove]()
+    {
+        return server.TryGetLatestValue("TestMove", latestMove)
+            && latestMove.type == sd::nativelink::ValueType::Double
+            && latestMove.doubleValue == 9.0;
     }, 2000));
 
     transport->Stop();

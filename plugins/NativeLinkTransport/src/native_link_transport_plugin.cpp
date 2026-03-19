@@ -1,9 +1,10 @@
 #define SD_TRANSPORT_PLUGIN_EXPORTS 1
 
-#include "native_link_ipc_client.h"
+#include "native_link_carrier_client.h"
 #include "transport/dashboard_transport_plugin_api.h"
 
 #include <chrono>
+#include <cstdlib>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -14,8 +15,12 @@
 
 namespace
 {
-    using sd::nativelink::NativeLinkIpcClient;
+    using sd::nativelink::CreateNativeLinkCarrierClient;
+    using sd::nativelink::NativeLinkCarrierKind;
+    using sd::nativelink::NativeLinkClientConfig;
     using sd::nativelink::TopicValue;
+    using sd::nativelink::ToString;
+    using sd::nativelink::TryParseCarrierKind;
     using sd::nativelink::UpdateEnvelope;
     using sd::nativelink::ValueType;
 
@@ -38,7 +43,8 @@ namespace
         bool running = false;
         std::string clientName = "SmartDashboardApp";
         std::string channelId = "native-link-default";
-        std::unique_ptr<NativeLinkIpcClient> client;
+        std::string carrierName = "shm";
+        std::unique_ptr<sd::nativelink::NativeLinkCarrierClient> client;
         sd_transport_callbacks_v1 callbacks {};
     };
 
@@ -153,6 +159,54 @@ namespace
         return json.substr(firstQuote + 1, secondQuote - firstQuote - 1);
     }
 
+    std::uint16_t ReadPluginPortSetting(const char* jsonText, const char* key, std::uint16_t fallback)
+    {
+        if (jsonText == nullptr || key == nullptr)
+        {
+            return fallback;
+        }
+
+        const std::string json(jsonText);
+        const std::string needle = std::string("\"") + key + "\"";
+        const std::size_t keyPos = json.find(needle);
+        if (keyPos == std::string::npos)
+        {
+            return fallback;
+        }
+
+        const std::size_t colonPos = json.find(':', keyPos + needle.size());
+        if (colonPos == std::string::npos)
+        {
+            return fallback;
+        }
+
+        const std::size_t valueStart = json.find_first_of("0123456789", colonPos + 1);
+        if (valueStart == std::string::npos)
+        {
+            return fallback;
+        }
+
+        const std::size_t valueEnd = json.find_first_not_of("0123456789", valueStart);
+        const std::string token = json.substr(valueStart, valueEnd - valueStart);
+        const unsigned long parsed = std::strtoul(token.c_str(), nullptr, 10);
+        if (parsed > 65535UL)
+        {
+            return fallback;
+        }
+        return static_cast<std::uint16_t>(parsed);
+    }
+
+    NativeLinkCarrierKind ReadCarrierKindSetting(const char* jsonText)
+    {
+        NativeLinkCarrierKind kind = NativeLinkCarrierKind::SharedMemory;
+        const std::string value = ReadPluginStringSetting(jsonText, "carrier", ToString(kind));
+        if (!TryParseCarrierKind(value, kind))
+        {
+            kind = NativeLinkCarrierKind::SharedMemory;
+        }
+        return kind;
+    }
+
     sd_transport_instance_v1 CreateNativeLinkInstance()
     {
         return new NativeLinkPluginInstance();
@@ -183,11 +237,35 @@ namespace
             "channel_id",
             "native-link-default"
         );
+        const NativeLinkCarrierKind carrierKind = ReadCarrierKindSetting(
+            config != nullptr ? config->plugin_settings_json : nullptr
+        );
+        instance->carrierName = ToString(carrierKind);
 
-        instance->client = std::make_unique<NativeLinkIpcClient>();
-        NativeLinkIpcClient::Config clientConfig;
+        NativeLinkClientConfig clientConfig;
+        clientConfig.carrierKind = carrierKind;
         clientConfig.channelId = instance->channelId;
         clientConfig.clientId = instance->clientName;
+        clientConfig.host = ReadPluginStringSetting(
+            config != nullptr ? config->plugin_settings_json : nullptr,
+            "host",
+            "127.0.0.1"
+        );
+        clientConfig.port = ReadPluginPortSetting(
+            config != nullptr ? config->plugin_settings_json : nullptr,
+            "port",
+            5810
+        );
+
+        // Ian: The semantic contract sits above carrier choice now. If the
+        // operator selects a carrier we do not implement yet, fail loudly here
+        // instead of silently falling back to SHM and hiding a selection bug.
+        instance->client = CreateNativeLinkCarrierClient(clientConfig.carrierKind);
+        if (instance->client == nullptr)
+        {
+            instance->running = false;
+            return 0;
+        }
 
         // Ian: SmartDashboard is no longer the authority here. The plugin should
         // only succeed when the simulator-owned Native Link server is actually

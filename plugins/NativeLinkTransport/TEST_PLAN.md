@@ -164,6 +164,12 @@ Diagnostic policy:
 - use `shm` as the reference path when isolating new ordering/reconnect bugs in
   `tcp`.
 
+Current checkpoint additions:
+
+- validate carrier-name parsing independently from transport startup
+- validate that explicit `tcp` selection fails cleanly until the TCP carrier is
+  implemented, rather than silently reusing the SHM backend.
+
 ## Acceptance signal for first implementation slice
 
 Do not treat Native Link v1 as ready until these all pass:

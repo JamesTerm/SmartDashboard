@@ -321,4 +321,12 @@ Current status note:
 
 - the architecture shift to real simulator-style authority is now in place on the SmartDashboard side
 - focused IPC tests and focused registry/plugin tests pass locally
+- first carrier-abstraction checkpoint is now in place under that authority path:
+  - `plugins/NativeLinkTransport/include/native_link_carrier_client.h` defines the shared client-side carrier boundary
+  - the current SHM IPC path is preserved behind that boundary as the diagnostic/reference backend
+  - plugin settings can now select `{"carrier":"shm"}` or `{"carrier":"tcp","host":"127.0.0.1","port":5810}` explicitly
+- Native Link rollout strategy is now documented in `docs/native_link_rollout_strategy.md`:
+  - carrier work should remain subordinate to one semantic contract
+  - dashboard-specific integrations should live behind adapter boundaries, not leak into the core
+  - the long-term adoption story should include both compatibility-first bridges and native-first Java/C++ SDKs
 - one remaining area still needs stabilization: deterministic startup/restart ordering across the full combined Native Link test slice. Do not treat the real IPC path as fully finished until the combined suite is consistently green.

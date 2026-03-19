@@ -1,34 +1,24 @@
 #pragma once
 
-#include "native_link_core.h"
-
-#include <functional>
-#include <string>
+#include "native_link_carrier_client.h"
 
 namespace sd::nativelink
 {
-    class NativeLinkIpcClient
+    class NativeLinkIpcClient final : public NativeLinkCarrierClient
     {
     public:
-        struct Config
-        {
-            std::string channelId = "native-link-default";
-            std::string clientId = "SmartDashboardApp";
-            std::uint32_t waitTimeoutMs = 100;
-            std::uint32_t heartbeatStaleTimeoutMs = 5000;
-        };
-
-        using UpdateCallback = std::function<void(const UpdateEnvelope&)>;
-        using ConnectionStateCallback = std::function<void(int)>;
+        using Config = NativeLinkClientConfig;
+        using UpdateCallback = NativeLinkUpdateCallback;
+        using ConnectionStateCallback = NativeLinkConnectionStateCallback;
 
         NativeLinkIpcClient();
         ~NativeLinkIpcClient();
 
-        bool Start(const Config& config, UpdateCallback onUpdate, ConnectionStateCallback onConnectionState);
-        void Stop();
+        bool Start(const Config& config, UpdateCallback onUpdate, ConnectionStateCallback onConnectionState) override;
+        void Stop() override;
 
-        bool Publish(const std::string& topicPath, const TopicValue& value);
-        bool IsConnected() const;
+        bool Publish(const std::string& topicPath, const TopicValue& value) override;
+        bool IsConnected() const override;
 
     private:
         struct Impl;
