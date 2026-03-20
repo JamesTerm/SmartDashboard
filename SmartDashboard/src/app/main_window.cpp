@@ -1385,6 +1385,13 @@ void MainWindow::OnConnectionStateChanged(int state)
         // Reconnect handling: reset sequence gating when transport re-enters connected state.
         m_variableStore.ResetSequenceTracking();
 
+        // Ian: The merged replay/line-plot work changed more startup behavior in
+        // the window, but Native Link still needs one deterministic reconnect
+        // rule: accept the authority-owned retained snapshot first, then publish
+        // dashboard-owned remembered controls. Doing this in the explicit
+        // `Connected` callback avoids a race where one dashboard instance can
+        // restart and republish before another instance has finished applying its
+        // snapshot-driven tiles.
         PublishRememberedControlValues();
     }
 
@@ -2726,56 +2733,12 @@ void MainWindow::StartTransport()
                 }
             );
 
-            // Ian: Numeric operator controls are dashboard-owned state.
-            // Retained transport replay can still carry a stale default from an
-            // earlier startup before the dashboard reapplies its remembered UI
-            // value. Re-apply remembered controls here so the visible tile state
-            // and the republished command value both prefer the dashboard's last
-            // operator intent on restart.
+            // Ian: Snapshot handling stops here now. Re-publishing remembered
+            // controls moved to `OnConnectionStateChanged(Connected)` so all
+            // dashboard instances get a full retained snapshot pass before any of
+            // them start asserting local operator-owned values back onto the
+            // authority.
             ApplyRememberedControlValuesToTiles();
-
-            // Ensure dashboard-owned control widgets publish their current values on connect.
-            // This makes operator intent available to freshly connected robot processes even
-            // when no live edit event has occurred since app startup.
-            for (const auto& [_, tile] : m_tiles)
-            {
-                if (!IsOperatorControlWidget(tile))
-                {
-                    continue;
-                }
-
-                const QString key = tile->GetKey();
-                if (key.isEmpty())
-                {
-                    continue;
-                }
-
-                const auto type = tile->GetType();
-                if (type == sd::widgets::VariableType::Bool)
-                {
-                    m_transport->PublishBool(key, tile->GetBoolValue());
-                }
-                else if (type == sd::widgets::VariableType::Double)
-                {
-                    m_transport->PublishDouble(key, tile->GetDoubleValue());
-                }
-                else if (type == sd::widgets::VariableType::String)
-                {
-                    const QString widgetType = tile->GetWidgetType();
-                    if (widgetType == "string.chooser")
-                    {
-                        const QString selectedValue = tile->GetStringValue();
-                        if (!selectedValue.isEmpty())
-                        {
-                            m_transport->PublishString(key + "/selected", selectedValue);
-                        }
-                    }
-                    else
-                    {
-                        m_transport->PublishString(key, tile->GetStringValue());
-                    }
-                }
-            }
 
             // Refresh remembered control cache from current tiles so reconnects can replay
             // the latest operator-facing values even if no new edit event occurs.

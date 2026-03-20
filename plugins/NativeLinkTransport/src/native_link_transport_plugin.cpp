@@ -297,7 +297,7 @@ namespace
         // IPC client has actually crossed into the authority-owned live session.
         // Returning success as soon as the mapping opens lets higher layers fire
         // remembered publishes into a transport that is still mid-handshake.
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2000);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(5000);
         while (std::chrono::steady_clock::now() < deadline)
         {
             if (instance->client->IsConnected())
@@ -308,6 +308,11 @@ namespace
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
 
+        // Ian: Real multi-process bring-up can be a little slower than the
+        // focused unit harness because the second dashboard must cross the full
+        // authority-owned snapshot/live handshake while the app is also opening
+        // windows and restoring settings. Fail eventually, but do not turn that
+        // transient startup work into a false "carrier broken" signal too early.
         instance->client->Stop();
         instance->client.reset();
         instance->running = false;

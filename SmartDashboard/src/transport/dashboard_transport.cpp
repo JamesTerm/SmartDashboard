@@ -1271,7 +1271,21 @@ namespace sd::transport
                         break;
                 }
 
-                self->m_onVariableUpdate(update);
+	                // Ian: Plugin callbacks may arrive on a transport-owned worker
+	                // thread. Queue them onto the main thread before touching the
+	                // stored callback so both dashboard instances use the same UI
+	                // delivery path even after merged app changes alter startup work.
+	                QMetaObject::invokeMethod(
+	                    qApp,
+	                    [self, update]()
+	                    {
+	                        if (self->m_onVariableUpdate != nullptr)
+	                        {
+	                            self->m_onVariableUpdate(update);
+	                        }
+	                    },
+	                    Qt::QueuedConnection
+	                );
             }
 
             static void OnPluginConnectionState(void* userData, int state)
@@ -1282,7 +1296,18 @@ namespace sd::transport
                     return;
                 }
 
-                self->m_onConnectionState(ToConnectionState(state));
+	                const ConnectionState connectionState = ToConnectionState(state);
+	                QMetaObject::invokeMethod(
+	                    qApp,
+	                    [self, connectionState]()
+	                    {
+	                        if (self->m_onConnectionState != nullptr)
+	                        {
+	                            self->m_onConnectionState(connectionState);
+	                        }
+	                    },
+	                    Qt::QueuedConnection
+	                );
             }
 
             void DestroyInstance()
