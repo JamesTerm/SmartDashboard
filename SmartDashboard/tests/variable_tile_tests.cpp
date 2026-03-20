@@ -1,5 +1,7 @@
 #include "widgets/variable_tile.h"
 
+#include "widgets/line_plot_widget.h"
+
 #include <QApplication>
 #include <QComboBox>
 #include <QLineEdit>
@@ -39,6 +41,20 @@ namespace
     {
         return tile.findChild<QLineEdit*>();
     }
+
+    sd::widgets::LinePlotWidget* FindLinePlot(sd::widgets::VariableTile& tile)
+    {
+        const QList<QWidget*> widgets = tile.findChildren<QWidget*>();
+        for (QWidget* widget : widgets)
+        {
+            if (auto* plot = dynamic_cast<sd::widgets::LinePlotWidget*>(widget))
+            {
+                return plot;
+            }
+        }
+
+        return nullptr;
+    }
 }
 
 TEST(VariableTileTests, ProgressBarZeroCentersBeforeWidgetIsShown)
@@ -74,4 +90,22 @@ TEST(VariableTileTests, StringChooserWidgetUsesComboAndTracksOptions)
     EXPECT_TRUE(lineEdit->isHidden());
     EXPECT_EQ(comboBox->count(), 3);
     EXPECT_EQ(comboBox->currentText(), QString("Taxi"));
+}
+
+TEST(VariableTileTests, ResetLinePlotGraphClearsAccumulatedSamples)
+{
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::VariableTile tile("test.lineplot", sd::widgets::VariableType::Double);
+    tile.SetWidgetType("double.lineplot");
+    tile.SetDoubleValue(1.25);
+    tile.SetDoubleValue(2.5);
+
+    sd::widgets::LinePlotWidget* plot = FindLinePlot(tile);
+    ASSERT_NE(plot, nullptr);
+    EXPECT_EQ(plot->GetSampleCountForTesting(), 2);
+
+    tile.ResetLinePlotGraph();
+
+    EXPECT_EQ(plot->GetSampleCountForTesting(), 0);
 }

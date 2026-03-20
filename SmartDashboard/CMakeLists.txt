@@ -73,7 +73,6 @@ if(BUILD_TESTING)
         tests/tile_control_widget_tests.cpp
         tests/variable_tile_tests.cpp
         tests/startup_instance_gate_tests.cpp
-        tests/dashboard_transport_registry_tests.cpp
         src/app/debug_log_paths.h
         src/app/debug_log_paths.cpp
         src/app/startup_instance_gate.h
@@ -85,6 +84,10 @@ if(BUILD_TESTING)
         src/widgets/playback_timeline_widget.cpp
         src/widgets/tile_control_widget.cpp
     )
+
+    if(SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK)
+        target_sources(SmartDashboard_tests PRIVATE tests/dashboard_transport_registry_tests.cpp)
+    endif()
 
     target_include_directories(SmartDashboard_tests
         PRIVATE

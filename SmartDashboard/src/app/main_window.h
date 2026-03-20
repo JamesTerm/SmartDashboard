@@ -78,6 +78,7 @@ private slots:
     void OnEditTransportSettings();
     void OnOpenReplayFile();
     void OnRecordToggled(bool checked);
+    void OnResetAllLinePlots();
     void OnPlaybackRewindToStart();
     void OnPlaybackPlayPause();
     void OnPlaybackRateChanged(int index);
@@ -125,6 +126,8 @@ private:
     void PersistUserReplayBookmarks() const;
     void RestoreDefaultReplayWorkspaceLayout();
     void UpdateReplayDockHeightLock();
+    void ResetAllLinePlots();
+    void SeekPlaybackToUs(std::int64_t targetUs, bool rewindToStart = false);
     void StepPlaybackByUs(std::int64_t deltaUs);
     void StartSessionRecording();
     void StopSessionRecording();
@@ -164,6 +167,9 @@ private:
     QAction* m_replayTimelineViewAction = nullptr;
     QAction* m_replayMarkersViewAction = nullptr;
     QAction* m_openReplayFileAction = nullptr;
+    QAction* m_resetAllLinePlotsAction = nullptr;
+    QAction* m_clearLinePlotsOnRewindAction = nullptr;
+    QAction* m_clearLinePlotsOnBackwardSeekAction = nullptr;
     QWidget* m_telemetryControlsPanel = nullptr;
     QPushButton* m_recordButton = nullptr;
     QToolButton* m_rewindButton = nullptr;
@@ -225,6 +231,8 @@ private:
     bool m_replayControlsPreferredVisible = true;
     bool m_replayTimelinePreferredVisible = true;
     bool m_replayMarkersPreferredVisible = true;
+    bool m_clearLinePlotsOnRewind = false;
+    bool m_clearLinePlotsOnBackwardSeek = false;
     bool m_syncingReplayControlsDockVisibility = false;
     bool m_syncingReplayTimelineDockVisibility = false;
     bool m_syncingReplayMarkerDockVisibility = false;

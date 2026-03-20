@@ -7,6 +7,18 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-19 - Replay line-plot reset workflow
+
+- Added a global line-plot reset workflow for repeated replay diagnosis passes:
+  - `View -> Reset All Line Plots` now clears all active line plots
+  - added app-wide shortcut `Ctrl+Shift+R`
+- Added replay-integrated reset preferences:
+  - optional `Clear line plots on rewind-to-start`
+  - optional `Clear line plots on backward seek`
+  - both persist through `QSettings`
+- Added focused tile coverage in `SmartDashboard/tests/variable_tile_tests.cpp` for line-plot reset behavior.
+- Gated Native Link registry tests behind `SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK` so the default test target builds on non-Native-Link configurations again.
+
 ## 2026-03-19 - Native Link IPC carrier hardening checkpoint
 
 - Continued the SmartDashboard-side real IPC transition after the earlier in-process scaffold removal.

@@ -66,6 +66,7 @@ namespace sd::widgets
         void SetBoolCheckboxShowLabel(bool showLabel);
         void SetStringChooserMode(bool chooserMode);
         void SetStringChooserOptions(const QStringList& options);
+        bool IsLinePlotWidget() const;
         void ResetLinePlotGraph();
 
         QString GetKey() const;
@@ -119,7 +120,6 @@ namespace sd::widgets
         int ValueToPercentForProgressBar(double value) const;
         void UpdateBoolLedAppearance();
         bool IsGaugeWidget() const;
-        bool IsLinePlotWidget() const;
         bool IsDoubleNumericWidget() const;
         bool IsPropertiesSupported() const;
         void OpenPropertiesDialog();
