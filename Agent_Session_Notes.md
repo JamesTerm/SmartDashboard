@@ -12,13 +12,13 @@
 
 ## Active Native Link context
 
-- Branch baseline is now the first TCP/client-side rollout checkpoint on `feature/native-link-tcpip-carrier`.
+- Branch baseline is now the pre-merge Native Link TCP checkpoint on `feature/native-link-tcpip-carrier`.
 - `plugins/NativeLinkTransport/include/native_link_carrier_client.h` is the active client-side carrier boundary.
-- `shm` remains the diagnostic/reference backend and must stay hot-swappable while TCP work continues.
+- `shm` remains the diagnostic/reference backend and must stay hot-swappable even though normal runtime Native Link now defaults to TCP at the plugin boundary.
 - SmartDashboard currently has a localhost TCP client/test-server path under that boundary:
   - `plugins/NativeLinkTransport/src/native_link_tcp_client.cpp`
   - `plugins/NativeLinkTransport/src/native_link_tcp_test_server.cpp`
-- Plugin runtime settings now support explicit carrier choice:
+- Plugin runtime settings support explicit carrier choice, but normal Native Link runtime use now defaults to TCP when `carrier` is omitted:
   - `{"carrier":"shm","channel_id":"..."}`
   - `{"carrier":"tcp","host":"127.0.0.1","port":5810,"channel_id":"..."}`
 - `SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK` stays `OFF` by default outside focused validation.
@@ -34,6 +34,6 @@
 
 ## Immediate next-session focus
 
-1. Continue the narrow runtime integration from the now-proven environment-driven TCP path instead of adding a public SHM/TCP selector.
+1. User testing / pre-merge verification of the Native Link TCP checkpoint.
 2. Keep `Robot_Simulation` as the first reference authority/example, but avoid trapping reusable authority logic inside app-specific code.
-3. After each runtime slice, rerun the SmartDashboard SHM probe, SmartDashboard TCP runtime probe, and focused Robot_Simulation Native Link tests.
+3. For any follow-up fix, rerun the SmartDashboard SHM probe, SmartDashboard TCP runtime probe, SmartDashboard Native Link `ctest` slice, and focused Robot_Simulation Native Link tests.

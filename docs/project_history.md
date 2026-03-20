@@ -19,6 +19,40 @@ Curated milestone history for this repository.
 - Added focused tile coverage in `SmartDashboard/tests/variable_tile_tests.cpp` for line-plot reset behavior.
 - Gated Native Link registry tests behind `SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK` so the default test target builds on non-Native-Link configurations again.
 
+## 2026-03-20 - Native Link TCP pre-merge checkpoint
+
+- Completed the first full carrier-abstraction checkpoint across `SmartDashboard`
+  and `Robot_Simulation` while preserving the Native Link semantic contract:
+  - one server-authoritative session/generation model
+  - descriptor snapshot -> state snapshot -> live delta ordering
+  - explicit state vs command/event behavior
+  - lease/ownership behavior
+  - no command replay.
+- Preserved `shm` + named events as the hot-swappable diagnostic/reference
+  carrier on both sides.
+- Added the localhost TCP reference path on both sides:
+  - SmartDashboard now has TCP client + TCP test-authority support under the
+    carrier boundary
+  - Robot_Simulation now has TCP reference authority + TCP test-client support
+    under the same semantic contract.
+- Proved the real runtime TCP path without introducing a public SHM/TCP chooser:
+  - `Native Link` now defaults to TCP at the plugin/runtime boundary when
+    `carrier` is omitted
+  - SHM remains explicitly selectable for internal diagnostics/support only
+  - added environment-driven runtime proof via
+    `tools/native_link_tcp_runtime_probe.py`.
+- Restabilized the broader SmartDashboard Native Link baseline after the latest
+  merged `main` changes by:
+  - queuing plugin transport callbacks onto the Qt thread
+  - tightening real multi-instance startup ordering in the probe helpers
+  - confirming the intermittent plugin DLL copy issue was just stale
+    `SmartDashboardApp.exe` processes holding the deployed DLL open.
+- Current pre-merge validation checkpoint:
+  - SmartDashboard SHM shared-state probe passes
+  - SmartDashboard TCP runtime probe passes
+  - SmartDashboard Native Link focused `ctest` slice passes
+  - Robot_Simulation Native Link focused tests pass.
+
 ## 2026-03-19 - Native Link IPC carrier hardening checkpoint
 
 - Continued the SmartDashboard-side real IPC transition after the earlier in-process scaffold removal.

@@ -36,7 +36,7 @@ def configure_native_link_settings(client_name: str) -> None:
         ("transportKind", "REG_DWORD", "1"),
         ("transportId", "REG_SZ", "native-link"),
         ("ntClientName", "REG_SZ", client_name),
-        ("pluginSettingsJson", "REG_SZ", '{"client_name":"' + client_name + '"}'),
+        ("pluginSettingsJson", "REG_SZ", '{"carrier":"shm","channel_id":"native-link-default","client_name":"' + client_name + '"}'),
     ]
 
     for name, reg_type, value in settings:

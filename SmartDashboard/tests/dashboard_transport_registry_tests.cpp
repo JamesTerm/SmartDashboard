@@ -278,3 +278,62 @@ TEST(DashboardTransportRegistryTests, NativeLinkPluginTcpTransportStartsAndPubli
     transport->Stop();
     server.Stop();
 }
+
+TEST(DashboardTransportRegistryTests, NativeLinkDefaultsToTcpCarrierWhenCarrierIsOmitted)
+{
+    ASSERT_NE(EnsureCoreApp(), nullptr);
+
+    const std::string channelId = MakeUniqueChannel("native-link-registry-default-tcp-test");
+    const std::uint16_t port = 5814;
+    sd::nativelink::testsupport::NativeLinkTcpTestServer server(channelId, port);
+    ASSERT_TRUE(server.Start());
+    server.RegisterDefaultDashboardTopics();
+
+    sd::transport::DashboardTransportRegistry registry;
+
+    sd::transport::ConnectionConfig config;
+    config.kind = sd::transport::TransportKind::Plugin;
+    config.transportId = "native-link";
+    config.ntClientName = "RegistryDefaultTcpTest";
+    config.pluginSettingsJson = QString::fromStdString(
+        std::string("{\"host\":\"127.0.0.1\",\"port\":")
+        + std::to_string(port)
+        + std::string(",\"channel_id\":\"")
+        + channelId
+        + "\"}"
+    );
+
+    std::unique_ptr<sd::transport::IDashboardTransport> transport = registry.CreateTransport(config);
+    ASSERT_NE(transport, nullptr);
+
+    std::mutex mutex;
+    std::vector<sd::transport::VariableUpdate> updates;
+
+    const bool started = transport->Start(
+        [&mutex, &updates](const sd::transport::VariableUpdate& update)
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            updates.push_back(update);
+        },
+        [](sd::transport::ConnectionState)
+        {
+        }
+    );
+
+    ASSERT_TRUE(started);
+    ASSERT_TRUE(WaitForCondition([&mutex, &updates]()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (const sd::transport::VariableUpdate& update : updates)
+        {
+            if (update.key == "TestMove")
+            {
+                return true;
+            }
+        }
+        return false;
+    }, 2000));
+
+    transport->Stop();
+    server.Stop();
+}

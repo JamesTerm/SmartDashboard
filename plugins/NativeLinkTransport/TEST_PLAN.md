@@ -174,6 +174,10 @@ Build/run hygiene note:
   3. launch probes or manual dashboards after the build completes
 - If a rebuild fails during the `copy_if_different` deploy step, treat it as a
   runtime file-lock issue first rather than a transport regression.
+- Confirmed cause: the deployed plugin DLL beside `SmartDashboardApp.exe` is
+  writable once every `SmartDashboardApp.exe` process has actually exited.
+  Intermittent copy failures were stale dashboard processes, not an unknown
+  hidden lock source.
 
 Current checkpoint additions:
 

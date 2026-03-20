@@ -188,6 +188,14 @@ That means future cleanup on the simulator side should keep moving toward reusab
 6. sketch a future `NT4 <-> Native Link` bridge/service path
 7. plan packaging for Java/C++ robot-side libraries and dashboard-side adapters.
 
+Current implementation checkpoint:
+
+- SmartDashboard Native Link now defaults to `tcp` at the plugin/runtime boundary
+  when `carrier` is omitted
+- explicit `shm` selection remains available for developer/support diagnostics and
+  carrier-isolation work
+- the current product intent remains: no normal team-facing SHM/TCP chooser.
+
 ## Decision rule for future sessions
 
 When a design choice appears, prefer the option that best preserves all of the following at once:

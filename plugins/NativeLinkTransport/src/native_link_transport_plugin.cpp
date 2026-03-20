@@ -198,11 +198,11 @@ namespace
 
     NativeLinkCarrierKind ReadCarrierKindSetting(const char* jsonText)
     {
-        NativeLinkCarrierKind kind = NativeLinkCarrierKind::SharedMemory;
+        NativeLinkCarrierKind kind = NativeLinkCarrierKind::Tcp;
         const std::string value = ReadPluginStringSetting(jsonText, "carrier", ToString(kind));
         if (!TryParseCarrierKind(value, kind))
         {
-            kind = NativeLinkCarrierKind::SharedMemory;
+            kind = NativeLinkCarrierKind::Tcp;
         }
         return kind;
     }
