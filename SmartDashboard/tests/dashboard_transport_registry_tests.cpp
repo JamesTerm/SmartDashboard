@@ -338,6 +338,42 @@ TEST(DashboardTransportRegistryTests, NativeLinkDefaultsToTcpCarrierWhenCarrierI
     server.Stop();
 }
 
+TEST(DashboardTransportRegistryTests, NativeLinkTcpTransportStartReturnsPromptlyWithoutAuthority)
+{
+    ASSERT_NE(EnsureCoreApp(), nullptr);
+
+    sd::transport::DashboardTransportRegistry registry;
+
+    sd::transport::ConnectionConfig config;
+    config.kind = sd::transport::TransportKind::Plugin;
+    config.transportId = "native-link";
+    config.ntClientName = "RegistryNonBlockingStart";
+    config.pluginSettingsJson = QString::fromStdString(
+        std::string("{\"carrier\":\"tcp\",\"host\":\"127.0.0.1\",\"port\":5898,\"channel_id\":\"native-link-no-server\"}")
+    );
+
+    std::unique_ptr<sd::transport::IDashboardTransport> transport = registry.CreateTransport(config);
+    ASSERT_NE(transport, nullptr);
+
+    const auto startTime = std::chrono::steady_clock::now();
+    const bool started = transport->Start(
+        [](const sd::transport::VariableUpdate&)
+        {
+        },
+        [](sd::transport::ConnectionState)
+        {
+        }
+    );
+    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - startTime
+    ).count();
+
+    EXPECT_TRUE(started);
+    EXPECT_LT(elapsedMs, 500);
+
+    transport->Stop();
+}
+
 TEST(DashboardTransportRegistryTests, NativeLinkTcpUsesDirectHostField)
 {
     ASSERT_NE(EnsureCoreApp(), nullptr);
