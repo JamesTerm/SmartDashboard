@@ -54,9 +54,16 @@ Replay controls live in the `Replay Controls` panel, which is docked at the bott
 - `B+`: add a user bookmark at current cursor time.
 - `Bx`: clear all user bookmarks for this session.
 - Speed selector: `0.25x`, `0.5x`, `1x`, `2x`.
+- `View -> Reset All Line Plots` (`Ctrl+Shift+R`): clears sample history in every active line plot.
 - Status bar replay readouts:
   - `t=...` shows current replay cursor time
   - `window=...` shows current visible timeline window span
+
+Replay reset helpers:
+
+- `View -> Clear line plots on rewind-to-start`: clears plots when `|◀` is used.
+- `View -> Clear line plots on backward seek`: clears plots when replay moves backward via scrub, marker jump, or keyboard step.
+- Both options are persisted between sessions.
 
 ## Timeline reference
 

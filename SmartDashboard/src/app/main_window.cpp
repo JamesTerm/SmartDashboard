@@ -29,6 +29,7 @@
 #include <QMenuBar>
 #include <QInputDialog>
 #include <QKeyEvent>
+#include <QKeySequence>
 #include <QLineEdit>
 #include <QMetaObject>
 #include <QPalette>
@@ -341,6 +342,45 @@ MainWindow::MainWindow(QWidget* parent)
     m_replayTimelineViewAction->setCheckable(true);
     m_replayTimelineViewAction->setChecked(true);
     m_replayTimelineViewAction->setEnabled(false);
+
+    viewMenu->addSeparator();
+    m_resetAllLinePlotsAction = viewMenu->addAction("Reset All Line Plots");
+    m_resetAllLinePlotsAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+R")));
+    m_resetAllLinePlotsAction->setShortcutContext(Qt::ApplicationShortcut);
+    m_resetAllLinePlotsAction->setStatusTip("Clear history in every visible line plot");
+    connect(m_resetAllLinePlotsAction, &QAction::triggered, this, &MainWindow::OnResetAllLinePlots);
+
+    m_clearLinePlotsOnRewindAction = viewMenu->addAction("Clear line plots on rewind-to-start");
+    m_clearLinePlotsOnRewindAction->setCheckable(true);
+    m_clearLinePlotsOnRewindAction->setStatusTip("Clear line plots when rewind-to-start is used");
+    connect(
+        m_clearLinePlotsOnRewindAction,
+        &QAction::toggled,
+        this,
+        [this](bool checked)
+        {
+            m_clearLinePlotsOnRewind = checked;
+
+            QSettings settings("SmartDashboard", "SmartDashboardApp");
+            settings.setValue("replay/clearLinePlotsOnRewind", checked);
+        }
+    );
+
+    m_clearLinePlotsOnBackwardSeekAction = viewMenu->addAction("Clear line plots on backward seek");
+    m_clearLinePlotsOnBackwardSeekAction->setCheckable(true);
+    m_clearLinePlotsOnBackwardSeekAction->setStatusTip("Clear line plots whenever replay moves backward in time");
+    connect(
+        m_clearLinePlotsOnBackwardSeekAction,
+        &QAction::toggled,
+        this,
+        [this](bool checked)
+        {
+            m_clearLinePlotsOnBackwardSeek = checked;
+
+            QSettings settings("SmartDashboard", "SmartDashboardApp");
+            settings.setValue("replay/clearLinePlotsOnBackwardSeek", checked);
+        }
+    );
 
     m_statusLabel = new QLabel("State: Disconnected", this);
     statusBar()->addPermanentWidget(m_statusLabel);
@@ -942,6 +982,8 @@ MainWindow::MainWindow(QWidget* parent)
     m_replayControlsPreferredVisible = settings.value("replay/controlsVisible", true).toBool();
     m_replayTimelinePreferredVisible = settings.value("replay/timelineVisible", true).toBool();
     m_replayMarkersPreferredVisible = settings.value("replay/markersVisible", true).toBool();
+    m_clearLinePlotsOnRewind = settings.value("replay/clearLinePlotsOnRewind", false).toBool();
+    m_clearLinePlotsOnBackwardSeek = settings.value("replay/clearLinePlotsOnBackwardSeek", false).toBool();
     if (m_telemetryFeatureViewAction != nullptr)
     {
         m_telemetryFeatureViewAction->setChecked(m_telemetryFeatureEnabled);
@@ -960,6 +1002,14 @@ MainWindow::MainWindow(QWidget* parent)
     {
         m_replayTimelineViewAction->setChecked(m_replayTimelinePreferredVisible);
         m_replayTimelineViewAction->setEnabled(false);
+    }
+    if (m_clearLinePlotsOnRewindAction != nullptr)
+    {
+        m_clearLinePlotsOnRewindAction->setChecked(m_clearLinePlotsOnRewind);
+    }
+    if (m_clearLinePlotsOnBackwardSeekAction != nullptr)
+    {
+        m_clearLinePlotsOnBackwardSeekAction->setChecked(m_clearLinePlotsOnBackwardSeek);
     }
     if (m_recordButton != nullptr)
     {
@@ -2314,8 +2364,13 @@ void MainWindow::OnPlaybackRewindToStart()
     }
 
     m_transport->SetPlaybackPlaying(false);
-    m_transport->SeekPlaybackUs(0);
+    SeekPlaybackToUs(0, true);
     UpdatePlaybackUiState();
+}
+
+void MainWindow::OnResetAllLinePlots()
+{
+    ResetAllLinePlots();
 }
 
 void MainWindow::OnPlaybackPlayPause()
@@ -2348,7 +2403,7 @@ void MainWindow::OnPlaybackCursorScrubbed(std::int64_t cursorUs)
         return;
     }
 
-    m_transport->SeekPlaybackUs(cursorUs);
+    SeekPlaybackToUs(cursorUs);
     UpdatePlaybackUiState();
 }
 
@@ -2376,7 +2431,7 @@ void MainWindow::OnPlaybackPreviousMarker()
         targetUs = m_replayMarkerTimesUs.front();
     }
 
-    m_transport->SeekPlaybackUs(targetUs);
+    SeekPlaybackToUs(targetUs);
     UpdatePlaybackUiState();
 }
 
@@ -2403,7 +2458,7 @@ void MainWindow::OnPlaybackNextMarker()
         targetUs = m_replayMarkerTimesUs.back();
     }
 
-    m_transport->SeekPlaybackUs(targetUs);
+    SeekPlaybackToUs(targetUs);
     UpdatePlaybackUiState();
 }
 
@@ -2419,7 +2474,7 @@ void MainWindow::OnReplayMarkerActivated(QListWidgetItem* item)
     }
 
     const std::int64_t markerUs = item->data(Qt::UserRole).toLongLong();
-    m_transport->SeekPlaybackUs(markerUs);
+    SeekPlaybackToUs(markerUs);
     UpdatePlaybackUiState();
 }
 
@@ -3231,7 +3286,7 @@ void MainWindow::StepPlaybackByUs(std::int64_t deltaUs)
 
     const std::int64_t cursorUs = m_transport->GetPlaybackCursorUs();
     const std::int64_t targetUs = std::max<std::int64_t>(0, cursorUs + deltaUs);
-    m_transport->SeekPlaybackUs(targetUs);
+    SeekPlaybackToUs(targetUs);
     UpdatePlaybackUiState();
 }
 
@@ -3272,6 +3327,39 @@ void MainWindow::keyPressEvent(QKeyEvent* event)
     }
 
     QMainWindow::keyPressEvent(event);
+}
+
+void MainWindow::ResetAllLinePlots()
+{
+    for (const auto& [_, tile] : m_tiles)
+    {
+        if (tile == nullptr || !tile->IsLinePlotWidget())
+        {
+            continue;
+        }
+
+        tile->ResetLinePlotGraph();
+    }
+}
+
+void MainWindow::SeekPlaybackToUs(std::int64_t targetUs, bool rewindToStart)
+{
+    if (!m_transport || !m_transport->SupportsPlayback())
+    {
+        return;
+    }
+
+    const std::int64_t clampedTargetUs = std::max<std::int64_t>(0, targetUs);
+    const std::int64_t currentUs = std::max<std::int64_t>(0, m_transport->GetPlaybackCursorUs());
+    const bool movedBackward = clampedTargetUs < currentUs;
+    const bool shouldClear = (rewindToStart && m_clearLinePlotsOnRewind)
+        || (movedBackward && m_clearLinePlotsOnBackwardSeek);
+    if (shouldClear)
+    {
+        ResetAllLinePlots();
+    }
+
+    m_transport->SeekPlaybackUs(clampedTargetUs);
 }
 
 void MainWindow::StartSessionRecording()
