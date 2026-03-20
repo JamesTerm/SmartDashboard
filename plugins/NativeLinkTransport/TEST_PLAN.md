@@ -164,6 +164,17 @@ Diagnostic policy:
 - use `shm` as the reference path when isolating new ordering/reconnect bugs in
   `tcp`.
 
+Build/run hygiene note:
+
+- SmartDashboard plugin rebuilds can fail if `SmartDashboardApp.exe` is still
+  running and holding the deployed plugin DLL open in `build/SmartDashboard`.
+- Preferred workflow for Native Link validation is:
+  1. stop SmartDashboard processes first
+  2. build plugin/app targets
+  3. launch probes or manual dashboards after the build completes
+- If a rebuild fails during the `copy_if_different` deploy step, treat it as a
+  runtime file-lock issue first rather than a transport regression.
+
 Current checkpoint additions:
 
 - validate carrier-name parsing independently from transport startup

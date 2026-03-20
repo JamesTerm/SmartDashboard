@@ -84,9 +84,12 @@ def wait_for_instance_count(expected: int, timeout_seconds: float) -> bool:
 
 def main() -> int:
     linger_seconds = 0.0
+    leave_running = False
     for i in range(1, len(sys.argv)):
         if sys.argv[i] == "--linger-seconds" and i + 1 < len(sys.argv):
             linger_seconds = float(sys.argv[i + 1])
+        if sys.argv[i] == "--leave-running":
+            leave_running = True
 
     if not APP_PATH.exists():
         print(f"missing_app={APP_PATH}")
@@ -137,10 +140,16 @@ def main() -> int:
 
     if linger_seconds > 0.0:
         # Ian: The shared-state probe reads per-process UI logs after this
-        # helper returns. Keep the dashboards alive briefly so those logs have a
-        # stable chance to flush and appear on disk.
+        # helper returns. Keep the dashboards alive briefly so queued retained
+        # updates have a stable chance to reach the UI thread before teardown.
         print(f"linger_seconds={linger_seconds}")
         time.sleep(linger_seconds)
+
+    if leave_running:
+        # Ian: Returning while the dashboards are still alive gives the parent
+        # probe a deterministic window to inspect real-process UI logs before a
+        # forced cleanup can race the last retained updates.
+        return 0
 
     first.poll()
     second.poll()

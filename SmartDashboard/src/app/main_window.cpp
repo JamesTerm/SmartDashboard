@@ -1318,6 +1318,17 @@ void MainWindow::OnConnectionStateChanged(int state)
 {
     m_connectionState = state;
 
+    QString stateText = "Disconnected";
+    if (state == static_cast<int>(sd::transport::ConnectionState::Connecting))
+    {
+        stateText = "Connecting";
+    }
+    else if (state == static_cast<int>(sd::transport::ConnectionState::Connected))
+    {
+        stateText = "Connected";
+    }
+    DebugLogUiEvent(QString("connection_state=%1").arg(stateText));
+
     const int connected = static_cast<int>(sd::transport::ConnectionState::Connected);
     if (state == connected)
     {
@@ -2640,6 +2651,8 @@ void MainWindow::StartTransport()
             }, Qt::QueuedConnection);
         }
     );
+
+    DebugLogUiEvent(QString("transport_start_result=%1").arg(started ? "ok" : "failed"));
 
     if (started)
     {

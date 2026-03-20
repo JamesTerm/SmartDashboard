@@ -38,6 +38,13 @@ def wait_for_log_pattern(path: Path, pattern: str, timeout_seconds: float) -> st
     return latest
 
 
+def latest_value_for_key(log_text: str, key: str) -> Optional[str]:
+    matches = re.findall(rf"update key={re.escape(key)} value=([^\r\n]+?) seq=", log_text)
+    if not matches:
+        return None
+    return matches[-1]
+
+
 def launch_authority_if_available() -> Optional[subprocess.Popen]:
     if not DEFAULT_AUTHORITY_EXE.exists():
         return None
@@ -56,14 +63,27 @@ def launch_authority_if_available() -> Optional[subprocess.Popen]:
     return process
 
 
+def close_dashboards() -> None:
+    subprocess.run(
+        ["powershell", "-NoProfile", "-Command", "Get-Process SmartDashboardApp -ErrorAction SilentlyContinue | Stop-Process -Force"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
 def main() -> int:
     first_log = DEBUG_DIR / "native_link_ui_dashboard-a.log"
     second_log = DEBUG_DIR / "native_link_ui_dashboard-b.log"
+    first_startup_log = DEBUG_DIR / "native_link_startup_dashboard-a.log"
+    second_startup_log = DEBUG_DIR / "native_link_startup_dashboard-b.log"
 
     # Ian: Delete stale probe artifacts up front. A false pass here would be
     # worse than a false failure because it would tell us two real dashboards
     # shared state when only old logs did.
-    for path in (first_log, second_log):
+    close_dashboards()
+
+    for path in (first_log, second_log, first_startup_log, second_startup_log):
         if path.exists():
             path.unlink()
 
@@ -71,7 +91,7 @@ def main() -> int:
 
     try:
         result = subprocess.run(
-            [sys.executable, str(SMOKE_HELPER), "--linger-seconds", "5"],
+            [sys.executable, str(SMOKE_HELPER), "--linger-seconds", "5", "--leave-running"],
             check=False,
             capture_output=True,
             text=True,
@@ -112,7 +132,7 @@ def main() -> int:
         required_patterns = [
             r"transport_start id=native-link",
             r"update key=Test/Auton_Selection/AutoChooser/selected value=Just Move Forward",
-            r"update key=TestMove value=3\.5",
+            r"update key=TestMove value=",
         ]
 
         # Ian: Keep the first shared-state proof intentionally small and explicit.
@@ -122,19 +142,39 @@ def main() -> int:
         for pattern in required_patterns:
             if re.search(pattern, log_a) is None:
                 print(f"dashboard_a_missing={pattern}")
+                startup_a = read_log(first_startup_log)
+                if startup_a:
+                    print("startup_dashboard_a=")
+                    print(startup_a.strip())
                 return 1
             if re.search(pattern, log_b) is None:
                 print(f"dashboard_b_missing={pattern}")
+                startup_b = read_log(second_startup_log)
+                if startup_b:
+                    print("startup_dashboard_b=")
+                    print(startup_b.strip())
                 return 1
 
+        latest_a = latest_value_for_key(log_a, "TestMove")
+        latest_b = latest_value_for_key(log_b, "TestMove")
+        if latest_a is None or latest_b is None:
+            print(f"latest_testmove_dashboard_a={latest_a}")
+            print(f"latest_testmove_dashboard_b={latest_b}")
+            return 1
+        if latest_a != latest_b:
+            print(f"testmove_mismatch dashboard_a={latest_a} dashboard_b={latest_b}")
+            return 1
+
         # Ian: The next threshold after shared startup state is a real cross-process
-        # write/read proof. One dashboard process republishes remembered TestMove on
-        # startup; the other dashboard must observe that same updated value through
-        # the shared Native Link authority instead of staying on its own private
-        # default.
+        # write/read proof. The remembered TestMove value can legitimately differ
+        # from the simulator's initial seed, but both real dashboard processes must
+        # converge on the same final value through the shared Native Link authority
+        # instead of keeping private per-process control state.
+        print(f"shared_testmove_value={latest_a}")
         print("native_link_shared_state_probe=ok")
         return 0
     finally:
+        close_dashboards()
         if authority is not None:
             authority.terminate()
             try:
