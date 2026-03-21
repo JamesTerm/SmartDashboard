@@ -12,7 +12,8 @@
 
 ## Active Native Link context
 
-- Branch baseline is now the pre-merge Native Link TCP checkpoint on `feature/native-link-tcpip-carrier`.
+- Current stable branch head is `dc69ecd` on `feature/native-link-tcpip-carrier`.
+- Baseline comparison repo is parked at `c8a1f0e` in `D:\code\SmartDashboard_baseline` for future regression checks.
 - `plugins/NativeLinkTransport/include/native_link_carrier_client.h` is the active client-side carrier boundary.
 - `shm` remains the diagnostic/reference backend and must stay hot-swappable even though normal runtime Native Link now defaults to TCP at the plugin boundary.
 - SmartDashboard currently has a localhost TCP client/test-server path under that boundary:
@@ -22,6 +23,19 @@
   - `{"carrier":"shm","channel_id":"..."}`
   - `{"carrier":"tcp","host":"127.0.0.1","port":5810,"channel_id":"..."}`
 - `SMARTDASHBOARD_BUILD_PLUGIN_NATIVE_LINK` stays `OFF` by default outside focused validation.
+
+## Current SmartDashboard startup/defaults state
+
+- SmartDashboard-local direct remembered-control persistence is now compile-time gated off by default.
+- Startup widget hydration now uses temporary UI-only defaults instead of reviving old persistence behavior.
+- Temporary defaults currently seed:
+  - bool widgets -> `false`
+  - numeric widgets -> `0.0`
+  - chooser widgets -> first available option
+  - string display/edit widgets -> empty string
+- Temporary defaults are not transport truth, are not written to `QSettings`, and must be replaced by the first real transport value.
+- `Clear Widgets` plus runtime `Load Layout` now reapplies temporary defaults correctly.
+- Remaining startup values can still come from retained transport state or authority/test seeds; that is separate from dashboard-owned persistence.
 
 ## Strategy reminders
 
@@ -34,6 +48,6 @@
 
 ## Immediate next-session focus
 
-1. User testing / pre-merge verification of the Native Link TCP checkpoint.
+1. If needed, add runtime toggles for startup default seeding instead of relying only on compile-time flags.
 2. Keep `Robot_Simulation` as the first reference authority/example, but avoid trapping reusable authority logic inside app-specific code.
 3. For any follow-up fix, rerun the SmartDashboard SHM probe, SmartDashboard TCP runtime probe, SmartDashboard Native Link `ctest` slice, and focused Robot_Simulation Native Link tests.

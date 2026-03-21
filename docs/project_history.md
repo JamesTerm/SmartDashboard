@@ -7,6 +7,22 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-20 - Startup defaults without persistence rollback
+
+- Stabilized the post-persistence-cleanup startup experience on `feature/native-link-tcpip-carrier`.
+- Disabled SmartDashboard-owned direct remembered-control persistence by default behind `SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS`.
+- Added temporary UI-only startup defaults behind `SMARTDASHBOARD_ENABLE_TEMPORARY_TILE_DEFAULTS` so widgets can hydrate without writing fake state back to transport or `QSettings`.
+- Current temporary default policy:
+  - bool widgets seed to `false`
+  - numeric widgets seed to `0.0`
+  - chooser widgets seed to first available option
+  - string display/edit widgets seed to empty string.
+- Reapplied temporary defaults after runtime layout loads, including the `Clear Widgets` -> `Load Layout` workflow.
+- Added focused regression coverage in:
+  - `SmartDashboard/tests/main_window_persistence_tests.cpp`
+  - `SmartDashboard/tests/variable_tile_tests.cpp`
+- Stable checkpoint commit: `dc69ecd` (`restore startup widget defaults without reviving persistence`).
+
 ## 2026-03-19 - Replay line-plot reset workflow
 
 - Added a global line-plot reset workflow for repeated replay diagnosis passes:

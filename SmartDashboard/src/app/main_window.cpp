@@ -2877,11 +2877,12 @@ void MainWindow::StartTransport()
                 }
             );
 
-            // Ian: Snapshot handling stops here now. Re-publishing remembered
-            // controls moved to `OnConnectionStateChanged(Connected)` so all
-            // dashboard instances get a full retained snapshot pass before any of
-            // them start asserting local operator-owned values back onto the
-            // authority.
+            // Ian: Snapshot handling stops here now. Any remembered-control
+            // republish still belongs in `OnConnectionStateChanged(Connected)` so
+            // all dashboard instances get a full retained snapshot pass before any
+            // of them start asserting local operator-owned values back onto the
+            // authority. The current default build disables remembered controls,
+            // but this ordering rule still matters if that feature is re-enabled.
             if (CurrentTransportUsesRememberedControlValues())
             {
                 ApplyRememberedControlValuesToTiles();

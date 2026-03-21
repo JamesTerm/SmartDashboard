@@ -8,7 +8,7 @@ There are two different ways a value can show up on startup:
 
 - SmartDashboard-local persistence
   - dashboard-owned remembered values restored from `QSettings`
-  - intended only for `Direct` operator-control widgets
+  - now compile-time gated off by default; older notes here describe the original `Direct`-only model
 - transport-retained state
   - authority-owned retained/live values replayed by the selected transport
   - applies even when local persistence is empty.
@@ -64,9 +64,9 @@ Relevant file:
 
 Rules we locked in:
 
-- remembered controls are only valid for `Direct`
+- remembered controls were scoped to `Direct`, but are now disabled by default behind `SMARTDASHBOARD_ENABLE_DIRECT_REMEMBERED_CONTROLS`
 - telemetry updates must not create remembered values
-- only explicit local control edits may create or update remembered values.
+- only explicit local control edits may create or update remembered values when that feature is enabled.
 
 ### 4. Control edit handlers
 
@@ -141,9 +141,10 @@ What we found:
 - pre-existing layout tiles could look alive before a real authority update arrived
 - slider/chooser widgets especially made this easy to misread as persistence.
 
-Fix:
+Fix evolution:
 
-- tiles now have an explicit `No data` placeholder state until a real value arrives.
+- tiles gained an explicit `No data` placeholder state until a real value arrives
+- current stable behavior now seeds temporary UI-only defaults for selected widget classes so startup/layout reload is usable without reviving persistence.
 
 ### 9. Direct transport retained replay
 
@@ -223,8 +224,10 @@ Relevant tests:
 
 - `MainWindowPersistenceTests.NativeLinkTelemetryUpdatesDoNotPopulateRememberedControls`
 - `MainWindowPersistenceTests.DirectTelemetryUpdatesDoNotCreateRememberedControls`
-- `MainWindowPersistenceTests.DirectControlEditsStillPersistRememberedControls`
-- `MainWindowPersistenceTests.DirectSliderEditUpdatesRememberedValueAcrossReopen`
+- `MainWindowPersistenceTests.RememberedControlsStayDisabledByDefaultEvenOnDirect`
+- `MainWindowPersistenceTests.ClearWidgetsThenReloadLayoutReappliesTemporaryDefaults`
+- `VariableTileTests.TemporaryDefaultYieldsToFirstLiveValue`
+- `VariableTileTests.EmptyTemporaryStringDefaultSuppressesNoDataPlaceholder`
 - `TileControlWidgetTests.DoubleSliderEmitsEditedValueWhenInteractive`
 
 Those tests should be the first place to extend if another startup/persistence bug appears.
