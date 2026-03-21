@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <chrono>
 #include <cstdint>
@@ -1126,6 +1127,7 @@ namespace sd::transport
             PluginDashboardTransport(const sd_transport_plugin_descriptor_v1* descriptor, ConnectionConfig config)
                 : m_descriptor(descriptor)
                 , m_config(std::move(config))
+                , m_alive(std::make_shared<std::atomic<bool>>(true))
             {
             }
 
@@ -1184,6 +1186,14 @@ namespace sd::transport
 
             void Stop() override
             {
+                // Signal all pending queued callbacks that this object is going away
+                // before we call into the plugin's stop(). The plugin's stop() joins
+                // the worker thread and may fire onConnectionState synchronously on
+                // that thread; if it posts a QueuedConnection lambda, the lambda
+                // captures m_alive by value and will bail out safely instead of
+                // dereferencing the already-destroyed PluginDashboardTransport.
+                m_alive->store(false, std::memory_order_release);
+
                 if (m_instance != nullptr && m_descriptor != nullptr && m_descriptor->transport_api != nullptr && m_descriptor->transport_api->stop != nullptr)
                 {
                     m_descriptor->transport_api->stop(m_instance);
@@ -1238,6 +1248,10 @@ namespace sd::transport
                     return;
                 }
 
+                // Capture alive guard by value so the lambda is safe even if
+                // this PluginDashboardTransport is destroyed before it executes.
+                auto alive = self->m_alive;
+
                 VariableUpdate update;
                 update.key = QString::fromUtf8(key);
                 update.seq = seq;
@@ -1275,10 +1289,16 @@ namespace sd::transport
 	                // thread. Queue them onto the main thread before touching the
 	                // stored callback so both dashboard instances use the same UI
 	                // delivery path even after merged app changes alter startup work.
+	                // Capture alive by value so the lambda is a no-op if this
+	                // PluginDashboardTransport has already been destroyed.
 	                QMetaObject::invokeMethod(
 	                    qApp,
-	                    [self, update]()
+	                    [self, alive, update]()
 	                    {
+	                        if (!alive->load(std::memory_order_acquire))
+	                        {
+	                            return;
+	                        }
 	                        if (self->m_onVariableUpdate != nullptr)
 	                        {
 	                            self->m_onVariableUpdate(update);
@@ -1296,11 +1316,18 @@ namespace sd::transport
                     return;
                 }
 
+                // Capture alive guard so the queued lambda cannot use self
+                // after the transport has been destroyed.
+                auto alive = self->m_alive;
 	                const ConnectionState connectionState = ToConnectionState(state);
 	                QMetaObject::invokeMethod(
 	                    qApp,
-	                    [self, connectionState]()
+	                    [self, alive, connectionState]()
 	                    {
+	                        if (!alive->load(std::memory_order_acquire))
+	                        {
+	                            return;
+	                        }
 	                        if (self->m_onConnectionState != nullptr)
 	                        {
 	                            self->m_onConnectionState(connectionState);
@@ -1329,6 +1356,10 @@ namespace sd::transport
             QByteArray m_ntHostUtf8;
             QByteArray m_ntClientNameUtf8;
             QByteArray m_replayFilePathUtf8;
+            // Shared alive flag: set to false in Stop() before calling the plugin's
+            // stop(). Queued lambdas posted by worker-thread callbacks capture this
+            // by value and bail out without touching `self` once it is false.
+            std::shared_ptr<std::atomic<bool>> m_alive;
         };
     }
 

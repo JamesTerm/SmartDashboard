@@ -58,11 +58,27 @@
 #include <QtCore/QPoint>
 
 #include <chrono>
+
+#ifdef _DEBUG
+#include <QLocalServer>
+#include <QLocalSocket>
+#endif
 #include <fstream>
 #include <limits>
 
 namespace
 {
+    // Ian: This allowlist is intentional and narrow by design.  It gates the
+    // DebugLogUiEvent path in OnVariableUpdate so only harness-relevant keys
+    // write to the headless UI log that automated scripts parse.  ALL delivered
+    // keys still create tiles and receive live updates — this function only
+    // controls which keys are noise-filtered out of the debug log.
+    //
+    // Ian: Heading and Travel_Heading ARE delivered (tiles are created, sequence
+    // gap analysis confirms receipt) but are NOT in this list because they are
+    // not currently used by the automated stress/verification scripts.  If you
+    // add a new key to the harness scripts, add it here too — otherwise the
+    // scripts will see zero log lines for it even though the transport is fine.
     bool IsHarnessFocusKey(const QString& key)
     {
         return key == "Test/AutonTest"
@@ -1130,6 +1146,32 @@ MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
     }
     ApplyTemporaryDefaultValuesToTiles();
     LoadWindowGeometry();
+
+#ifdef _DEBUG
+    // Debug-only named-pipe command channel so automation scripts can reliably
+    // trigger connect/disconnect without fragile keyboard injection.
+    // Channel name: "SmartDashboardApp_DebugCmd_<PID>"
+    // Supported commands (newline-terminated): "disconnect\n", "connect\n"
+    {
+        const QString serverName = QString("SmartDashboardApp_DebugCmd_%1")
+            .arg(static_cast<qint64>(QCoreApplication::applicationPid()));
+        m_debugCommandServer = new QLocalServer(this);
+        QLocalServer::removeServer(serverName); // clean up any stale socket
+        if (m_debugCommandServer->listen(serverName))
+        {
+            DebugLogUiEvent(QString("debug_cmd_server=listening name=%1").arg(serverName));
+            connect(m_debugCommandServer, &QLocalServer::newConnection,
+                    this, &MainWindow::OnDebugCommandReceived);
+        }
+        else
+        {
+            DebugLogUiEvent(QString("debug_cmd_server=failed name=%1 err=%2")
+                .arg(serverName)
+                .arg(m_debugCommandServer->errorString()));
+        }
+    }
+#endif
+
     if (startTransportOnInit)
     {
         StartTransport();
@@ -2228,6 +2270,41 @@ void MainWindow::OnDisconnectTransport()
     StopTransport();
     UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
 }
+
+#ifdef _DEBUG
+void MainWindow::OnDebugCommandReceived()
+{
+    while (m_debugCommandServer && m_debugCommandServer->hasPendingConnections())
+    {
+        QLocalSocket* socket = m_debugCommandServer->nextPendingConnection();
+        // Read the full command (wait briefly for data to arrive)
+        if (!socket->waitForReadyRead(500))
+        {
+            socket->deleteLater();
+            continue;
+        }
+        const QString cmd = QString::fromUtf8(socket->readAll()).trimmed().toLower();
+        DebugLogUiEvent(QString("debug_cmd_received cmd=%1").arg(cmd));
+        socket->write("ok\n");
+        socket->flush();
+        socket->deleteLater();
+
+        if (cmd == "disconnect")
+        {
+            if (m_connectionConfig.kind != sd::transport::TransportKind::Replay)
+            {
+                StopTransport();
+                UpdateWindowConnectionText(
+                    static_cast<int>(sd::transport::ConnectionState::Disconnected));
+            }
+        }
+        else if (cmd == "connect")
+        {
+            StartTransport();
+        }
+    }
+}
+#endif
 
 void MainWindow::OnUseDirectTransport()
 {

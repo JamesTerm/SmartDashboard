@@ -7,6 +7,54 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-21 - Native Link SHM transport declared stable; live telemetry fix and stress hardening
+
+### Live telemetry gap — root cause and fix
+
+- **Root cause:** `NativeLink::Core::PublishInternal` called `FindTopic()` and rejected any write with `WriteRejectReason::UnknownTopic` if the topic was not pre-registered. `RegisterDefaultTopics` only pre-registered 7 topics. `TeleAutonV2` publishes ~26 keys per loop (Velocity, X_ft, Y_ft, Heading, Travel_Heading, Rotation Velocity, all wheel velocities/voltages/encoders, swivel voltages/raws, predicted_*). All of those extra keys were silently rejected — no error, no crash, just a missing value.
+- **Why Direct Connect worked and Native Link SHM did not:** `DirectPublisherStub::PublishDouble` writes to a raw ring buffer with no topic registration gate. Native Link's explicit topic contract is stricter by design.
+- **Fix in `NativeLink.cpp` `Core::PublishInternal`:** When `allowServerOnly=true` (server-originated write) and the topic is not found, auto-register it as `TopicKind::State`, `RetentionMode::LatestValue`, `replayOnSubscribe=true`, `WriterPolicy::ServerOnly`, value type inferred from the incoming value. Client-originated writes on unknown topics are still rejected, preserving the server-authoritative ownership model.
+- **Verified with `tools/native_link_live_telemetry_verify.py` (new script):** PASS — Velocity (57 distinct values), Y_ft (56 distinct), Wheel_fl_Velocity (12 distinct), all 7 required keys delivered, 410+ updates each across a 10-second headless collection window.
+
+### Disconnect stress script — 4 synchronization bugs fixed
+
+- **Bug 1:** Cycle 1 fired `disconnect` while the dashboard was still in Connecting state (had not yet drained the initial SHM snapshot). Fixed by waiting for `connection_state=Connected` (Nth occurrence) before the first cycle.
+- **Bug 2:** Cycles 44-50 saw `connected_state_timeout` because the authority's hardcoded `60000 ms` run expired before 50 cycles × ~1.2s completed. Fixed by computing authority run time from `max(60000, cycles × (pause_ms×2 + 15000) + 20000)`.
+- **Bug 3:** `connect` was fired without verifying the dashboard had actually reached `Disconnected` first. Fixed by polling the window title for "Disconnected" before each reconnect.
+- **Bug 4:** The script had a duplicate function body (lines 255-443 were a verbatim copy of lines 148-252). Removed.
+- **Result:** 50/50 cycles PASS, zero warnings, clean 50-cycle run with `pause_ms=400`.
+
+### SHM wire protocol — fully documented
+
+- SHM name: `Local\NativeLink.Shared.native-link-default`
+- `SharedState` = 10,825,000 bytes; `SharedClientSlot` = 1,353,112 bytes × 8; `SharedMessage` = 1,320 bytes
+- Ring buffer: monotonically increasing `serverWriteIndex`/`clientReadIndex`, slot = `messages[index % 1024]`
+- Value encoding: Bool=1 byte, Double=8 bytes LE IEEE-754, String=raw UTF-8, StringArray=`[u32 len][bytes]…`
+- Connect = CAS `clientTag` 0→nonzero; zero `snapshotCompleteSessionId` to trigger snapshot; heartbeat timeout = 5s
+
+### Dashboard log filtering insight documented
+
+- `IsHarnessFocusKey()` in `main_window.cpp` is an intentional narrow allowlist for the `DebugLogUiEvent` path.
+- `Heading` and `Travel_Heading` ARE delivered (sequence gap analysis: ~16 gaps per cycle = ~16 non-logged auto-registered topics) but are not in the allowlist.
+- Tiles are created for all delivered keys via the `m_nextTileOffset` cascade — the allowlist only controls what appears in the headless debug log.
+
+### New tooling
+
+- `tools/native_link_live_telemetry_verify.py` — headless telemetry delivery verifier; runs authority + dashboard, collects 10s of updates, asserts required keys and live value change.
+
+### `Ian:` comments added
+
+- `NativeLink.cpp` `PublishInternal` — server-authoritative ownership model and auto-register safety rationale
+- `NativeLinkAuthorityHelpers.cpp` `RegisterDefaultTopics` — explains why the list is minimal and where the auto-register path is the correct home for robot-code keys
+- `main_window.cpp` `IsHarnessFocusKey` — explains intentional allowlist scope and common trap (missing from allowlist ≠ not delivered)
+- `native_link_shm_disconnect_stress.py` — explains occurrence-count wait pattern, dynamic authority lifetime formula, and SHM snapshot drain motivation
+- `native_link_live_telemetry_verify.py` — explains REQUIRED_KEYS design and original root cause
+
+### Declaration
+
+- SHM transport is declared **stable** for the current session baseline.
+- Next session target: Native Link TCP carrier work (SHM remains hot-swappable reference backend).
+
 ## 2026-03-20 - Startup defaults without persistence rollback
 
 - Added a debug-only Native Link carrier override to SmartDashboard transport settings so local validation can quickly compare `shm` and `tcp` against the same dashboard UI path.
