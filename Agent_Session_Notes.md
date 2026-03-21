@@ -57,11 +57,33 @@
 - 21/21 `NativeLinkTransport_tests` + 32/32 `SmartDashboard_tests` pass.
 - No known blocking items. The two previously listed "potential future work" items (write-ack on TCP Publish, `--cycles N` on telemetry verify script) are confirmed non-blocking follow-on work, not merge gates.
 
+## Hand-off checkpoint commit hashes
+
+| Repo | Branch | Commit |
+|---|---|---|
+| SmartDashboard | `feature/native-link-tcpip-carrier` | `02db17b` (session notes + gitignore checkpoint) |
+| Robot_Simulation | `feature/native-link-tcpip-carrier` | `c5e14b3` (three DS TCP blockers fixed) |
+
+Both branches are 1 commit ahead of origin (not yet pushed). Push both when Ian confirms the manual test passes and immediately before merging.
+
 ## Next session starting point
 
-- Ian is doing one final manual test (DS + SmartDashboard end-to-end, Release builds, cross-machine to 192.168.1.159) before merging.
-- If that passes: merge `feature/native-link-tcpip-carrier` → `main` in both repos.
-- After merge, candidate follow-on tasks (pick any, none are blocking):
-  - Write-ack protocol on TCP `Publish` (currently fire-and-forget).
-  - Extend `native_link_live_telemetry_verify.py --carrier tcp` with `--cycles N`.
-  - Wire a UI toolbar/status-bar Connect button as a more prominent surface for `auto_connect:false` workflows.
+**All code is done. The only remaining gate is Ian's manual test.**
+
+Test procedure:
+1. Build Robot_Simulation in Release from `feature/native-link-tcpip-carrier`.
+2. Copy `DriverStation.exe` to the DS machine (192.168.1.159). Ensure `DriverStation.ini` has `[Connection]\nMode=3\nNativeLinkCarrier=tcp` (or delete the INI to accept the Release default).
+3. Launch `DriverStation.exe` on the DS machine. Confirm it starts and the Native Link TCP server binds (check that Windows Firewall prompts and you allow it).
+4. On the local machine, build SmartDashboard in Release. Launch `SmartDashboardApp.exe`. Select Native Link transport, set Host/IP to `192.168.1.159`, port `5810`.
+5. Click Connect. Title bar should transition: `Connecting…` → `Connected`.
+6. Confirm live telemetry tiles populate.
+
+If test passes:
+- Merge `feature/native-link-tcpip-carrier` → `main` in Robot_Simulation.
+- Merge `feature/native-link-tcpip-carrier` → `main` in SmartDashboard.
+- Push both `main` branches.
+
+After merge, candidate follow-on tasks (pick any, none are blocking):
+- Write-ack protocol on TCP `Publish` (currently fire-and-forget).
+- Extend `native_link_live_telemetry_verify.py --carrier tcp` with `--cycles N`.
+- Wire a UI toolbar/status-bar Connect button as a more prominent surface for `auto_connect:false` workflows.

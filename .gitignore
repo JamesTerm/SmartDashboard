@@ -52,3 +52,9 @@ CMakeUserPresets.json
 
 # Repo-local debug output
 .debug/
+
+# Temporary diagnostic / scratch scripts (not for review or commit)
+tools/_tmp_*.py
+
+# Windows NUL device artifact (created by accidental redirect to "nul")
+nul
