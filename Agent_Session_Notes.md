@@ -50,13 +50,17 @@
 - TCP and SHM transports are both stable and at parity.
 - DS root-cause fix is complete — port 5810 now binds on a clean DS launch. See `docs/journal/2026-03-21-ds-env-root-cause.md`.
 - Connect/Disconnect menu items are now state-aware: Connect greys out while transport is running; Disconnect greys out while stopped.
+- DS TCP bind address fixed: `NATIVE_LINK_HOST` changed from `127.0.0.1` to `0.0.0.0` so the server is reachable cross-machine. Committed `c5e14b3` in Robot_Simulation.
+- DS Debug carrier combo regression fixed: switching the combo no longer flips the connection mode to DirectConnect. Committed `c5e14b3`.
+- DS INI default fixed: `LoadPersistedNativeLinkCarrier` now derives its fallback from `GetDefaultNativeLinkCarrier()` instead of hardcoding `L"shm"`. Committed `c5e14b3`.
+- **TCP wire protocol verified:** Full comparison of DS-side (`NativeLinkTcp.h`, `NativeLinkTcp.cpp`) vs SD-side (`native_link_tcp_protocol.h`, `native_link_ipc_protocol.h`, `native_link_tcp_client.cpp`) shows **no mismatches**. Magic `0x4E4C5443`, version `1`, all enum values, all struct layouts, and `SharedMessage` field layouts are identical on both sides. The previous session hypothesis about a protocol mismatch was **disproved**.
 - 21/21 `NativeLinkTransport_tests` + 32/32 `SmartDashboard_tests` pass.
 - No known blocking items. The two previously listed "potential future work" items (write-ack on TCP Publish, `--cycles N` on telemetry verify script) are confirmed non-blocking follow-on work, not merge gates.
 
 ## Next session starting point
 
-- Ian is doing one final manual test (DS + SmartDashboard end-to-end) before merging.
-- If that passes: merge `feature/native-link-tcpip-carrier` → `main`.
+- Ian is doing one final manual test (DS + SmartDashboard end-to-end, Release builds, cross-machine to 192.168.1.159) before merging.
+- If that passes: merge `feature/native-link-tcpip-carrier` → `main` in both repos.
 - After merge, candidate follow-on tasks (pick any, none are blocking):
   - Write-ack protocol on TCP `Publish` (currently fire-and-forget).
   - Extend `native_link_live_telemetry_verify.py --carrier tcp` with `--cycles N`.

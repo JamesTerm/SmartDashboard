@@ -7,6 +7,64 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-21 - TCP wire protocol verified: no mismatches between DS server and SD client
+
+Full side-by-side comparison of all DS-side and SD-side TCP protocol definitions:
+
+| Item | DS (`NativeLinkTcp.h`) | SD (`native_link_tcp_protocol.h`) | Result |
+|---|---|---|---|
+| `kFrameMagic` | `0x4E4C5443` | `0x4E4C5443` | ✅ Match |
+| `kFrameVersion` | `1` | `1` | ✅ Match |
+| `FrameHeader` layout | `u32 magic, u16 version, u16 kind, u32 payloadBytes` | same | ✅ Match |
+| `FrameKind` enum | ClientHello=1, ServerHello=2, ServerMessage=3, ClientPublish=4, Heartbeat=5 | same | ✅ Match |
+| `HelloPayload` | `char channelId[64], char clientId[64]` | same | ✅ Match |
+| `ServerHelloPayload` | `u64 serverSessionId` | same | ✅ Match |
+| `HeartbeatPayload` | `u64 serverSessionId` | same | ✅ Match |
+| `SharedMessage` field layout | 4×u32, 3×u64, char[192], char[64], unsigned char[1024] | same (different namespace alias, identical struct) | ✅ Match |
+
+The previous session hypothesis about a wire-level protocol mismatch was **disproved**. The DS server's `ReceiveFrame` check at `NativeLinkTcp.cpp:125` will accept the SD client's frames — the magic and version bytes are identical.
+
+The DS `NativeLinkSharedMemory.h` includes the SD's `native_link_ipc_protocol.h` via a relative path (`../../../../plugins/NativeLinkTransport/include/native_link_ipc_protocol.h`) and aliases `sd::nativelink::SharedMessage` locally. The SD client uses `ipc::SharedMessage` which resolves to `sd::nativelink::ipc::SharedMessage` from its own copy of the same header. The two copies have different namespace nesting (`sd::nativelink` vs `sd::nativelink::ipc`) but identical struct field layout — so wire encoding is the same.
+
+**Conclusion:** The only things that were blocking cross-machine TCP were the three DS fixes now committed in `c5e14b3` (bind address `0.0.0.0`, INI default, carrier combo bounce). No protocol changes are needed.
+
+---
+
+## 2026-03-21 - DS Native Link TCP bind address fixed: 127.0.0.1 → 0.0.0.0
+
+- **Problem:** `ApplyNativeLinkEnvironment` in `DriverStation.cpp` hardcoded `NATIVE_LINK_HOST=127.0.0.1`. This value flowed into `ServerConfig.host` via `LoadServerConfigFromEnvironment` and was used as the bind address in `TcpServerCarrier::Start()` (`NativeLinkTcp.cpp:173`). A loopback-bound socket is invisible to any other machine — the kernel silently drops all cross-machine packets before they reach the process, which meant SmartDashboard on a remote machine at `192.168.1.x` could never connect. Windows Firewall would also never prompt because no external packet reached the socket (explaining the DS window "disappearing" — the firewall consent dialog was appearing and being dismissed for a connection that would have failed anyway).
+- **Comparison:** Legacy NT's `SocketServerStreamProvider` uses `htonl(INADDR_ANY)` (0.0.0.0) — all interfaces. That is why Legacy NT works cross-machine and Native Link TCP did not.
+- **Fix:** Changed `NATIVE_LINK_HOST` to `"0.0.0.0"` in `ApplyNativeLinkEnvironment`. The TCP server now binds all interfaces, matching Legacy NT behavior. Windows will prompt the firewall on the first inbound connection from a remote machine; allow once and it works permanently.
+- **Rule captured:** TCP server bind address must be `0.0.0.0` (all interfaces) for any cross-machine use case. `127.0.0.1` is loopback-only and correct only for same-machine testing.
+
+---
+
+## 2026-03-21 - DS Debug carrier combo regression fixed
+
+### Root cause
+When the user switched the carrier combo (SHM ↔ TCP/IP) while in Native Link mode, the `CBN_SELCHANGE` handler called:
+```cpp
+ApplyConnectionMode(ConnectionMode::eDirectConnect);
+ApplyConnectionMode(ConnectionMode::eNativeLink);
+```
+The intent was to restart the NativeLink server with the new carrier env that had just been written. But `ApplyConnectionMode` calls `SetConnectionMode` on the robot tester, which does a full mode teardown/restart. The intermediate `eDirectConnect` transition was observable: the connection mode combo visibly snapped to DirectConnect, the DS was left in an unusable state in Debug, and the carrier combo was left in an inconsistent enabled/disabled state.
+
+### Fix
+Replaced the two-step bounce with a single direct call:
+```cpp
+if (s_pRobotTester && s_pRobotTester->GetConnectionMode() == ConnectionMode::eNativeLink)
+    s_pRobotTester->SetConnectionMode(ConnectionMode::eNativeLink);
+```
+This re-applies the current mode (and therefore picks up the newly written `NATIVE_LINK_CARRIER` env) without ever surfacing a DirectConnect state to the user or to `ApplyConnectionMode`. The connection mode combo stays on Native Link throughout.
+
+### Secondary fix — `LoadPersistedNativeLinkCarrier` INI default
+The `GetPrivateProfileStringW` call in `LoadPersistedNativeLinkCarrier` was using a hardcoded `L"shm"` as the default string. On a clean machine (no `DriverStation.ini`) in Release, this would cause the INI-path to return `SharedMemory` even though `GetDefaultNativeLinkCarrier()` returns `Tcp`. Fixed by computing the default string from `GetDefaultNativeLinkCarrier()` so both code paths agree.
+
+### Rule captured
+Never use `ApplyConnectionMode` to bounce through an intermediate mode as a restart trick. `ApplyConnectionMode` is a user-visible state transition function — it updates the combo, persists to INI, and calls `SetConnectionMode` which does a full teardown. Use `SetConnectionMode` directly on the robot tester when a silent restart with updated env is needed.
+
+---
+
 ## 2026-03-21 - Connect/Disconnect menu state-aware enable/disable
 
 - **Problem:** Connect and Disconnect menu items were always enabled (unless in replay mode), making them misleading — clicking Connect while already connected, or Disconnect while already stopped, was silently a no-op.
