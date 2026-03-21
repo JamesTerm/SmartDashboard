@@ -162,6 +162,13 @@ TEST(DashboardTransportRegistryTests, NativeLinkPluginTransportStartsAndPublishe
 
 TEST(DashboardTransportRegistryTests, NativeLinkPluginTcpTransportFailsWithoutTcpAuthority)
 {
+    // Ian: Start() is non-blocking — it always returns true and drives
+    // connection state asynchronously via callbacks. The correct way to verify
+    // that a missing authority is detected is to use auto_connect=false (so the
+    // client parks after the first failed attempt rather than retrying forever)
+    // and then wait for a Disconnected callback. Previously this test relied on
+    // the old synchronous blocking connect that returned false immediately;
+    // that behaviour was replaced when TCP startup was made non-blocking.
     ASSERT_NE(EnsureCoreApp(), nullptr);
 
     const std::string channelId = MakeUniqueChannel("native-link-registry-missing-tcp-authority");
@@ -178,22 +185,52 @@ TEST(DashboardTransportRegistryTests, NativeLinkPluginTcpTransportFailsWithoutTc
         + std::to_string(port)
         + std::string(",\"channel_id\":\"")
         + channelId
-        + "\"}"
+        + std::string(",\"auto_connect\":false}")
     );
 
     std::unique_ptr<sd::transport::IDashboardTransport> transport = registry.CreateTransport(config);
     ASSERT_NE(transport, nullptr);
 
+    std::mutex mutex;
+    std::vector<sd::transport::ConnectionState> states;
+
     const bool started = transport->Start(
         [](const sd::transport::VariableUpdate&)
         {
         },
-        [](sd::transport::ConnectionState)
+        [&mutex, &states](sd::transport::ConnectionState state)
         {
+            std::lock_guard<std::mutex> lock(mutex);
+            states.push_back(state);
         }
     );
 
-    EXPECT_FALSE(started);
+    // Non-blocking Start() always returns true; failure manifests as Disconnected callback.
+    EXPECT_TRUE(started);
+
+    // With auto_connect=false the client fires Disconnected after the first
+    // failed attempt and parks. Wait up to 5 s (kConnectTimeoutMs = 3 s + margin).
+    ASSERT_TRUE(WaitForCondition([&mutex, &states]()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (sd::transport::ConnectionState s : states)
+        {
+            if (s == sd::transport::ConnectionState::Disconnected)
+            {
+                return true;
+            }
+        }
+        return false;
+    }, 5000));
+
+    // Must never have reached Connected.
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (sd::transport::ConnectionState s : states)
+        {
+            EXPECT_NE(s, sd::transport::ConnectionState::Connected);
+        }
+    }
 
     transport->Stop();
 }
@@ -341,6 +378,13 @@ TEST(DashboardTransportRegistryTests, NativeLinkDefaultsToTcpCarrierWhenCarrierI
 
 TEST(DashboardTransportRegistryTests, NativeLinkTcpTransportFailsWithoutAuthority)
 {
+    // Ian: Start() is non-blocking — it always returns true immediately and
+    // connects in a background thread. This test verifies two things that were
+    // previously conflated into one:
+    //   1. Start() returns promptly (the original non-blocking intent).
+    //   2. No Connected callback fires when no server is listening.
+    // We use auto_connect=false so the client parks in Disconnected after the
+    // first failed attempt rather than retrying for the lifetime of the test.
     ASSERT_NE(EnsureCoreApp(), nullptr);
 
     sd::transport::DashboardTransportRegistry registry;
@@ -350,27 +394,56 @@ TEST(DashboardTransportRegistryTests, NativeLinkTcpTransportFailsWithoutAuthorit
     config.transportId = "native-link";
     config.ntClientName = "RegistryNonBlockingStart";
     config.pluginSettingsJson = QString::fromStdString(
-        std::string("{\"carrier\":\"tcp\",\"host\":\"127.0.0.1\",\"port\":5898,\"channel_id\":\"native-link-no-server\"}")
+        std::string("{\"carrier\":\"tcp\",\"host\":\"127.0.0.1\",\"port\":5898,\"channel_id\":\"native-link-no-server\",\"auto_connect\":false}")
     );
 
     std::unique_ptr<sd::transport::IDashboardTransport> transport = registry.CreateTransport(config);
     ASSERT_NE(transport, nullptr);
+
+    std::mutex mutex;
+    std::vector<sd::transport::ConnectionState> states;
 
     const auto startTime = std::chrono::steady_clock::now();
     const bool started = transport->Start(
         [](const sd::transport::VariableUpdate&)
         {
         },
-        [](sd::transport::ConnectionState)
+        [&mutex, &states](sd::transport::ConnectionState state)
         {
+            std::lock_guard<std::mutex> lock(mutex);
+            states.push_back(state);
         }
     );
     const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - startTime
     ).count();
 
-    EXPECT_FALSE(started);
-    EXPECT_LT(elapsedMs, 5000);
+    // Non-blocking Start() must return true and return promptly (well under kConnectTimeoutMs).
+    EXPECT_TRUE(started);
+    EXPECT_LT(elapsedMs, 500);
+
+    // Wait for Disconnected callback — fires when the first connect attempt fails.
+    ASSERT_TRUE(WaitForCondition([&mutex, &states]()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (sd::transport::ConnectionState s : states)
+        {
+            if (s == sd::transport::ConnectionState::Disconnected)
+            {
+                return true;
+            }
+        }
+        return false;
+    }, 5000));
+
+    // Must never have reached Connected.
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        for (sd::transport::ConnectionState s : states)
+        {
+            EXPECT_NE(s, sd::transport::ConnectionState::Connected);
+        }
+    }
 
     transport->Stop();
 }

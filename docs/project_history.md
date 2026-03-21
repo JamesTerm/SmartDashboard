@@ -7,6 +7,17 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-21 - DS Native Link TCP root cause fixed: CRT/Win32 env desync
+
+- **Root cause:** `LoadServerConfigFromEnvironment()` in `Robot_Simulation/.../NativeLink.cpp` read `NATIVE_LINK_CARRIER` via `_dupenv_s` (CRT), while `ApplyNativeLinkEnvironment()` wrote it via `SetEnvironmentVariableA` (Win32). The CRT's env cache and the Win32 OS env block are separate stores that can diverge after process startup. The carrier read back as empty/default (`SharedMemory`) even though the Win32 block already had `"tcp"`, so port 5810 was never bound on a clean DS launch.
+- **Fix:** replaced `_dupenv_s` with `GetEnvironmentVariableA` (Win32) at `NativeLink.cpp:~104` so all reads in `LoadServerConfigFromEnvironment()` use the same Win32 layer as the write. Port 5810 now binds on a double-click/clean-env DS launch.
+- **Rule captured:** never mix `SetEnvironmentVariableA` (Win32 write) with `_dupenv_s` (CRT read) for the same variable in the same process. Use `GetEnvironmentVariableA` for both sides.
+- **Two stale SmartDashboard tests updated:** `NativeLinkPluginTcpTransportFailsWithoutTcpAuthority` and `NativeLinkTcpTransportFailsWithoutAuthority` were asserting `Start()` returns `false` — the old synchronous-blocking TCP behavior. With the non-blocking reconnecting client, `Start()` always returns `true` immediately; failure manifests as a `Disconnected` callback. Tests updated to use `auto_connect:false` and `WaitForCondition` for `Disconnected`.
+- **Test counts:** 21/21 `NativeLinkTransport_tests` + 32/32 `SmartDashboard_tests` pass.
+- **Verbose journal entry:** `docs/journal/2026-03-21-ds-env-root-cause.md`
+
+---
+
 ## 2026-03-21 - CMake build system hardening: gtest discovery fix, NativeLink always-on, solution folders
 
 ### gtest_discover_tests / MSB3073 build error fixed

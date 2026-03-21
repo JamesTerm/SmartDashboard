@@ -263,6 +263,19 @@ namespace sd::nativelink
         }
     }
 
+    // Ian: kReconnectRetryMs is intentionally short so that a robot-code
+    // restart (authority exits and relaunches) re-establishes the dashboard
+    // within ~1 s rather than the multi-second delay the OS TCP connect
+    // timeout would impose on a back-off scheme. Keep it >= the authority's
+    // own startup time (empirically ~300 ms for the test server).
+    constexpr std::uint32_t kReconnectRetryMs = 500;
+
+    // Ian: kConnectTimeoutMs bounds the blocking connect() so the UI thread
+    // (or worker thread) can't stall for the OS default (~20 s on Windows)
+    // when the authority is not yet up. Using select() on a non-blocking
+    // socket gives us a timeout without spawning an extra thread.
+    constexpr std::uint32_t kConnectTimeoutMs = 3000;
+
     struct NativeLinkTcpClient::Impl
     {
         enum class SnapshotPhase
@@ -281,6 +294,10 @@ namespace sd::nativelink
         std::atomic<bool> running = false;
         std::atomic<bool> stopRequested = false;
         std::atomic<bool> connected = false;
+        // Ian: Mirrors config.autoConnect but stored atomically so RunLoop can
+        // read it without holding any lock.  Written once in Start() before the
+        // worker thread launches.
+        std::atomic<bool> autoConnect = true;
         std::atomic<std::uint64_t> serverSessionId = 0;
         std::atomic<std::uint64_t> lastHeartbeatUs = 0;
         std::mutex sendMutex;
@@ -306,41 +323,7 @@ namespace sd::nativelink
             snapshotPhase = SnapshotPhase::Descriptors;
             lastHeartbeatUs.store(0, std::memory_order_release);
             serverSessionId.store(0, std::memory_order_release);
-
-            socketHandle = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-            if (socketHandle == INVALID_SOCKET)
-            {
-                return false;
-            }
-
-            sockaddr_in address {};
-            address.sin_family = AF_INET;
-            address.sin_port = htons(config.port);
-            if (InetPtonA(AF_INET, config.host.c_str(), &address.sin_addr) != 1)
-            {
-                CloseSocket();
-                return false;
-            }
-
-            if (connect(socketHandle, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == SOCKET_ERROR)
-            {
-                CloseSocket();
-                return false;
-            }
-
-            if (onConnectionState)
-            {
-                onConnectionState(kConnectionStateConnecting);
-            }
-
-            tcp::HelloPayload hello {};
-            CopyUtf8(hello.channelId, sizeof(hello.channelId), config.channelId);
-            CopyUtf8(hello.clientId, sizeof(hello.clientId), config.clientId);
-            if (!SendFrame(tcp::FrameKind::ClientHello, &hello, sizeof(hello)))
-            {
-                CloseSocket();
-                return false;
-            }
+            autoConnect.store(inConfig.autoConnect, std::memory_order_release);
 
             running.store(true, std::memory_order_release);
             stopRequested.store(false, std::memory_order_release);
@@ -406,7 +389,196 @@ namespace sd::nativelink
             return connected.load(std::memory_order_acquire);
         }
 
+        // Ian: TryConnect creates a fresh non-blocking socket, drives it to
+        // connected state via select() with kConnectTimeoutMs, then sends the
+        // ClientHello handshake. Returns true only when the handshake send
+        // succeeds. Caller (RunLoop) retains ownership of the socket via
+        // socketHandle; on failure the socket is closed before returning.
+        // Non-blocking connect lets Stop() interrupt via ShutdownSocket()
+        // (which calls shutdown(SD_BOTH)) even before the connect completes —
+        // shutdown on a not-yet-connected socket returns SOCKET_ERROR which
+        // is harmless but the worker will also see stopRequested == true and
+        // exit the outer loop without retrying.
+        bool TryConnect()
+        {
+            SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            if (sock == INVALID_SOCKET)
+            {
+                return false;
+            }
+
+            // Switch to non-blocking so connect() returns immediately.
+            u_long nonBlocking = 1;
+            if (ioctlsocket(sock, FIONBIO, &nonBlocking) != 0)
+            {
+                closesocket(sock);
+                return false;
+            }
+
+            sockaddr_in address {};
+            address.sin_family = AF_INET;
+            address.sin_port = htons(config.port);
+            if (InetPtonA(AF_INET, config.host.c_str(), &address.sin_addr) != 1)
+            {
+                closesocket(sock);
+                return false;
+            }
+
+            // Non-blocking connect will return SOCKET_ERROR with WSAEWOULDBLOCK;
+            // that is the expected path when the OS hasn't completed the 3-way
+            // handshake yet.
+            const int connectResult = connect(sock, reinterpret_cast<const sockaddr*>(&address), sizeof(address));
+            if (connectResult == SOCKET_ERROR)
+            {
+                const int err = WSAGetLastError();
+                if (err != WSAEWOULDBLOCK && err != WSAEINPROGRESS)
+                {
+                    closesocket(sock);
+                    return false;
+                }
+            }
+
+            // Wait for writability (connect completion) or error.
+            fd_set writeSet {};
+            fd_set errorSet {};
+            FD_ZERO(&writeSet);
+            FD_ZERO(&errorSet);
+            FD_SET(sock, &writeSet);
+            FD_SET(sock, &errorSet);
+            timeval tv {};
+            tv.tv_sec  = static_cast<long>(kConnectTimeoutMs / 1000);
+            tv.tv_usec = static_cast<long>((kConnectTimeoutMs % 1000) * 1000);
+
+            const int ready = select(0, nullptr, &writeSet, &errorSet, &tv);
+            if (ready <= 0 || FD_ISSET(sock, &errorSet) || !FD_ISSET(sock, &writeSet))
+            {
+                closesocket(sock);
+                return false;
+            }
+
+            // Verify getsockopt SO_ERROR (Windows may write error into writeset).
+            int sockErr = 0;
+            int sockErrLen = sizeof(sockErr);
+            if (getsockopt(sock, SOL_SOCKET, SO_ERROR,
+                           reinterpret_cast<char*>(&sockErr), &sockErrLen) != 0
+                || sockErr != 0)
+            {
+                closesocket(sock);
+                return false;
+            }
+
+            // Switch back to blocking for the recv loop; RecvAllWithTimeout
+            // uses select() internally, so it still honours its own timeout.
+            u_long blocking = 0;
+            if (ioctlsocket(sock, FIONBIO, &blocking) != 0)
+            {
+                closesocket(sock);
+                return false;
+            }
+
+            // Publish the socket into the shared field under sendMutex before
+            // sending the hello, so that HeartbeatLoop can use it immediately
+            // and ShutdownSocket() can interrupt us on Stop().
+            {
+                std::lock_guard<std::mutex> lock(sendMutex);
+                socketHandle = sock;
+            }
+
+            tcp::HelloPayload hello {};
+            CopyUtf8(hello.channelId, sizeof(hello.channelId), config.channelId);
+            CopyUtf8(hello.clientId, sizeof(hello.clientId), config.clientId);
+            if (!SendFrame(tcp::FrameKind::ClientHello, &hello, sizeof(hello)))
+            {
+                CloseSocket();
+                return false;
+            }
+
+            return true;
+        }
+
         void RunLoop()
+        {
+            // Ian: Outer reconnect loop — mirrors the SHM client's passive
+            // re-drain behaviour but must be active because TCP has no shared
+            // memory the server can write into between dial attempts. Each pass
+            // tries to connect, runs the frame receive loop until the server
+            // disconnects or a protocol error occurs, then:
+            //   autoConnect=true  → fires Disconnected, waits kReconnectRetryMs, redials
+            //   autoConnect=false → fires Disconnected, exits (user must click Connect)
+            // Stop() sets stopRequested and calls ShutdownSocket() to interrupt both
+            // the connect wait (select on write-readiness) and any in-progress recv
+            // (shutdown(SD_BOTH)).
+            while (!stopRequested.load(std::memory_order_acquire))
+            {
+                // Reset per-connection state before each dial attempt.
+                snapshotPhase = SnapshotPhase::Descriptors;
+                lastHeartbeatUs.store(0, std::memory_order_release);
+                serverSessionId.store(0, std::memory_order_release);
+
+                if (onConnectionState)
+                {
+                    onConnectionState(kConnectionStateConnecting);
+                }
+
+                if (!TryConnect())
+                {
+                    if (stopRequested.load(std::memory_order_acquire))
+                    {
+                        break;
+                    }
+
+                    // Ian: Fire Disconnected so the UI title pulses
+                    // Connecting→Disconnected rather than staying stuck in
+                    // Connecting indefinitely. This lets the user observe each
+                    // failed attempt without misleading them about state.
+                    if (onConnectionState)
+                    {
+                        onConnectionState(kConnectionStateDisconnected);
+                    }
+
+                    if (!autoConnect.load(std::memory_order_acquire))
+                    {
+                        // Ian: Manual-connect mode — park here until the user
+                        // triggers a new Start(). Do not retry automatically.
+                        break;
+                    }
+
+                    // Server not up yet — sleep then retry.
+                    std::this_thread::sleep_for(std::chrono::milliseconds(kReconnectRetryMs));
+                    continue;
+                }
+
+                // Inner receive loop — runs until the connection dies.
+                RunRecvLoop();
+
+                // Connection dropped. Clear connected state.
+                if (connected.exchange(false) && onConnectionState)
+                {
+                    onConnectionState(kConnectionStateDisconnected);
+                }
+
+                CloseSocket();
+
+                if (stopRequested.load(std::memory_order_acquire))
+                {
+                    break;
+                }
+
+                if (!autoConnect.load(std::memory_order_acquire))
+                {
+                    // Ian: Manual-connect mode — after a drop, park in
+                    // Disconnected rather than auto-redialling.
+                    break;
+                }
+
+                // Brief pause before redialling so we don't hammer the port.
+                std::this_thread::sleep_for(std::chrono::milliseconds(kReconnectRetryMs));
+            }
+
+            running.store(false, std::memory_order_release);
+        }
+
+        void RunRecvLoop()
         {
             while (!stopRequested.load(std::memory_order_acquire))
             {
@@ -455,13 +627,6 @@ namespace sd::nativelink
                     break;
                 }
             }
-
-            running.store(false, std::memory_order_release);
-            if (connected.exchange(false) && onConnectionState)
-            {
-                onConnectionState(kConnectionStateDisconnected);
-            }
-            ShutdownSocket();
         }
 
         void HeartbeatLoop()
@@ -471,15 +636,21 @@ namespace sd::nativelink
                 std::this_thread::sleep_for(std::chrono::milliseconds(config.waitTimeoutMs));
                 if (stopRequested.load(std::memory_order_acquire) || socketHandle == INVALID_SOCKET)
                 {
+                    // Ian: During a reconnect window socketHandle is INVALID_SOCKET;
+                    // skip the send rather than erroring. The next successful dial
+                    // will install a new socket and heartbeats will resume.
                     continue;
                 }
 
                 tcp::HeartbeatPayload heartbeat {};
                 heartbeat.serverSessionId = serverSessionId.load(std::memory_order_acquire);
-                if (!SendFrame(tcp::FrameKind::Heartbeat, &heartbeat, sizeof(heartbeat)))
-                {
-                    break;
-                }
+                // Ian: If SendFrame fails here the server-side socket is already
+                // dead; the recv loop in RunRecvLoop() will detect the same
+                // condition and break out of the inner loop, which drives the
+                // outer reconnect cycle. Do not treat a heartbeat send failure
+                // as a reason to exit the heartbeat thread — just continue so
+                // the thread stays alive for the next connection.
+                SendFrame(tcp::FrameKind::Heartbeat, &heartbeat, sizeof(heartbeat));
             }
         }
 

@@ -1,5 +1,5 @@
 """
-Native Link SHM live telemetry verification.
+Native Link live telemetry verification (SHM or TCP).
 
 Starts DriverStation_TransportSmoke + SmartDashboardApp (headless), waits for
 the dashboard UI log to show live updates for keys that were previously silently
@@ -10,13 +10,17 @@ dropped (Velocity, X_ft, Heading, wheel velocities).  Passes only if:
      are live updates, not a single retained snapshot).
 
 Usage:
-    python tools/native_link_live_telemetry_verify.py
+    python tools/native_link_live_telemetry_verify.py [--carrier shm|tcp]
+
+    --carrier  shm (default) or tcp.  When tcp, the authority is given TCP
+               env vars and the dashboard registry is set to carrier=tcp.
 
 Exit codes:
     0  - pass
     1  - fail (missing keys or no live change)
     2  - setup error (binary not found, transport never started)
 """
+import argparse
 import os
 import re
 import subprocess
@@ -83,16 +87,16 @@ def stop_processes() -> None:
     time.sleep(1.0)
 
 
-def configure_registry() -> None:
+def configure_registry(carrier: str) -> None:
+    if carrier == "tcp":
+        plugin_json = f'{{"carrier":"tcp","host":"127.0.0.1","port":5810,"channel_id":"native-link-default"}}'
+    else:
+        plugin_json = f'{{"carrier":"shm","channel_id":"native-link-default","client_name":"{TAG}-dashboard"}}'
     settings = [
         ("transportKind", "REG_DWORD", "1"),
         ("transportId", "REG_SZ", "native-link"),
         ("ntClientName", "REG_SZ", f"{TAG}-dashboard"),
-        (
-            "pluginSettingsJson",
-            "REG_SZ",
-            f'{{"carrier":"shm","channel_id":"native-link-default","client_name":"{TAG}-dashboard"}}',
-        ),
+        ("pluginSettingsJson", "REG_SZ", plugin_json),
     ]
     for name, reg_type, value in settings:
         result = run(["reg", "add", REGKEY, "/v", name, "/t", reg_type, "/d", value, "/f"])
@@ -124,6 +128,11 @@ def all_values_for_key(log_text: str, key: str) -> list[str]:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--carrier", choices=["shm", "tcp"], default="shm")
+    args = parser.parse_args()
+    carrier: str = args.carrier
+
     if not APP.exists():
         print(f"missing_app={APP}")
         return 2
@@ -136,14 +145,20 @@ def main() -> int:
     startup_log = DEBUG_DIR / f"native_link_startup_{TAG}.log"
 
     stop_processes()
-    configure_registry()
+    configure_registry(carrier)
     for path in (ui_log, startup_log):
         if path.exists():
             path.unlink()
 
     auth_env = os.environ.copy()
-    auth_env["NATIVE_LINK_CARRIER"] = "shm"
-    auth_env["NATIVE_LINK_CHANNEL_ID"] = "native-link-default"
+    if carrier == "tcp":
+        auth_env["NATIVE_LINK_CARRIER"] = "tcp"
+        auth_env["NATIVE_LINK_HOST"] = "127.0.0.1"
+        auth_env["NATIVE_LINK_PORT"] = "5810"
+        auth_env["NATIVE_LINK_CHANNEL_ID"] = "native-link-default"
+    else:
+        auth_env["NATIVE_LINK_CARRIER"] = "shm"
+        auth_env["NATIVE_LINK_CHANNEL_ID"] = "native-link-default"
 
     dash_env = os.environ.copy()
     dash_env["SMARTDASHBOARD_WORKSPACE_ROOT"] = str(ROOT)
@@ -162,7 +177,7 @@ def main() -> int:
         env=dash_env,
     )
     dash_pid = dashboard.pid
-    print(f"authority_pid={authority.pid} dashboard_pid={dash_pid}")
+    print(f"carrier={carrier} authority_pid={authority.pid} dashboard_pid={dash_pid}")
 
     try:
         # Wait for transport to come up.
@@ -220,7 +235,7 @@ def main() -> int:
                     print(f"    {m}")
             return 1
 
-        print("native_link_live_telemetry_verify=ok")
+        print(f"native_link_live_telemetry_verify carrier={carrier} ok")
         return 0
 
     finally:

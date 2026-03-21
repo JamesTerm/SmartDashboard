@@ -68,6 +68,18 @@ namespace
             "SmartDashboardApp",
             0,
             0
+        },
+        {
+            "auto_connect",
+            "Auto-connect",
+            SD_TRANSPORT_CONNECTION_FIELD_TYPE_BOOL,
+            "When enabled the client retries automatically after each failed connect attempt. "
+            "Disable for offline/development workflows where no authority is running.",
+            1,
+            0,
+            nullptr,
+            0,
+            1
         }
     };
 
@@ -253,6 +265,49 @@ namespace
         return static_cast<std::uint16_t>(parsed);
     }
 
+    bool ReadPluginBoolSetting(const char* jsonText, const char* key, bool fallback)
+    {
+        if (jsonText == nullptr || key == nullptr)
+        {
+            return fallback;
+        }
+
+        const std::string json(jsonText);
+        const std::string needle = std::string("\"") + key + "\"";
+        const std::size_t keyPos = json.find(needle);
+        if (keyPos == std::string::npos)
+        {
+            return fallback;
+        }
+
+        const std::size_t colonPos = json.find(':', keyPos + needle.size());
+        if (colonPos == std::string::npos)
+        {
+            return fallback;
+        }
+
+        // Skip whitespace after the colon.
+        const std::size_t valueStart = json.find_first_not_of(" \t\r\n", colonPos + 1);
+        if (valueStart == std::string::npos)
+        {
+            return fallback;
+        }
+
+        // Ian: JSON booleans are lowercase "true" or "false". Accept both and
+        // return the fallback for anything else so an operator who fat-fingers
+        // the JSON doesn't silently disable auto-connect.
+        if (json.compare(valueStart, 4, "true") == 0)
+        {
+            return true;
+        }
+        if (json.compare(valueStart, 5, "false") == 0)
+        {
+            return false;
+        }
+
+        return fallback;
+    }
+
     NativeLinkCarrierKind ReadCarrierKindSetting(const char* jsonText)
     {
         NativeLinkCarrierKind kind = NativeLinkCarrierKind::Tcp;
@@ -317,6 +372,17 @@ namespace
             config != nullptr ? config->plugin_settings_json : nullptr,
             "port",
             5810
+        );
+        // Ian: auto_connect defaults true so existing registry entries that
+        // predate this field get the same reconnecting behaviour as before.
+        // Operators who want a one-shot connect (offline dev, no authority
+        // running) set {"auto_connect":false} in plugin_settings_json; the
+        // client then parks in Disconnected after the first failed attempt and
+        // only redials when the user clicks Connect (which calls Stop+Start).
+        clientConfig.autoConnect = ReadPluginBoolSetting(
+            config != nullptr ? config->plugin_settings_json : nullptr,
+            "auto_connect",
+            true
         );
 
         // Ian: The semantic contract sits above carrier choice now. If the

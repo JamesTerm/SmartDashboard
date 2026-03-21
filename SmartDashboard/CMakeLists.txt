@@ -116,6 +116,7 @@ if(BUILD_TESTING)
             Qt6::Core
             Qt6::Gui
             Qt6::Widgets
+            Qt6::Network
             Qt6::Test
             SmartDashboard_Interface_direct
             ClientInterface_direct

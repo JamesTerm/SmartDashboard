@@ -411,4 +411,92 @@ namespace sd::nativelink
         server.Stop();
     }
 
+    TEST(NativeLinkTcpClientTests, DashboardPublishSucceedsAfterTcpServerSessionRestart)
+    {
+        // Ian: TCP session restart sends a new __snapshot_begin__ over the
+        // existing socket (no connection close). The client must re-enter
+        // Descriptors phase, emit Connecting, then re-reach Connected after
+        // __live_begin__ arrives, and finally succeed with a publish — exactly
+        // the same recovery path as the SHM session restart test.
+        const std::uint16_t port = 5813;
+        testsupport::NativeLinkTcpTestServer server("native-link-tcp-restart-test", port);
+        ASSERT_TRUE(server.Start());
+        server.RegisterDefaultDashboardTopics();
+
+        NativeLinkTcpClient client;
+        NativeLinkClientConfig config;
+        config.carrierKind = NativeLinkCarrierKind::Tcp;
+        config.channelId = "native-link-tcp-restart-test";
+        config.clientId = "dashboard-a";
+        config.host = "127.0.0.1";
+        config.port = port;
+
+        std::mutex mutex;
+        std::vector<int> states;
+
+        ASSERT_TRUE(client.Start(
+            config,
+            [](const UpdateEnvelope&) {},
+            [&mutex, &states](int state)
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                states.push_back(state);
+            }
+        ));
+
+        ASSERT_TRUE(WaitForCondition([&mutex, &states]()
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            for (int state : states)
+            {
+                if (state == kConnectionStateConnected)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }, 3000));
+
+        server.RestartSession();
+
+        // Expect: Connecting (from __snapshot_begin__) → Connected (from __live_begin__)
+        EXPECT_TRUE(WaitForCondition([&mutex, &states]()
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            bool sawFirstConnect = false;
+            bool sawConnectingAfterFirstConnect = false;
+            bool sawReconnect = false;
+            for (int state : states)
+            {
+                if (state == kConnectionStateConnected)
+                {
+                    if (sawConnectingAfterFirstConnect)
+                    {
+                        sawReconnect = true;
+                    }
+                    sawFirstConnect = true;
+                }
+                else if (sawFirstConnect)
+                {
+                    sawConnectingAfterFirstConnect = true;
+                }
+            }
+            return sawReconnect;
+        }, 3000));
+
+        ASSERT_TRUE(client.IsConnected());
+        ASSERT_TRUE(client.Publish("TestMove", TopicValue::Double(4.5)));
+
+        TopicValue latest;
+        EXPECT_TRUE(WaitForCondition([&server, &latest]()
+        {
+            return server.TryGetLatestValue("TestMove", latest)
+                && latest.type == ValueType::Double
+                && latest.doubleValue == 4.5;
+        }, 2000));
+
+        client.Stop();
+        server.Stop();
+    }
+
 }

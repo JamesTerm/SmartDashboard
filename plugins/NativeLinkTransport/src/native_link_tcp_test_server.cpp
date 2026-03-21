@@ -184,6 +184,11 @@ namespace sd::nativelink::testsupport
             return true;
         }
 
+        // Ian: Plain blocking RecvAll is only used for the initial ClientHello
+        // handshake, where the client is expected to respond promptly. Post-handshake
+        // use RecvAllWithTimeout so that a silently-dead client (no FIN/RST) does not
+        // hang its per-client thread indefinitely — important for the disconnect-stress
+        // harness which kills the dashboard process without a graceful socket close.
         bool RecvAll(SOCKET socketHandle, char* bytes, int totalBytes)
         {
             int received = 0;
@@ -197,6 +202,62 @@ namespace sd::nativelink::testsupport
                 received += chunk;
             }
             return true;
+        }
+
+        enum class ReceiveStatus
+        {
+            Success,
+            Timeout,
+            Closed,
+            Error
+        };
+
+        // Ian: kClientRecvTimeoutMs bounds how long the per-client thread can
+        // block waiting for the next frame header. When the client process
+        // disappears without sending a FIN (e.g. process kill during stress
+        // testing), the OS will eventually report an error on the socket, but
+        // Windows TCP keep-alive probes take tens of seconds by default. This
+        // explicit timeout lets the per-client thread notice the dead client
+        // within ~2 s and clean up the slot, making the server side reconnect-
+        // safe without requiring OS-level keep-alive tuning.
+        static constexpr std::uint32_t kClientRecvTimeoutMs = 2000;
+
+        ReceiveStatus RecvAllWithTimeout(SOCKET socketHandle, char* bytes, int totalBytes)
+        {
+            int received = 0;
+            while (received < totalBytes)
+            {
+                fd_set readSet {};
+                FD_ZERO(&readSet);
+                FD_SET(socketHandle, &readSet);
+
+                timeval timeout {};
+                timeout.tv_sec  = static_cast<long>(kClientRecvTimeoutMs / 1000);
+                timeout.tv_usec = static_cast<long>((kClientRecvTimeoutMs % 1000) * 1000);
+
+                const int ready = select(0, &readSet, nullptr, nullptr, &timeout);
+                if (ready == 0)
+                {
+                    return ReceiveStatus::Timeout;
+                }
+                if (ready == SOCKET_ERROR)
+                {
+                    return ReceiveStatus::Error;
+                }
+
+                const int chunk = recv(socketHandle, bytes + received, totalBytes - received, 0);
+                if (chunk == 0)
+                {
+                    return ReceiveStatus::Closed;
+                }
+                if (chunk == SOCKET_ERROR)
+                {
+                    return ReceiveStatus::Error;
+                }
+
+                received += chunk;
+            }
+            return ReceiveStatus::Success;
         }
 
         TopicDescriptor MakeDescriptor(
@@ -527,7 +588,21 @@ namespace sd::nativelink::testsupport
             while (!stopRequested.load() && client->alive.load())
             {
                 tcp::FrameHeader frameHeader {};
-                if (!RecvAll(client->socketHandle, reinterpret_cast<char*>(&frameHeader), static_cast<int>(sizeof(frameHeader))))
+                const ReceiveStatus headerStatus = RecvAllWithTimeout(
+                    client->socketHandle,
+                    reinterpret_cast<char*>(&frameHeader),
+                    static_cast<int>(sizeof(frameHeader))
+                );
+                if (headerStatus == ReceiveStatus::Timeout)
+                {
+                    // Ian: Timeout on the server-side recv means the client has
+                    // gone quiet — likely a crashed/killed process.  Loop and
+                    // check stopRequested; if still running this slot will
+                    // eventually also fail on error or closed when the OS
+                    // delivers the RST once the remote side's port is reused.
+                    continue;
+                }
+                if (headerStatus != ReceiveStatus::Success)
                 {
                     break;
                 }
@@ -537,10 +612,17 @@ namespace sd::nativelink::testsupport
                 }
 
                 std::vector<unsigned char> payload(frameHeader.payloadBytes);
-                if (frameHeader.payloadBytes > 0
-                    && !RecvAll(client->socketHandle, reinterpret_cast<char*>(payload.data()), static_cast<int>(payload.size())))
+                if (frameHeader.payloadBytes > 0)
                 {
-                    break;
+                    const ReceiveStatus payloadStatus = RecvAllWithTimeout(
+                        client->socketHandle,
+                        reinterpret_cast<char*>(payload.data()),
+                        static_cast<int>(payload.size())
+                    );
+                    if (payloadStatus != ReceiveStatus::Success)
+                    {
+                        break;
+                    }
                 }
 
                 client->lastHeartbeatUs.store(GetSteadyNowUs());

@@ -30,11 +30,12 @@ namespace
         size_t count = 0;
         const sd_transport_connection_field_descriptor_v1* fields = descriptor->get_connection_fields(&count);
         ASSERT_NE(fields, nullptr);
-        ASSERT_EQ(count, 4u);
+        ASSERT_EQ(count, 5u);
 
         EXPECT_STREQ(fields[0].field_id, SD_TRANSPORT_FIELD_USE_TEAM_NUMBER);
         EXPECT_STREQ(fields[1].field_id, SD_TRANSPORT_FIELD_TEAM_NUMBER);
         EXPECT_STREQ(fields[2].field_id, SD_TRANSPORT_FIELD_HOST);
         EXPECT_STREQ(fields[3].field_id, SD_TRANSPORT_FIELD_CLIENT_NAME);
+        EXPECT_STREQ(fields[4].field_id, "auto_connect");
     }
 }
