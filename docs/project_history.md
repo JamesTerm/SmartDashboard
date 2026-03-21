@@ -7,6 +7,17 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-21 - Connect/Disconnect menu state-aware enable/disable
+
+- **Problem:** Connect and Disconnect menu items were always enabled (unless in replay mode), making them misleading — clicking Connect while already connected, or Disconnect while already stopped, was silently a no-op.
+- **Fix 1 — `ApplyTransportMenuChecks`:** Connect is now enabled only when `m_connectionState == Disconnected`; Disconnect is enabled only when the transport is running (Connecting/Connected/Stale). Added `Ian:` comment explaining the state-aware rationale.
+- **Fix 2 — `OnConnectionStateChanged`:** Added a call to `ApplyTransportMenuChecks()` at the end of `OnConnectionStateChanged` so the menu items refresh on every transport-driven state transition (e.g. the auto-connect loop cycling through Connecting → Connected → Disconnected).
+- **Bug found during testing:** `OnDisconnectTransport` was calling `UpdateWindowConnectionText(Disconnected)` directly, bypassing `OnConnectionStateChanged`. This updated the title bar but left `m_connectionState` and the menu enable states out of sync — so clicking Disconnect never re-enabled Connect. Fixed by routing through `OnConnectionStateChanged` instead. Same fix applied to the `StartTransport` failure path. Added `Ian:` comment at the fix site.
+- **Rule captured:** any code path that changes connection state must go through `OnConnectionStateChanged`, not `UpdateWindowConnectionText` directly. The former runs the full pipeline (title, menu enable/disable, recording event); the latter only updates the status bar label.
+- **Test counts:** 21/21 `NativeLinkTransport_tests` + 32/32 `SmartDashboard_tests` pass.
+
+---
+
 ## 2026-03-21 - DS Native Link TCP root cause fixed: CRT/Win32 env desync
 
 - **Root cause:** `LoadServerConfigFromEnvironment()` in `Robot_Simulation/.../NativeLink.cpp` read `NATIVE_LINK_CARRIER` via `_dupenv_s` (CRT), while `ApplyNativeLinkEnvironment()` wrote it via `SetEnvironmentVariableA` (Win32). The CRT's env cache and the Win32 OS env block are separate stores that can diverge after process startup. The carrier read back as empty/default (`SharedMemory`) even though the Win32 block already had `"tcp"`, so port 5810 was never bound on a clean DS launch.

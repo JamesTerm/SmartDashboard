@@ -30,6 +30,7 @@
 - `IsHarnessFocusKey` in `main_window.cpp` is an intentional narrow allowlist for the debug log only. All keys still create tiles and receive updates.
 - The alive guard (`m_alive` shared_ptr) in `PluginDashboardTransport::Stop()` must be set false before calling the plugin's stop, not after.
 - TCP client `Start()` is non-blocking and always returns `true`. Failure manifests as a `Disconnected` callback. Tests that need to verify a missing authority must use `auto_connect:false` and wait for `Disconnected`.
+- `OnDisconnectTransport` must route through `OnConnectionStateChanged`, not `UpdateWindowConnectionText` directly. The full pipeline (title, menu enable states, recording event) must all fire together on any state transition — manual or transport-driven.
 
 ## Current startup/defaults state
 
@@ -45,10 +46,18 @@
 
 ## Current status
 
+- Branch `feature/native-link-tcpip-carrier` is **merge-ready pending one final manual test by Ian**.
 - TCP and SHM transports are both stable and at parity.
 - DS root-cause fix is complete — port 5810 now binds on a clean DS launch. See `docs/journal/2026-03-21-ds-env-root-cause.md`.
+- Connect/Disconnect menu items are now state-aware: Connect greys out while transport is running; Disconnect greys out while stopped.
 - 21/21 `NativeLinkTransport_tests` + 32/32 `SmartDashboard_tests` pass.
-- No known blocking items. Potential future work:
-  - Wire a UI Connect button to `Stop()`+`Start()` for manual-connect mode.
+- No known blocking items. The two previously listed "potential future work" items (write-ack on TCP Publish, `--cycles N` on telemetry verify script) are confirmed non-blocking follow-on work, not merge gates.
+
+## Next session starting point
+
+- Ian is doing one final manual test (DS + SmartDashboard end-to-end) before merging.
+- If that passes: merge `feature/native-link-tcpip-carrier` → `main`.
+- After merge, candidate follow-on tasks (pick any, none are blocking):
   - Write-ack protocol on TCP `Publish` (currently fire-and-forget).
   - Extend `native_link_live_telemetry_verify.py --carrier tcp` with `--cycles N`.
+  - Wire a UI toolbar/status-bar Connect button as a more prominent surface for `auto_connect:false` workflows.

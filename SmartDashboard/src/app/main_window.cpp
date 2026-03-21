@@ -1514,6 +1514,9 @@ void MainWindow::OnConnectionStateChanged(int state)
 
     UpdateWindowConnectionText(state);
     RecordConnectionEvent(state);
+
+    // Refresh Connect/Disconnect enabled state now that m_connectionState has changed.
+    ApplyTransportMenuChecks();
 }
 
 void MainWindow::PublishRememberedControlValues()
@@ -2268,7 +2271,11 @@ void MainWindow::OnDisconnectTransport()
     }
 
     StopTransport();
-    UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
+    // Ian: Route through OnConnectionStateChanged (not UpdateWindowConnectionText directly)
+    // so the full state-change pipeline fires: title bar, menu enable/disable, recording event.
+    // Calling UpdateWindowConnectionText directly was the original bug — it updated the title
+    // but left m_connectionState and the Connect/Disconnect menu items out of sync.
+    OnConnectionStateChanged(static_cast<int>(sd::transport::ConnectionState::Disconnected));
 }
 
 #ifdef _DEBUG
@@ -2724,14 +2731,22 @@ void MainWindow::ApplyTransportMenuChecks()
         m_openReplayFileAction->setEnabled(m_telemetryFeatureEnabled);
     }
 
+    // Ian: Connect is only meaningful when the transport is stopped (Disconnected).
+    // Disconnect is only meaningful when the transport is running (Connecting/Connected/Stale).
+    // Graying them out in the wrong state avoids confusing double-clicks and makes
+    // the menu self-documenting about current transport lifecycle.
+    const bool isDisconnected =
+        m_connectionState == static_cast<int>(sd::transport::ConnectionState::Disconnected);
+    const bool isRunning = !isDisconnected;
+
     if (m_connectTransportAction != nullptr)
     {
-        m_connectTransportAction->setEnabled(!replayMode);
+        m_connectTransportAction->setEnabled(!replayMode && isDisconnected);
     }
 
     if (m_disconnectTransportAction != nullptr)
     {
-        m_disconnectTransportAction->setEnabled(!replayMode);
+        m_disconnectTransportAction->setEnabled(!replayMode && isRunning);
     }
 }
 
@@ -3066,7 +3081,7 @@ void MainWindow::StartTransport()
     {
         StopSessionRecording();
         m_transport.reset();
-        UpdateWindowConnectionText(static_cast<int>(sd::transport::ConnectionState::Disconnected));
+        OnConnectionStateChanged(static_cast<int>(sd::transport::ConnectionState::Disconnected));
     }
 
     UpdatePlaybackUiState();
