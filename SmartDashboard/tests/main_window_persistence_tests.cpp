@@ -295,3 +295,33 @@ TEST(MainWindowPersistenceTests, ClearWidgetsThenReloadLayoutReappliesTemporaryD
     EXPECT_TRUE(window.TileHasValueForTesting("Test/Auton_Selection/AutoChooser"));
     EXPECT_TRUE(window.TileIsTemporaryDefaultForTesting("Test/Auton_Selection/AutoChooser"));
 }
+
+TEST(MainWindowPersistenceTests, AutoConnectFalseSurvivesSyncToPluginSettingsJson)
+{
+    // Ian: "auto_connect" lives only in pluginSettingsJson (no dedicated
+    // ConnectionConfig member). SyncConnectionConfigToPluginSettingsJson
+    // rebuilds the JSON from scratch using the individual ConnectionConfig
+    // fields; without explicit round-trip logic it would silently discard
+    // "auto_connect": false written by SetConnectionFieldValue. This test pins
+    // that the round-trip preserves the user's explicit false choice.
+    ASSERT_NE(EnsureApp(), nullptr);
+    const ScopedPersistenceSettings scopedSettings;
+    SetStartupTransport("native-link", sd::transport::TransportKind::Plugin);
+
+    MainWindow window(nullptr, false);
+    window.SetTransportSelectionForTesting("native-link", sd::transport::TransportKind::Plugin);
+
+    // Write auto_connect=false into pluginSettingsJson.
+    window.SetConnectionFieldValueForTesting(QStringLiteral("auto_connect"), false);
+
+    // Rebuild pluginSettingsJson from the split ConnectionConfig fields --
+    // this is the exact path taken by OnEditTransportSettings after the user
+    // clicks OK in the settings dialog.
+    window.SyncConnectionConfigToPluginSettingsJsonForTesting();
+
+    // Read it back. The default is true (reconnect on) to match the plugin
+    // fallback; if false is not preserved the call returns true and the
+    // test correctly fails.
+    EXPECT_FALSE(window.GetConnectionFieldBoolForTesting(QStringLiteral("auto_connect"), true))
+        << "auto_connect=false must survive SyncConnectionConfigToPluginSettingsJson";
+}

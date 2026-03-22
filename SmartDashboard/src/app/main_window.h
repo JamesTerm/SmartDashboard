@@ -68,6 +68,9 @@ public:
     bool HasRememberedControlValueForTesting(const QString& key) const;
     bool TileHasValueForTesting(const QString& key) const;
     bool TileIsTemporaryDefaultForTesting(const QString& key) const;
+    void SetConnectionFieldValueForTesting(const QString& fieldId, const QVariant& value);
+    void SyncConnectionConfigToPluginSettingsJsonForTesting();
+    bool GetConnectionFieldBoolForTesting(const QString& fieldId, bool defaultValue) const;
 #endif
 
 private slots:

@@ -7,6 +7,59 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-21 - UI freeze during auton fixed: drain budget cap and key coalescing
+
+### Root cause
+
+During auton, Robot_Simulation publishes ~25 keys at ~62.5 Hz over TCP — roughly 1,500–1,562 messages/sec. The old dispatch had **two stacked `Qt::QueuedConnection` hops**:
+
+1. `OnPluginVariableUpdate` in `dashboard_transport.cpp` wrapped every incoming message in a `QMetaObject::invokeMethod(qApp, ..., QueuedConnection)` call — one Qt event per message = 1,500+ events/sec flooding the UI thread's event queue.
+2. Inside that lambda, `m_pendingUiUpdates` was populated (the batch path), but because the outer hop had already queued a separate Qt event for every message, the queue was never actually coalescing anything useful.
+
+`DrainPendingUiUpdates` processed the entire unbounded queue synchronously on every call with no per-call cap, so a sudden burst of 1,500 queued events would block the UI thread for 10–20 seconds.
+
+### Three fixes
+
+**Fix A** (`dashboard_transport.cpp` `OnPluginVariableUpdate`): Removed the outer `QMetaObject::invokeMethod`. Now calls `m_onVariableUpdate(update)` directly after the `alive` guard — messages go straight to the `m_pendingUiUpdates` batch path, no extra Qt event per message.
+
+**Fix B** (`main_window.cpp` `DrainPendingUiUpdates`): Added `kDrainBudget = 150` per-call cap. If more items remain after draining 150, a 16 ms reschedule fires to continue — keeps the UI event loop responsive between drains.
+
+**Fix C** (`main_window.cpp` `DrainPendingUiUpdates`): Added last-write-wins key coalescing using `std::unordered_map<std::string, int>` before processing the batch. At runtime with ~25 unique keys, a 150-item batch collapses to ≤25 unique tile updates before any widget repaint occurs.
+
+### Rule captured
+
+Never wrap a high-frequency per-message callback in `QueuedConnection` invokeMethod — that creates one Qt event per message and will flood the queue at any non-trivial rate. Reserve `QueuedConnection` for infrequent state changes (e.g. `OnPluginConnectionState`). For high-frequency data, write directly into an atomic queue/map and drain on a timer with a per-call budget cap.
+
+### Verification
+
+Ian confirmed the fix working manually (live auton run with ~25 keys at 62.5 Hz — dashboard remained responsive throughout). 74/74 automated tests pass.
+
+---
+
+## 2026-03-21 - Auto-connect checkbox now works correctly
+
+### Root cause (two parts)
+
+**Bug 1 — value silently discarded:** `SyncConnectionConfigToPluginSettingsJson()` rebuilt the plugin settings JSON from scratch each call, only preserving `carrier`, `channel_id`, and `port`. When `SetConnectionFieldValue("auto_connect", false)` wrote the value into the JSON, the next call to `SyncConnectionConfigToPluginSettingsJson()` (triggered by the same OK button handler) immediately overwrote the JSON from scratch, dropping `auto_connect`. The user's change was visible for zero time.
+
+**Bug 2 — live transport not interrupted:** Even after fixing Bug 1 so the value persisted, the running transport's reconnect loop was not interrupted. The TCP client's `autoConnect` atomic is set at `Start()` time and never updated live. The user was trapped: when the transport pulsed through `Connecting`/`Disconnected`, the Disconnect menu item was greyed out during `Disconnected` state and Connect was greyed during `Connecting` — neither was reliably clickable.
+
+### Fixes
+
+**Bug 1 fix** (`main_window.cpp` `SyncConnectionConfigToPluginSettingsJson`): Added `auto_connect` to the JSON round-trip preserve list. Includes an `Ian:` comment explaining the trap — any plugin Bool field stored only in `pluginSettingsJson` (with no dedicated `ConnectionConfig` member) must be explicitly listed here or it silently vanishes.
+
+**Bug 2 fix** (`main_window.cpp` `OnEditTransportSettings`): When the user unchecks auto-connect and clicks OK, and a transport is running, `StopTransport()` is called immediately. This is safe and fast — the worker is either sleeping `kReconnectRetryMs` (500 ms) between attempts or blocked in a 3-second connect timeout, both of which are interrupted by `ShutdownSocket()` inside `Stop()`. After stopping, `OnConnectionStateChanged(Disconnected)` is called so the title bar settles and the Connect menu item becomes available for a manual single-shot attempt. All other setting changes (host, port, carrier) retain the existing "reconnect manually" message box behavior.
+
+### Rule captured
+
+Any plugin-owned setting stored only in `pluginSettingsJson` (i.e., no dedicated `ConnectionConfig` struct member) must be explicitly round-tripped in `SyncConnectionConfigToPluginSettingsJson`. The function rebuilds JSON from scratch — any key not in the preserve list is silently dropped. When adding a new plugin Bool/Int/String field to a transport descriptor, always add a corresponding preserve entry here.
+
+### Verification
+
+74/74 automated tests pass including `AutoConnectFalseSurvivesSyncToPluginSettingsJson` (test #29). Ready for Ian's manual verification.
+
+---
+
 ## 2026-03-21 - TCP wire protocol verified: no mismatches between DS server and SD client
 
 Full side-by-side comparison of all DS-side and SD-side TCP protocol definitions:

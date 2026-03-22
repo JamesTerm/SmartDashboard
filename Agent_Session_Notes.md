@@ -46,44 +46,22 @@
 
 ## Current status
 
-- Branch `feature/native-link-tcpip-carrier` is **merge-ready pending one final manual test by Ian**.
-- TCP and SHM transports are both stable and at parity.
-- DS root-cause fix is complete — port 5810 now binds on a clean DS launch. See `docs/journal/2026-03-21-ds-env-root-cause.md`.
-- Connect/Disconnect menu items are now state-aware: Connect greys out while transport is running; Disconnect greys out while stopped.
-- DS TCP bind address fixed: `NATIVE_LINK_HOST` changed from `127.0.0.1` to `0.0.0.0` so the server is reachable cross-machine. Committed `c5e14b3` in Robot_Simulation.
-- DS Debug carrier combo regression fixed: switching the combo no longer flips the connection mode to DirectConnect. Committed `c5e14b3`.
-- DS INI default fixed: `LoadPersistedNativeLinkCarrier` now derives its fallback from `GetDefaultNativeLinkCarrier()` instead of hardcoding `L"shm"`. Committed `c5e14b3`.
-- **TCP wire protocol verified:** Full comparison of DS-side (`NativeLinkTcp.h`, `NativeLinkTcp.cpp`) vs SD-side (`native_link_tcp_protocol.h`, `native_link_ipc_protocol.h`, `native_link_tcp_client.cpp`) shows **no mismatches**. Magic `0x4E4C5443`, version `1`, all enum values, all struct layouts, and `SharedMessage` field layouts are identical on both sides. The previous session hypothesis about a protocol mismatch was **disproved**.
-- 21/21 `NativeLinkTransport_tests` + 32/32 `SmartDashboard_tests` pass.
-- No known blocking items. The two previously listed "potential future work" items (write-ack on TCP Publish, `--cycles N` on telemetry verify script) are confirmed non-blocking follow-on work, not merge gates.
+- Branch `feature/native-link-tcpip-carrier` is **merged to main and pushed** in both repos.
+- All known bugs are fixed. 74/74 tests pass.
+- Ian confirmed the UI-freeze fix. The auto-connect fix is ready for follow-up manual verification next time the DS is available.
 
 ## Hand-off checkpoint commit hashes
 
 | Repo | Branch | Commit |
 |---|---|---|
-| SmartDashboard | `feature/native-link-tcpip-carrier` | `02db17b` (session notes + gitignore checkpoint) |
-| Robot_Simulation | `feature/native-link-tcpip-carrier` | `c5e14b3` (three DS TCP blockers fixed) |
-
-Both branches are 1 commit ahead of origin (not yet pushed). Push both when Ian confirms the manual test passes and immediately before merging.
+| SmartDashboard | `main` | post-merge (see git log) |
+| Robot_Simulation | `main` | post-merge (see git log) |
 
 ## Next session starting point
 
-**All code is done. The only remaining gate is Ian's manual test.**
+**No blocking work.** The project is fully merged. Candidate follow-on tasks (pick any):
 
-Test procedure:
-1. Build Robot_Simulation in Release from `feature/native-link-tcpip-carrier`.
-2. Copy `DriverStation.exe` to the DS machine (192.168.1.159). Ensure `DriverStation.ini` has `[Connection]\nMode=3\nNativeLinkCarrier=tcp` (or delete the INI to accept the Release default).
-3. Launch `DriverStation.exe` on the DS machine. Confirm it starts and the Native Link TCP server binds (check that Windows Firewall prompts and you allow it).
-4. On the local machine, build SmartDashboard in Release. Launch `SmartDashboardApp.exe`. Select Native Link transport, set Host/IP to `192.168.1.159`, port `5810`.
-5. Click Connect. Title bar should transition: `Connecting…` → `Connected`.
-6. Confirm live telemetry tiles populate.
-
-If test passes:
-- Merge `feature/native-link-tcpip-carrier` → `main` in Robot_Simulation.
-- Merge `feature/native-link-tcpip-carrier` → `main` in SmartDashboard.
-- Push both `main` branches.
-
-After merge, candidate follow-on tasks (pick any, none are blocking):
+- **Manual verify auto-connect checkbox** with a live DS: uncheck it in settings while connected, confirm the transport stops immediately and Connect becomes available.
 - Write-ack protocol on TCP `Publish` (currently fire-and-forget).
 - Extend `native_link_live_telemetry_verify.py --carrier tcp` with `--cycles N`.
 - Wire a UI toolbar/status-bar Connect button as a more prominent surface for `auto_connect:false` workflows.

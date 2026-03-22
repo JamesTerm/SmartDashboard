@@ -57,6 +57,7 @@
 #include <QtCore/QJsonArray>
 #include <QtCore/QPoint>
 
+#include <algorithm>
 #include <chrono>
 
 #ifdef _DEBUG
@@ -1227,14 +1228,66 @@ void MainWindow::DebugLogUiEvent(const QString& line) const
 
 void MainWindow::DrainPendingUiUpdates()
 {
-    QVector<sd::transport::VariableUpdate> updates;
+    // Ian: Per-call budget cap (Fix B).  During auton mode the robot publishes
+    // ~25 keys at ~62 Hz (~1,500 msg/sec over TCP).  Without a cap, a burst
+    // fills m_pendingUiUpdates with thousands of items and DrainPendingUiUpdates
+    // processes them all in one synchronous pass on the UI thread, blocking
+    // painting and input for 10-20 seconds — the freeze + playback-backlog
+    // symptom observed in manual testing.  Processing at most kDrainBudget
+    // items per event-loop turn bounds the UI-thread hold time to a few ms.
+    // If the queue still has items after the budget is consumed, a new drain
+    // is scheduled immediately so no updates are lost, just slightly deferred.
+    static constexpr int kDrainBudget = 150;
+
+    QVector<sd::transport::VariableUpdate> batch;
+    bool reschedule = false;
     {
         std::lock_guard<std::mutex> lock(m_pendingUiUpdatesMutex);
-        updates.swap(m_pendingUiUpdates);
         m_uiDrainScheduled = false;
+
+        const int take = std::min(static_cast<int>(m_pendingUiUpdates.size()), kDrainBudget);
+        batch = QVector<sd::transport::VariableUpdate>(
+            m_pendingUiUpdates.begin(),
+            m_pendingUiUpdates.begin() + take);
+        m_pendingUiUpdates.erase(m_pendingUiUpdates.begin(), m_pendingUiUpdates.begin() + take);
+
+        if (!m_pendingUiUpdates.isEmpty())
+        {
+            m_uiDrainScheduled = true;
+            reschedule = true;
+        }
     }
 
-    for (const auto& update : updates)
+    if (reschedule)
+    {
+        QMetaObject::invokeMethod(this, &MainWindow::DrainPendingUiUpdates, Qt::QueuedConnection);
+    }
+
+    // Ian: Last-write-wins coalescing per key (Fix C).  When the robot sends
+    // multiple updates for the same key within one budget window (common at
+    // 62 Hz with 25 keys), only the most recent value matters for display.
+    // Build an ordered list of unique keys, keeping the last-seen VariableUpdate
+    // for each, in first-appearance order so tile creation order is stable.
+    QVector<sd::transport::VariableUpdate> coalesced;
+    coalesced.reserve(batch.size());
+    std::unordered_map<std::string, int> keyIndex;  // key -> index into coalesced
+    keyIndex.reserve(static_cast<size_t>(batch.size()));
+    for (const auto& update : batch)
+    {
+        const std::string key = update.key.toStdString();
+        auto it = keyIndex.find(key);
+        if (it == keyIndex.end())
+        {
+            keyIndex[key] = static_cast<int>(coalesced.size());
+            coalesced.push_back(update);
+        }
+        else
+        {
+            coalesced[it->second] = update;  // overwrite with newer value
+        }
+    }
+
+    for (const auto& update : coalesced)
     {
         OnVariableUpdateReceived(update.key, update.valueType, update.value, static_cast<quint64>(update.seq));
     }
@@ -2491,6 +2544,48 @@ void MainWindow::OnEditTransportSettings()
     SyncConnectionConfigToPluginSettingsJson();
     ApplyTransportMenuChecks();
     PersistConnectionSettings();
+
+    // Ian: auto_connect is the one setting that can be applied to a live
+    // transport without a full stop+start.  When the user unchecks it while
+    // the transport is running (or pulsing in the Connecting/Disconnected
+    // retry cycle), we stop immediately so the title bar settles and the
+    // Connect button becomes available for a manual single-shot attempt.
+    // Stopping is safe and fast: the worker is either sleeping kReconnectRetryMs
+    // (500 ms) between attempts or blocked in a 3-second connect timeout, both
+    // of which are interrupted by ShutdownSocket() inside Stop().
+    //
+    // For all other setting changes (host, port, carrier) the transport is left
+    // running so an operator editing fields mid-match does not get an involuntary
+    // disconnect.  A message box informs them to reconnect manually.
+    const bool newAutoConnect = [&]() -> bool {
+        if (m_connectionConfig.pluginSettingsJson.trimmed().isEmpty())
+        {
+            return true;
+        }
+        const QJsonDocument doc = QJsonDocument::fromJson(m_connectionConfig.pluginSettingsJson.toUtf8());
+        if (!doc.isObject())
+        {
+            return true;
+        }
+        const QJsonValue v = doc.object().value("auto_connect");
+        return v.isUndefined() ? true : v.toBool(true);
+    }();
+
+    if (m_transport != nullptr && !newAutoConnect)
+    {
+        // User disabled auto-connect — stop the retry cycle right now.
+        StopTransport();
+        OnConnectionStateChanged(static_cast<int>(sd::transport::ConnectionState::Disconnected));
+    }
+    else if (m_transport != nullptr)
+    {
+        // Other settings changed while connected — inform the user to reconnect.
+        QMessageBox::information(
+            this,
+            QStringLiteral("Settings Saved"),
+            QStringLiteral("Settings have been saved.\n\nReconnect (Disconnect then Connect) for the new settings to take effect.")
+        );
+    }
 }
 
 void MainWindow::OnOpenReplayFile()
@@ -3996,6 +4091,25 @@ bool MainWindow::TileIsTemporaryDefaultForTesting(const QString& key) const
     const auto it = m_tiles.find(key.toStdString());
     return it != m_tiles.end() && it->second != nullptr && it->second->IsShowingTemporaryDefault();
 }
+
+void MainWindow::SetConnectionFieldValueForTesting(const QString& fieldId, const QVariant& value)
+{
+    SetConnectionFieldValue(fieldId, value);
+}
+
+void MainWindow::SyncConnectionConfigToPluginSettingsJsonForTesting()
+{
+    SyncConnectionConfigToPluginSettingsJson();
+}
+
+bool MainWindow::GetConnectionFieldBoolForTesting(const QString& fieldId, bool defaultValue) const
+{
+    sd::transport::ConnectionFieldDescriptor field;
+    field.id = fieldId;
+    field.type = sd::transport::ConnectionFieldType::Bool;
+    field.defaultValue = defaultValue;
+    return GetConnectionFieldValue(field).toBool();
+}
 #endif
 
 QVariant MainWindow::GetConnectionFieldValue(const sd::transport::ConnectionFieldDescriptor& field) const
@@ -4094,6 +4208,18 @@ void MainWindow::SyncConnectionConfigToPluginSettingsJson()
             if (existing.contains("port"))
             {
                 object.insert("port", existing.value("port").toInt(5810));
+            }
+            // Ian: "auto_connect" is a plugin-owned Bool field stored only in
+            // pluginSettingsJson (it has no dedicated ConnectionConfig member).
+            // It must be explicitly round-tripped here or SetConnectionFieldValue
+            // writes it into the JSON and then this function immediately overwrites
+            // the JSON from scratch, silently discarding the user's choice.
+            // The plugin fallback is true, so omitting this key is safe for legacy
+            // INI entries — but once the user has explicitly set it to false, it
+            // must survive this rebuild.
+            if (existing.contains("auto_connect"))
+            {
+                object.insert("auto_connect", existing.value("auto_connect").toBool(true));
             }
         }
     }

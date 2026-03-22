@@ -1285,27 +1285,28 @@ namespace sd::transport
                         break;
                 }
 
-	                // Ian: Plugin callbacks may arrive on a transport-owned worker
-	                // thread. Queue them onto the main thread before touching the
-	                // stored callback so both dashboard instances use the same UI
-	                // delivery path even after merged app changes alter startup work.
-	                // Capture alive by value so the lambda is a no-op if this
-	                // PluginDashboardTransport has already been destroyed.
-	                QMetaObject::invokeMethod(
-	                    qApp,
-	                    [self, alive, update]()
-	                    {
-	                        if (!alive->load(std::memory_order_acquire))
-	                        {
-	                            return;
-	                        }
-	                        if (self->m_onVariableUpdate != nullptr)
-	                        {
-	                            self->m_onVariableUpdate(update);
-	                        }
-	                    },
-	                    Qt::QueuedConnection
-	                );
+                // Ian: Call m_onVariableUpdate directly from the worker thread.
+                // Do NOT use invokeMethod/QueuedConnection here — doing so posts
+                // one Qt event per incoming message, which at 1,500+ msg/sec
+                // floods the Qt event queue and causes the UI freeze + playback
+                // backlog observed during auton mode.  The registered callback
+                // (StartTransport lambda in main_window.cpp) already handles
+                // cross-thread delivery: it checks QThread::currentThread(),
+                // batches off-thread arrivals into m_pendingUiUpdates under a
+                // mutex, and posts a single QueuedConnection to DrainPendingUiUpdates
+                // — coalescing the entire burst into one UI-thread call regardless
+                // of how many messages arrive between drain cycles.
+                // The alive guard is still checked here so we do not touch self
+                // after Stop() has cleared it (Stop sets m_alive false before
+                // joining the worker thread, so this window is correctly bounded).
+                if (!alive->load(std::memory_order_acquire))
+                {
+                    return;
+                }
+                if (self->m_onVariableUpdate != nullptr)
+                {
+                    self->m_onVariableUpdate(update);
+                }
             }
 
             static void OnPluginConnectionState(void* userData, int state)
