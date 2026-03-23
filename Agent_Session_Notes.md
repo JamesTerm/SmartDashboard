@@ -63,12 +63,13 @@
 - This repo and `D:\code\Robot_Simulation` share the Native Link contract, carrier implementations, and plugin boundary.
 - When either repo's session notes or strategy docs change, check the other side for consistency — especially around invariants, carrier defaults, and plugin support iterations.
 - The canonical long-term rollout strategy lives in `docs/native_link_rollout_strategy.md` (this repo).
+- **Shuffleboard transport:** Robot_Simulation's `feature/shuffleboard-transport` branch takes the lead on NT4 protocol work. This repo's `feature/shuffleboard-transport` branch is reserved for the SmartDashboard plugin side once the simulator proves the protocol works against the official Shuffleboard app.
 
 ## Next session starting point
 
-**No blocking work.** The near-term roadmap (items 1-5) is complete on both repos. Awaiting direction for next iteration.
+**Shuffleboard transport work is active on the Robot_Simulation side.** This repo is not involved yet — the simulator will prove NT4 protocol compatibility with the official Shuffleboard app first, then findings inform the SmartDashboard plugin.
 
-Candidate follow-on tasks from previous sessions (pick any):
+Candidate follow-on tasks (independent of Shuffleboard work):
 
 - **Manual verify auto-connect checkbox** with a live DS: uncheck it in settings while connected, confirm the transport stops immediately and Connect becomes available.
 - Write-ack protocol on TCP `Publish` (currently fire-and-forget).
