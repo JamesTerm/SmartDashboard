@@ -593,32 +593,33 @@ namespace
 
     void RunClientLoop(LegacyNtTransportInstance& instance)
     {
+        // Ian: Single-attempt connection.  The host (MainWindow) now owns the
+        // reconnect timer and drives retries via Stop()+Start() cycles.  This
+        // method connects once, runs the message loop until the connection
+        // drops or Stop() sets running=false, fires Disconnected, and exits.
+        //
+        // Previous behavior: an outer `while (IsRunning(instance))` loop with
+        // sleep between retries.  That logic is now in
+        // MainWindow::OnReconnectTimerFired().
+
+        if (!ConnectAndHandshake(instance))
+        {
+            PublishState(instance, SD_TRANSPORT_CONNECTION_STATE_DISCONNECTED);
+            return;
+        }
+
+        PublishState(instance, SD_TRANSPORT_CONNECTION_STATE_CONNECTED);
+
         while (IsRunning(instance))
         {
-            if (!ConnectAndHandshake(instance))
+            if (!ProcessOneMessage(instance))
             {
-                PublishState(instance, SD_TRANSPORT_CONNECTION_STATE_DISCONNECTED);
-                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-                continue;
-            }
-
-            PublishState(instance, SD_TRANSPORT_CONNECTION_STATE_CONNECTED);
-
-            while (IsRunning(instance))
-            {
-                if (!ProcessOneMessage(instance))
-                {
-                    break;
-                }
-            }
-
-            CloseSocket(instance);
-            PublishState(instance, SD_TRANSPORT_CONNECTION_STATE_DISCONNECTED);
-            if (IsRunning(instance))
-            {
-                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                break;
             }
         }
+
+        CloseSocket(instance);
+        PublishState(instance, SD_TRANSPORT_CONNECTION_STATE_DISCONNECTED);
     }
 
     bool SendEntryAssignment(

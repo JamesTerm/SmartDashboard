@@ -100,7 +100,6 @@ struct ShuffleboardPluginInstance
     uint16_t port = 5810;
     int teamNumber = 0;
     bool useTeamNumber = false;
-    bool autoConnect = true;
     std::unique_ptr<NT4Client> client;
     sd_transport_callbacks_v1 callbacks {};
 };
@@ -306,12 +305,16 @@ int GetShuffleboardBoolProperty(const char* propertyName, int defaultValue)
 
     const std::string name(propertyName);
 
-    // Ian: Chooser support requires write-back to the NT4 server. Phase 1 is
-    // receive-only so we report false for now. Phase 2 will flip this to true
-    // once the publish path is validated end-to-end.
+    // Ian: Chooser support requires write-back to the NT4 server. The publish
+    // path in NT4Client::PublishString sends a JSON publish claim followed by
+    // a binary value frame. The server creates the topic and updates the
+    // retained cache. Returning true here tells the host to assemble inbound
+    // chooser sub-keys (.type, /options, /default, /active, /selected) into a
+    // chooser widget, and to route user selections through PublishString with
+    // the key + "/selected" convention.
     if (name == SD_TRANSPORT_PROPERTY_SUPPORTS_CHOOSER)
     {
-        return 0;
+        return 1;
     }
 
     // NT4 servers support multiple clients natively.
@@ -371,7 +374,11 @@ int StartShuffleboard(
     const char* settingsJson = (config != nullptr) ? config->plugin_settings_json : nullptr;
 
     instance->port = ReadPluginPortSetting(settingsJson, "port", 5810);
-    instance->autoConnect = ReadPluginBoolSetting(settingsJson, "auto_connect", true);
+    // Ian: auto_connect is no longer read by the plugin.  The host
+    // (MainWindow) now owns reconnect logic via a QTimer that drives
+    // Stop()+Start() cycles.  The auto_connect setting still lives in
+    // plugin_settings_json and is read by MainWindow::IsAutoConnectEnabled()
+    // so the UI checkbox continues to work.
 
     // Allow host/port override from plugin_settings_json
     const std::string settingsHost = ReadPluginStringSetting(settingsJson, "host", "");
@@ -384,7 +391,6 @@ int StartShuffleboard(
     clientConfig.host = ResolveHost(*instance);
     clientConfig.port = instance->port;
     clientConfig.clientName = instance->clientName;
-    clientConfig.autoConnect = instance->autoConnect;
 
     instance->client = std::make_unique<NT4Client>();
 

@@ -373,17 +373,13 @@ namespace
             "port",
             5810
         );
-        // Ian: auto_connect defaults true so existing registry entries that
-        // predate this field get the same reconnecting behaviour as before.
-        // Operators who want a one-shot connect (offline dev, no authority
-        // running) set {"auto_connect":false} in plugin_settings_json; the
-        // client then parks in Disconnected after the first failed attempt and
-        // only redials when the user clicks Connect (which calls Stop+Start).
-        clientConfig.autoConnect = ReadPluginBoolSetting(
-            config != nullptr ? config->plugin_settings_json : nullptr,
-            "auto_connect",
-            true
-        );
+        // Ian: auto_connect is no longer read by the plugin.  The host
+        // (MainWindow) now owns reconnect logic via a QTimer that drives
+        // Stop()+Start() cycles.  The auto_connect setting still lives in
+        // plugin_settings_json and is read by MainWindow::IsAutoConnectEnabled()
+        // so the UI checkbox continues to work.  The plugin simply makes a
+        // single connect attempt per Start() call and fires Disconnected on
+        // failure, letting the host decide whether to retry.
 
         // Ian: The semantic contract sits above carrier choice now. If the
         // operator selects a carrier we do not implement yet, fail loudly here

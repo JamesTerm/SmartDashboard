@@ -101,9 +101,9 @@ struct NT4ClientConfig
     uint16_t port = 5810;
     std::string clientName = "SmartDashboard";
 
-    /// @brief When true, the client automatically reconnects on disconnect.
-    /// When false, it attempts one connect and parks in Disconnected on failure.
-    bool autoConnect = true;
+    // Ian: The autoConnect field has been removed.  Reconnect logic now lives
+    // in the host (MainWindow) which drives Stop()+Start() cycles via a
+    // QTimer.  IXWebSocket's built-in auto-reconnect is always disabled.
 };
 
 /// @brief NT4 WebSocket client that connects to an NT4 server, subscribes to

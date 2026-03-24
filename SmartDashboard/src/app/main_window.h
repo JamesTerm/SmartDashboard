@@ -148,6 +148,8 @@ private:
     QString BuildDisplayLabel(const QString& key) const;
     void StartTransport();
     void StopTransport();
+    bool IsAutoConnectEnabled() const;
+    void OnReconnectTimerFired();
     void UpdatePlaybackUiState();
     void RefreshReplayMarkers();
     void RefreshReplayMarkerList(std::int64_t cursorUs);
@@ -221,6 +223,8 @@ private:
     QLabel* m_replaySelectionSummaryLabel = nullptr;
     sd::widgets::PlaybackTimelineWidget* m_playbackTimeline = nullptr;
     QTimer* m_playbackUiTimer = nullptr;
+    QTimer* m_reconnectTimer = nullptr;
+    bool m_userDisconnected = false;
     bool m_telemetryFeatureEnabled = true;
     bool m_recordRequested = false;
     bool m_isEditable = false;

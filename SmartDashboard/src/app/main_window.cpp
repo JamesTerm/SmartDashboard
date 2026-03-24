@@ -1127,6 +1127,18 @@ MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
     m_playbackUiTimer->start();
     UpdatePlaybackUiState();
 
+    // Ian: Host-level auto-reconnect timer.  When a direct transport fires
+    // Disconnected and auto-connect is enabled (and the user did not manually
+    // click Disconnect), this timer retries by calling StartTransport().
+    // The interval is deliberately short (1 s) so that a robot-code restart
+    // re-establishes the dashboard quickly.  The timer is single-shot so we
+    // get exactly one reconnect attempt per expiry; OnConnectionStateChanged
+    // restarts it if the attempt fails again.
+    m_reconnectTimer = new QTimer(this);
+    m_reconnectTimer->setSingleShot(true);
+    m_reconnectTimer->setInterval(1000);
+    connect(m_reconnectTimer, &QTimer::timeout, this, &MainWindow::OnReconnectTimerFired);
+
     connect(
         qApp,
         &QCoreApplication::aboutToQuit,
@@ -1550,8 +1562,17 @@ void MainWindow::OnConnectionStateChanged(int state)
     DebugLogUiEvent(QString("connection_state=%1").arg(stateText));
 
     const int connected = static_cast<int>(sd::transport::ConnectionState::Connected);
+    const int disconnected = static_cast<int>(sd::transport::ConnectionState::Disconnected);
+
     if (state == connected)
     {
+        // Ian: Successful connection — cancel any pending reconnect attempt.
+        // The timer is single-shot so it won't fire again on its own, but
+        // stopping it explicitly handles the narrow window where the timer has
+        // expired but the queued slot hasn't executed yet.
+        m_reconnectTimer->stop();
+        m_userDisconnected = false;
+
         // Reconnect handling: reset sequence gating when transport re-enters connected state.
         m_variableStore.ResetSequenceTracking();
 
@@ -1563,6 +1584,28 @@ void MainWindow::OnConnectionStateChanged(int state)
         // restart and republish before another instance has finished applying its
         // snapshot-driven tiles.
         PublishRememberedControlValues();
+    }
+    else if (state == disconnected)
+    {
+        // Ian: Host-level auto-reconnect: when a plugin fires Disconnected
+        // (either a failed connect attempt or a dropped connection), the host
+        // schedules a retry via m_reconnectTimer — but only if:
+        //   1. auto_connect is enabled in settings
+        //   2. the user didn't manually click Disconnect
+        //   3. we're using a direct (non-replay) transport
+        // The timer is single-shot; each expiry triggers one Stop+Start cycle.
+        // If that attempt also fails (plugin fires Disconnected again), we end
+        // up back here and schedule another retry — creating a host-driven
+        // retry loop without any per-plugin reconnect code.
+        if (IsAutoConnectEnabled()
+            && !m_userDisconnected
+            && m_connectionConfig.kind != sd::transport::TransportKind::Replay)
+        {
+            if (!m_reconnectTimer->isActive())
+            {
+                m_reconnectTimer->start();
+            }
+        }
     }
 
     UpdateWindowConnectionText(state);
@@ -2313,6 +2356,9 @@ void MainWindow::OnConnectTransport()
         return;
     }
 
+    // Ian: User explicitly clicked Connect — clear the manual-disconnect
+    // flag so host-level auto-reconnect is eligible again.
+    m_userDisconnected = false;
     StartTransport();
 }
 
@@ -2322,6 +2368,11 @@ void MainWindow::OnDisconnectTransport()
     {
         return;
     }
+
+    // Ian: User explicitly clicked Disconnect — suppress host-level
+    // auto-reconnect until the user clicks Connect again.
+    m_userDisconnected = true;
+    m_reconnectTimer->stop();
 
     StopTransport();
     // Ian: Route through OnConnectionStateChanged (not UpdateWindowConnectionText directly)
@@ -2353,13 +2404,16 @@ void MainWindow::OnDebugCommandReceived()
         {
             if (m_connectionConfig.kind != sd::transport::TransportKind::Replay)
             {
+                m_userDisconnected = true;
+                m_reconnectTimer->stop();
                 StopTransport();
-                UpdateWindowConnectionText(
+                OnConnectionStateChanged(
                     static_cast<int>(sd::transport::ConnectionState::Disconnected));
             }
         }
         else if (cmd == "connect")
         {
+            m_userDisconnected = false;
             StartTransport();
         }
     }
@@ -2545,37 +2599,29 @@ void MainWindow::OnEditTransportSettings()
     ApplyTransportMenuChecks();
     PersistConnectionSettings();
 
-    // Ian: auto_connect is the one setting that can be applied to a live
-    // transport without a full stop+start.  When the user unchecks it while
-    // the transport is running (or pulsing in the Connecting/Disconnected
-    // retry cycle), we stop immediately so the title bar settles and the
-    // Connect button becomes available for a manual single-shot attempt.
-    // Stopping is safe and fast: the worker is either sleeping kReconnectRetryMs
-    // (500 ms) between attempts or blocked in a 3-second connect timeout, both
-    // of which are interrupted by ShutdownSocket() inside Stop().
+    // Ian: auto_connect is now a host-level concern — the reconnect timer in
+    // MainWindow drives retries, not the plugin.  When the user unchecks
+    // auto_connect while the transport is running (or while the host reconnect
+    // timer is scheduling retries), we stop the timer and the transport so
+    // the title bar settles and the Connect button becomes available for a
+    // manual single-shot attempt.
     //
     // For all other setting changes (host, port, carrier) the transport is left
     // running so an operator editing fields mid-match does not get an involuntary
     // disconnect.  A message box informs them to reconnect manually.
-    const bool newAutoConnect = [&]() -> bool {
-        if (m_connectionConfig.pluginSettingsJson.trimmed().isEmpty())
-        {
-            return true;
-        }
-        const QJsonDocument doc = QJsonDocument::fromJson(m_connectionConfig.pluginSettingsJson.toUtf8());
-        if (!doc.isObject())
-        {
-            return true;
-        }
-        const QJsonValue v = doc.object().value("auto_connect");
-        return v.isUndefined() ? true : v.toBool(true);
-    }();
+    const bool newAutoConnect = IsAutoConnectEnabled();
 
-    if (m_transport != nullptr && !newAutoConnect)
+    if (!newAutoConnect)
     {
-        // User disabled auto-connect — stop the retry cycle right now.
-        StopTransport();
-        OnConnectionStateChanged(static_cast<int>(sd::transport::ConnectionState::Disconnected));
+        // User disabled auto-connect — stop the host-level retry cycle.
+        m_reconnectTimer->stop();
+        m_userDisconnected = true;
+
+        if (m_transport != nullptr)
+        {
+            StopTransport();
+            OnConnectionStateChanged(static_cast<int>(sd::transport::ConnectionState::Disconnected));
+        }
     }
     else if (m_transport != nullptr)
     {
@@ -3193,6 +3239,59 @@ void MainWindow::StopTransport()
 
     StopSessionRecording();
     UpdatePlaybackUiState();
+}
+
+// Ian: Host-level auto-connect check.  Reads `auto_connect` from the shared
+// plugin_settings_json so the setting works identically for every plugin
+// transport (Native Link, Shuffleboard, Legacy NT) without each plugin
+// having to implement its own retry loop.  Defaults to true when the field
+// is absent or the JSON is empty, matching the original per-plugin behavior.
+bool MainWindow::IsAutoConnectEnabled() const
+{
+    if (m_connectionConfig.pluginSettingsJson.trimmed().isEmpty())
+    {
+        return true;
+    }
+    const QJsonDocument doc = QJsonDocument::fromJson(m_connectionConfig.pluginSettingsJson.toUtf8());
+    if (!doc.isObject())
+    {
+        return true;
+    }
+    const QJsonValue v = doc.object().value("auto_connect");
+    return v.isUndefined() ? true : v.toBool(true);
+}
+
+// Ian: Reconnect-timer callback.  Fires once per interval (single-shot) and
+// performs a full Stop()+Start() cycle on the transport.  If Start() fails
+// synchronously, we fire Disconnected which re-arms the timer for another
+// attempt.  If Start() succeeds and the plugin later fires Connected, the
+// timer is stopped in OnConnectionStateChanged.  If the plugin fires
+// Disconnected asynchronously (connect timeout, server rejected us, etc.),
+// OnConnectionStateChanged re-arms the timer again.
+//
+// The Stop()+Start() pattern is simple and safe: Stop() joins the worker
+// thread and resets state, then Start() creates a fresh worker with a
+// single connect attempt.  No new plugin API is needed.
+void MainWindow::OnReconnectTimerFired()
+{
+    DebugLogUiEvent(QStringLiteral("reconnect_timer_fired"));
+
+    // Guard: if the user clicked Disconnect while the timer was in flight,
+    // or auto-connect was disabled in settings, do nothing.
+    if (m_userDisconnected || !IsAutoConnectEnabled())
+    {
+        return;
+    }
+
+    // Guard: replay transport should never auto-reconnect.
+    if (m_connectionConfig.kind == sd::transport::TransportKind::Replay)
+    {
+        return;
+    }
+
+    // Perform the stop+start cycle.  StartTransport() internally calls
+    // StopTransport() first, so we don't need an explicit Stop() here.
+    StartTransport();
 }
 
 void MainWindow::UpdatePlaybackUiState()

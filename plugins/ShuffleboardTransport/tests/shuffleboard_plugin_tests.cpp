@@ -68,15 +68,17 @@ TEST(ShuffleboardPluginTests, DescriptorAdvertisesMultiClient)
     EXPECT_NE(descriptor->get_bool_property(SD_TRANSPORT_PROPERTY_SUPPORTS_MULTI_CLIENT, 0), 0);
 }
 
-TEST(ShuffleboardPluginTests, ChooserSupportDisabledInPhase1)
+TEST(ShuffleboardPluginTests, ChooserSupportEnabled)
 {
-    // Ian: Chooser support requires write-back to the NT4 server. Phase 1 is
-    // receive-only so we report false. This test ensures we don't accidentally
-    // flip this before the publish path is validated end-to-end.
+    // Ian: Chooser support is enabled now that the publish path works end-to-end.
+    // The plugin sends a JSON publish claim + binary value frame to the NT4 server,
+    // which updates its retained cache. The host assembles chooser sub-keys
+    // (.type, /options, /default, /active, /selected) into a chooser widget and
+    // routes user selections through PublishString with key + "/selected".
     const sd_transport_plugin_descriptor_v1* descriptor = SdGetTransportPluginV1();
     ASSERT_NE(descriptor, nullptr);
     ASSERT_NE(descriptor->get_bool_property, nullptr);
-    EXPECT_EQ(descriptor->get_bool_property(SD_TRANSPORT_PROPERTY_SUPPORTS_CHOOSER, 0), 0);
+    EXPECT_NE(descriptor->get_bool_property(SD_TRANSPORT_PROPERTY_SUPPORTS_CHOOSER, 0), 0);
 }
 
 TEST(ShuffleboardPluginTests, UnknownPropertyReturnsDefault)

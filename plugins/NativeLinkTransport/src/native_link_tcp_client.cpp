@@ -263,13 +263,6 @@ namespace sd::nativelink
         }
     }
 
-    // Ian: kReconnectRetryMs is intentionally short so that a robot-code
-    // restart (authority exits and relaunches) re-establishes the dashboard
-    // within ~1 s rather than the multi-second delay the OS TCP connect
-    // timeout would impose on a back-off scheme. Keep it >= the authority's
-    // own startup time (empirically ~300 ms for the test server).
-    constexpr std::uint32_t kReconnectRetryMs = 500;
-
     // Ian: kConnectTimeoutMs bounds the blocking connect() so the UI thread
     // (or worker thread) can't stall for the OS default (~20 s on Windows)
     // when the authority is not yet up. Using select() on a non-blocking
@@ -294,10 +287,6 @@ namespace sd::nativelink
         std::atomic<bool> running = false;
         std::atomic<bool> stopRequested = false;
         std::atomic<bool> connected = false;
-        // Ian: Mirrors config.autoConnect but stored atomically so RunLoop can
-        // read it without holding any lock.  Written once in Start() before the
-        // worker thread launches.
-        std::atomic<bool> autoConnect = true;
         std::atomic<std::uint64_t> serverSessionId = 0;
         std::atomic<std::uint64_t> lastHeartbeatUs = 0;
         std::mutex sendMutex;
@@ -323,7 +312,6 @@ namespace sd::nativelink
             snapshotPhase = SnapshotPhase::Descriptors;
             lastHeartbeatUs.store(0, std::memory_order_release);
             serverSessionId.store(0, std::memory_order_release);
-            autoConnect.store(inConfig.autoConnect, std::memory_order_release);
 
             running.store(true, std::memory_order_release);
             stopRequested.store(false, std::memory_order_release);
@@ -498,83 +486,46 @@ namespace sd::nativelink
 
         void RunLoop()
         {
-            // Ian: Outer reconnect loop — mirrors the SHM client's passive
-            // re-drain behaviour but must be active because TCP has no shared
-            // memory the server can write into between dial attempts. Each pass
-            // tries to connect, runs the frame receive loop until the server
-            // disconnects or a protocol error occurs, then:
-            //   autoConnect=true  → fires Disconnected, waits kReconnectRetryMs, redials
-            //   autoConnect=false → fires Disconnected, exits (user must click Connect)
-            // Stop() sets stopRequested and calls ShutdownSocket() to interrupt both
-            // the connect wait (select on write-readiness) and any in-progress recv
-            // (shutdown(SD_BOTH)).
-            while (!stopRequested.load(std::memory_order_acquire))
+            // Ian: Single-attempt connection.  The host (MainWindow) now owns
+            // the reconnect timer and drives retries via Stop()+Start() cycles.
+            // This method connects once, runs the receive loop until the
+            // connection drops or stopRequested is set, fires Disconnected, and
+            // exits.  The host sees the Disconnected callback and schedules the
+            // next attempt if auto-connect is enabled.
+            //
+            // Previous behavior: an outer `while(!stopRequested)` loop with
+            // `autoConnect` checks and `kReconnectRetryMs` sleep between retries.
+            // That logic is now in MainWindow::OnReconnectTimerFired().
+
+            snapshotPhase = SnapshotPhase::Descriptors;
+            lastHeartbeatUs.store(0, std::memory_order_release);
+            serverSessionId.store(0, std::memory_order_release);
+
+            if (onConnectionState)
             {
-                // Reset per-connection state before each dial attempt.
-                snapshotPhase = SnapshotPhase::Descriptors;
-                lastHeartbeatUs.store(0, std::memory_order_release);
-                serverSessionId.store(0, std::memory_order_release);
+                onConnectionState(kConnectionStateConnecting);
+            }
 
-                if (onConnectionState)
-                {
-                    onConnectionState(kConnectionStateConnecting);
-                }
-
-                if (!TryConnect())
-                {
-                    if (stopRequested.load(std::memory_order_acquire))
-                    {
-                        break;
-                    }
-
-                    // Ian: Fire Disconnected so the UI title pulses
-                    // Connecting→Disconnected rather than staying stuck in
-                    // Connecting indefinitely. This lets the user observe each
-                    // failed attempt without misleading them about state.
-                    if (onConnectionState)
-                    {
-                        onConnectionState(kConnectionStateDisconnected);
-                    }
-
-                    if (!autoConnect.load(std::memory_order_acquire))
-                    {
-                        // Ian: Manual-connect mode — park here until the user
-                        // triggers a new Start(). Do not retry automatically.
-                        break;
-                    }
-
-                    // Server not up yet — sleep then retry.
-                    std::this_thread::sleep_for(std::chrono::milliseconds(kReconnectRetryMs));
-                    continue;
-                }
-
-                // Inner receive loop — runs until the connection dies.
-                RunRecvLoop();
-
-                // Connection dropped. Clear connected state.
-                if (connected.exchange(false) && onConnectionState)
+            if (!TryConnect())
+            {
+                if (!stopRequested.load(std::memory_order_acquire) && onConnectionState)
                 {
                     onConnectionState(kConnectionStateDisconnected);
                 }
-
-                CloseSocket();
-
-                if (stopRequested.load(std::memory_order_acquire))
-                {
-                    break;
-                }
-
-                if (!autoConnect.load(std::memory_order_acquire))
-                {
-                    // Ian: Manual-connect mode — after a drop, park in
-                    // Disconnected rather than auto-redialling.
-                    break;
-                }
-
-                // Brief pause before redialling so we don't hammer the port.
-                std::this_thread::sleep_for(std::chrono::milliseconds(kReconnectRetryMs));
+                running.store(false, std::memory_order_release);
+                return;
             }
 
+            // Receive loop — runs until the connection dies or Stop() is called.
+            RunRecvLoop();
+
+            // Connection dropped. Clear connected state.
+            if (connected.exchange(false) && onConnectionState)
+            {
+                onConnectionState(kConnectionStateDisconnected);
+            }
+
+            CloseSocket();
             running.store(false, std::memory_order_release);
         }
 

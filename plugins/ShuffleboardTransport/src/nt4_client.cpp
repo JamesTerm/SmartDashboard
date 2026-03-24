@@ -25,11 +25,9 @@ namespace sd::shuffleboard
 namespace
 {
 
-// Ian: kReconnectDelayMs is intentionally short so that a robot-code restart
-// (which kills the NT4 server and immediately re-launches it) appears
-// near-seamless in the dashboard. 2 seconds keeps the UI responsive without
-// hammering a host that is genuinely offline.
-constexpr int kReconnectDelayMs = 2000;
+// Ian: kReconnectDelayMs was removed.  Reconnect logic now lives in the host
+// (MainWindow) which drives Stop()+Start() cycles via a QTimer.  IXWebSocket's
+// built-in automatic reconnection is always disabled.
 
 // Ian: The subscription UID is an arbitrary client-chosen integer. The server
 // uses it to track which subscriptions a client has. We only ever create one
@@ -916,9 +914,13 @@ struct NT4Client::Impl
     }
 
     /// @brief Ensure we have a publish claim for a topic, return the pubuid.
+    /// Ian: The host passes short keys like "TestMove" or "Test/Auton_Selection/AutoChooser/selected".
+    /// The NT4 server expects the full path "/SmartDashboard/<key>" — same prefix it uses
+    /// when publishing topics to us. Without this prefix the server creates a new topic
+    /// outside the /SmartDashboard/ namespace and the simulator never sees the value.
     int EnsurePublished(const std::string& topicPath, NT4TypeCode typeCode)
     {
-        const std::string ntPath = "/" + topicPath; // topics use full NT4 paths
+        const std::string ntPath = "/SmartDashboard/" + topicPath;
         // Check if already published
         {
             std::lock_guard<std::mutex> lock(pubMutex);
@@ -998,19 +1000,11 @@ bool NT4Client::Start(
     m_impl->ws.disablePerMessageDeflate();
     m_impl->ws.setPingInterval(30);
 
-    // Ian: Enable auto-reconnect if configured. IXWebSocket handles the
-    // reconnect loop internally with exponential backoff. We set the initial
-    // delay and max delay to keep reconnection snappy.
-    if (config.autoConnect)
-    {
-        m_impl->ws.enableAutomaticReconnection();
-        m_impl->ws.setMinWaitBetweenReconnectionRetries(kReconnectDelayMs);
-        m_impl->ws.setMaxWaitBetweenReconnectionRetries(kReconnectDelayMs * 5);
-    }
-    else
-    {
-        m_impl->ws.disableAutomaticReconnection();
-    }
+    // Ian: IXWebSocket's built-in auto-reconnect is always disabled now.
+    // The host (MainWindow) owns reconnect logic and drives Stop()+Start()
+    // cycles via a QTimer.  The plugin makes a single connect attempt per
+    // Start() call and fires Disconnected if the connection drops.
+    m_impl->ws.disableAutomaticReconnection();
 
     // Set up the message handler
     auto* impl = m_impl.get();
