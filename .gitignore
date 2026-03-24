@@ -56,5 +56,8 @@ CMakeUserPresets.json
 # Temporary diagnostic / scratch scripts (not for review or commit)
 tools/_tmp_*.py
 
+# Temporary stderr/stdout captures from test runs
+sd_stderr*.txt
+
 # Windows NUL device artifact (created by accidental redirect to "nul")
 nul

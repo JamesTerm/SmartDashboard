@@ -3,6 +3,14 @@
 /// @file dashboard_transport_plugin_api.h
 /// @brief Versioned C ABI for optional SmartDashboard transport plugins.
 ///
+/// Ian: To add a new transport plugin (e.g. Glass), create a new directory
+/// under plugins/<Name>Transport/ with its own CMakeLists.txt, implement
+/// the sd_transport_plugin_descriptor_v1 contract, and export
+/// SdGetTransportPluginV1().  See ShuffleboardTransport/ as the reference
+/// example — it covers: NT4 WebSocket client, publish (write-back),
+/// chooser support, host-level auto-connect integration, WSAStartup
+/// deferred init, and connection field descriptors.
+///
 /// This header is the binary contract between the SmartDashboard host process
 /// and transport plugins loaded from the `plugins/` directory.
 ///
