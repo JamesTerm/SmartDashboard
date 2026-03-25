@@ -3286,7 +3286,7 @@ void MainWindow::StopTransport()
 
 // Ian: Host-level auto-connect check.  Reads `auto_connect` from the shared
 // plugin_settings_json so the setting works identically for every plugin
-// transport (Native Link, Shuffleboard, Legacy NT) without each plugin
+// transport (Native Link, NT4, Legacy NT) without each plugin
 // having to implement its own retry loop.  Defaults to true when the field
 // is absent or the JSON is empty, matching the original per-plugin behavior.
 bool MainWindow::IsAutoConnectEnabled() const

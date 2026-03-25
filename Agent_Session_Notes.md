@@ -49,7 +49,7 @@ Current plugins:
 |---|---|---|---|
 | LegacyNtTransport | `legacy-nt` | NetworkTables v2 TCP | Stable |
 | NativeLinkTransport | `native-link` | Custom TCP/SHM | Stable |
-| ShuffleboardTransport | `shuffleboard` | NT4 WebSocket | Stable, merged |
+| NT4Transport | `nt4` | NT4 WebSocket | Stable, merged |
 
 ### Auto-connect
 
@@ -58,7 +58,7 @@ Current plugins:
 
 ### Write-back
 
-- `PublishBool/Double/String` in the plugin ABI is fully wired for Shuffleboard. The `EnsurePublished` path in `nt4_client.cpp` uses the `/SmartDashboard/` prefix.
+- `PublishBool/Double/String` in the plugin ABI is fully wired for NT4. The `EnsurePublished` path in `nt4_client.cpp` uses the `/SmartDashboard/` prefix.
 - `supports_chooser` returns true. This property controls whether inbound updates are assembled into chooser widgets — it does NOT gate outbound publish.
 - `RememberControlValueIfAllowed` only works for Direct transport (`CurrentTransportUsesRememberedControlValues()` returns true only for `TransportKind::Direct`).
 
@@ -74,16 +74,34 @@ Current plugins:
 |---|---|---|
 | Native Link TCP carrier | `feature/native-link-tcpip-carrier` | Merged to main |
 | Shuffleboard NT4 transport | `feature/shuffleboard-transport` | Merged to main |
+| Glass NT4 transport + Shuffleboard→NT4 rename | `feature/glass-transport` | Active |
 
-## Preparing for Glass transport
+## Glass transport (active — `feature/glass-transport`)
 
-Glass is the next dashboard integration target. It uses the same NT4 protocol as Shuffleboard (WebSocket on port 1735 by default, not 5810). The process:
+Glass is the next dashboard integration target. It uses the same NT4 protocol as Shuffleboard — same WebSocket transport, same MsgPack binary frames, same JSON control messages, same port 5810. Because the NT4 plugin already implements a full NT4 client, the Glass plugin may share most of that code.
 
-1. **Pull Glass source** into `D:\code\Glass` (same pattern as `D:\code\Shuffleboard`)
-2. **Make Robot_Simulation work with Glass** (may need NT4 server adjustments for Glass's subscription patterns or port)
+### Glass installation
+
+Glass 2026.2.2 is installed at `D:\code\Glass` (portable directory, same pattern as `D:\code\Shuffleboard`):
+
+| File | Purpose |
+|---|---|
+| `glass.exe` | Glass application (native C++ binary — no JRE needed) |
+| `run_glass.bat` | Launch Glass (default config from `%APPDATA%`) |
+| `run_glass_local.bat` | Launch Glass pre-configured for localhost:5810 |
+| `config_local\glass.json` | Pre-configured: NT4 client mode, `localhost`, port 5810 |
+
+**How local config works:** Glass takes one CLI argument — a save directory for its JSON config files. `run_glass_local.bat` passes `config_local\` which contains a pre-seeded `glass.json`. Default `run_glass.bat` uses `%APPDATA%` and requires manual GUI configuration.
+
+**Source:** `https://frcmaven.wpi.edu/artifactory/release/edu/wpi/first/tools/Glass/2026.2.2/Glass-2026.2.2-windowsx86-64.zip`
+
+### Plan
+
+1. ~~Pull Glass into `D:\code\Glass`~~ — Done
+2. **Make Robot_Simulation work with Glass** — likely zero server changes since Glass speaks the same NT4 protocol on port 5810
 3. **Create SmartDashboard Glass plugin** under `plugins/GlassTransport/`
 
-### Lessons from Shuffleboard to apply to Glass
+### Lessons from the Shuffleboard integration to apply to Glass
 
 **Protocol:**
 - NT4 is subscription-driven. The server must NOT send `announce` messages until the client sends `subscribe`. This was the #1 silent failure with Shuffleboard.
@@ -95,12 +113,12 @@ Glass is the next dashboard integration target. It uses the same NT4 protocol as
 **SmartDashboard plugin side:**
 - WSAStartup must be called before any IXWebSocket operations. Use `ix::initNetSystem()` in `Start()`, `ix::uninitNetSystem()` in `Stop()`, guarded by a flag. Do NOT initialize Winsock globally.
 - Stock vcpkg ixwebsocket works fine for the client side (no overlay port needed).
-- Topic prefix: Shuffleboard uses `/SmartDashboard/<key>`. Glass may use a different prefix — check its NT4 topic namespace.
+- Topic prefix: NT4 uses `/SmartDashboard/<key>`. Glass may use a different prefix — check its NT4 topic namespace.
 - `EnsurePublished` must build the correct full topic path for the publish JSON message.
 - The chooser protocol (`.type`, `options`, `default`, `active`, `selected` sub-keys) is a WPILib convention. Glass should support it too, but verify.
 
 **Simulator side (Robot_Simulation):**
-- The NT4 server currently binds to port 5810 (Shuffleboard default). Glass defaults to port 1735. May need configurable port or multi-port support.
+- The NT4 server binds to port 5810. Glass also uses port 5810 in NT4 client mode (same as Shuffleboard) — no port changes needed. The old note about "Glass defaults to port 1735" was wrong; 1735 is the NT3 fallback port.
 - `IsChooserEnabledForCurrentConnection()` in `AI_Input_Example.cpp` must include the new mode.
 - `UsesLegacyTransportPath()` in `Transport.cpp` must return false for the new mode.
 - A new `ConnectionMode` enum value and `IConnectionBackend` subclass are needed.

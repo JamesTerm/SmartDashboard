@@ -4,7 +4,7 @@
 /// @brief NT4 WebSocket client for receiving telemetry from an NT4 server.
 ///
 /// This client connects to an NT4 server (e.g. the Robot_Simulation
-/// ShuffleboardBackend or a real ntcore server) over WebSocket on port 5810.
+/// NT4Backend or a real ntcore server) over WebSocket on port 5810.
 /// It implements the NT4 subscription-driven protocol:
 ///   1. Connect via WebSocket to ws://<host>:5810/nt/<clientname>
 ///   2. Send a subscribe message with topic patterns
@@ -26,7 +26,7 @@
 #include <string>
 #include <vector>
 
-namespace sd::shuffleboard
+namespace sd::nt4
 {
 
 /// @brief NT4 numeric type codes matching the NT4 protocol spec.
@@ -149,4 +149,4 @@ private:
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace sd::shuffleboard
+} // namespace sd::nt4
