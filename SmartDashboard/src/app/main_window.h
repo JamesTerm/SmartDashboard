@@ -167,6 +167,7 @@ private:
     void RecordConnectionEvent(int state);
     bool IsRecordingTransportKind(sd::transport::TransportKind kind) const;
     void PublishRememberedControlValues();
+    void RepublishPluginChooserSelections();
     void DebugLogUiEvent(const QString& line) const;
     void DrainPendingUiUpdates();
     void SelectTransport(const QString& transportId);
@@ -255,6 +256,13 @@ private:
     };
     std::unordered_map<std::string, RememberedControlValue> m_rememberedControlValues;
     std::unordered_map<std::string, TemporaryDefaultValue> m_temporaryDefaultValues;
+    // Ian: In-memory chooser selections for plugin transports (Native Link, NT4).
+    // Unlike Direct's registry-persisted m_rememberedControlValues, these survive
+    // only as long as the process runs.  On reconnect the server's snapshot seeds
+    // /selected with a default, so we re-publish the user's last local edit to
+    // restore the operator's intent.  Keyed by chooser base path (e.g.
+    // "Test/Auton_Selection/AutoChooser"), value is the display string.
+    std::unordered_map<std::string, QString> m_pluginChooserSelections;
     mutable std::ofstream m_uiDebugLog;
     std::mutex m_pendingUiUpdatesMutex;
     QVector<sd::transport::VariableUpdate> m_pendingUiUpdates;
