@@ -11,25 +11,25 @@
 // Ian: This is the ABI bridge between the SmartDashboard host and the NT4
 // WebSocket client. It follows the exact same pattern as the NativeLink
 // plugin: static descriptor + C function table + opaque instance. The plugin
-// connects to an NT4 server (Robot_Simulation ShuffleboardBackend or a real
-// ntcore server running on a robot/coprocessor) and feeds received topic
-// values into the dashboard display pipeline. Phase 1 is receive-only;
-// phase 2 adds write-back for chooser selections via NT4 publish.
+// connects to an NT4 server (Robot_Simulation NT4Backend or a real ntcore
+// server running on a robot/coprocessor) and feeds received topic values
+// into the dashboard display pipeline. Supports any NT4-compatible dashboard
+// (Shuffleboard, Glass, AdvantageScope, etc.).
 
 namespace
 {
 
-using sd::shuffleboard::ConnectionState;
-using sd::shuffleboard::NT4Client;
-using sd::shuffleboard::NT4ClientConfig;
-using sd::shuffleboard::TopicUpdate;
-using sd::shuffleboard::ValueType;
+using sd::nt4::ConnectionState;
+using sd::nt4::NT4Client;
+using sd::nt4::NT4ClientConfig;
+using sd::nt4::TopicUpdate;
+using sd::nt4::ValueType;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Connection fields — host-rendered settings schema
 // ────────────────────────────────────────────────────────────────────────────
 
-const sd_transport_connection_field_descriptor_v1 kShuffleboardConnectionFields[] = {
+const sd_transport_connection_field_descriptor_v1 kNT4ConnectionFields[] = {
     {
         SD_TRANSPORT_FIELD_HOST,
         "Host / IP",
@@ -46,7 +46,7 @@ const sd_transport_connection_field_descriptor_v1 kShuffleboardConnectionFields[
         "Use team number",
         SD_TRANSPORT_CONNECTION_FIELD_TYPE_BOOL,
         "Use FRC team-number resolution instead of a direct host/IP.",
-        0,  // default off — most Shuffleboard use is against localhost or a known IP
+        0,  // default off — most NT4 use is against localhost or a known IP
         0,
         nullptr,
         0,
@@ -92,7 +92,7 @@ const sd_transport_connection_field_descriptor_v1 kShuffleboardConnectionFields[
 // Plugin instance
 // ────────────────────────────────────────────────────────────────────────────
 
-struct ShuffleboardPluginInstance
+struct NT4PluginInstance
 {
     bool running = false;
     std::string clientName = "SmartDashboard";
@@ -224,7 +224,7 @@ bool ReadPluginBoolSetting(const char* jsonText, const char* key, bool fallback)
 // Host resolution
 // ────────────────────────────────────────────────────────────────────────────
 
-std::string ResolveHost(const ShuffleboardPluginInstance& instance)
+std::string ResolveHost(const NT4PluginInstance& instance)
 {
     if (instance.useTeamNumber && instance.teamNumber > 0)
     {
@@ -247,7 +247,7 @@ std::string ResolveHost(const ShuffleboardPluginInstance& instance)
 // ABI callback bridge
 // ────────────────────────────────────────────────────────────────────────────
 
-void PublishUpdateCallback(const ShuffleboardPluginInstance& instance, const TopicUpdate& update)
+void PublishUpdateCallback(const NT4PluginInstance& instance, const TopicUpdate& update)
 {
     if (instance.callbacks.on_variable_update == nullptr)
     {
@@ -296,7 +296,7 @@ void PublishUpdateCallback(const ShuffleboardPluginInstance& instance, const Top
 // Plugin property queries
 // ────────────────────────────────────────────────────────────────────────────
 
-int GetShuffleboardBoolProperty(const char* propertyName, int defaultValue)
+int GetNT4BoolProperty(const char* propertyName, int defaultValue)
 {
     if (propertyName == nullptr)
     {
@@ -326,36 +326,36 @@ int GetShuffleboardBoolProperty(const char* propertyName, int defaultValue)
     return defaultValue;
 }
 
-const sd_transport_connection_field_descriptor_v1* GetShuffleboardConnectionFields(size_t* outCount)
+const sd_transport_connection_field_descriptor_v1* GetNT4ConnectionFields(size_t* outCount)
 {
     if (outCount != nullptr)
     {
-        *outCount = sizeof(kShuffleboardConnectionFields) / sizeof(kShuffleboardConnectionFields[0]);
+        *outCount = sizeof(kNT4ConnectionFields) / sizeof(kNT4ConnectionFields[0]);
     }
 
-    return kShuffleboardConnectionFields;
+    return kNT4ConnectionFields;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // Plugin API function table
 // ────────────────────────────────────────────────────────────────────────────
 
-sd_transport_instance_v1 CreateShuffleboardInstance()
+sd_transport_instance_v1 CreateNT4Instance()
 {
-    return new ShuffleboardPluginInstance();
+    return new NT4PluginInstance();
 }
 
-void DestroyShuffleboardInstance(sd_transport_instance_v1 instance)
+void DestroyNT4Instance(sd_transport_instance_v1 instance)
 {
-    delete static_cast<ShuffleboardPluginInstance*>(instance);
+    delete static_cast<NT4PluginInstance*>(instance);
 }
 
-int StartShuffleboard(
+int StartNT4(
     sd_transport_instance_v1 instanceHandle,
     const sd_transport_connection_config_v1* config,
     const sd_transport_callbacks_v1* callbacks)
 {
-    auto* instance = static_cast<ShuffleboardPluginInstance*>(instanceHandle);
+    auto* instance = static_cast<NT4PluginInstance*>(instanceHandle);
     if (instance == nullptr || callbacks == nullptr)
     {
         return 0;
@@ -427,9 +427,9 @@ int StartShuffleboard(
     return 1;
 }
 
-void StopShuffleboard(sd_transport_instance_v1 instanceHandle)
+void StopNT4(sd_transport_instance_v1 instanceHandle)
 {
-    auto* instance = static_cast<ShuffleboardPluginInstance*>(instanceHandle);
+    auto* instance = static_cast<NT4PluginInstance*>(instanceHandle);
     if (instance == nullptr)
     {
         return;
@@ -444,9 +444,9 @@ void StopShuffleboard(sd_transport_instance_v1 instanceHandle)
     instance->running = false;
 }
 
-int ShuffleboardPublishBool(sd_transport_instance_v1 instanceHandle, const char* key, int value)
+int NT4PublishBool(sd_transport_instance_v1 instanceHandle, const char* key, int value)
 {
-    auto* instance = static_cast<ShuffleboardPluginInstance*>(instanceHandle);
+    auto* instance = static_cast<NT4PluginInstance*>(instanceHandle);
     if (instance == nullptr || instance->client == nullptr || key == nullptr)
     {
         return 0;
@@ -455,9 +455,9 @@ int ShuffleboardPublishBool(sd_transport_instance_v1 instanceHandle, const char*
     return instance->client->PublishBool(key, value != 0) ? 1 : 0;
 }
 
-int ShuffleboardPublishDouble(sd_transport_instance_v1 instanceHandle, const char* key, double value)
+int NT4PublishDouble(sd_transport_instance_v1 instanceHandle, const char* key, double value)
 {
-    auto* instance = static_cast<ShuffleboardPluginInstance*>(instanceHandle);
+    auto* instance = static_cast<NT4PluginInstance*>(instanceHandle);
     if (instance == nullptr || instance->client == nullptr || key == nullptr)
     {
         return 0;
@@ -466,9 +466,9 @@ int ShuffleboardPublishDouble(sd_transport_instance_v1 instanceHandle, const cha
     return instance->client->PublishDouble(key, value) ? 1 : 0;
 }
 
-int ShuffleboardPublishString(sd_transport_instance_v1 instanceHandle, const char* key, const char* value)
+int NT4PublishString(sd_transport_instance_v1 instanceHandle, const char* key, const char* value)
 {
-    auto* instance = static_cast<ShuffleboardPluginInstance*>(instanceHandle);
+    auto* instance = static_cast<NT4PluginInstance*>(instanceHandle);
     if (instance == nullptr || instance->client == nullptr || key == nullptr || value == nullptr)
     {
         return 0;
@@ -481,31 +481,31 @@ int ShuffleboardPublishString(sd_transport_instance_v1 instanceHandle, const cha
 // Static descriptor and API table
 // ────────────────────────────────────────────────────────────────────────────
 
-const sd_transport_api_v1 kShuffleboardApi = {
-    &CreateShuffleboardInstance,
-    &DestroyShuffleboardInstance,
-    &StartShuffleboard,
-    &StopShuffleboard,
-    &ShuffleboardPublishBool,
-    &ShuffleboardPublishDouble,
-    &ShuffleboardPublishString
+const sd_transport_api_v1 kNT4Api = {
+    &CreateNT4Instance,
+    &DestroyNT4Instance,
+    &StartNT4,
+    &StopNT4,
+    &NT4PublishBool,
+    &NT4PublishDouble,
+    &NT4PublishString
 };
 
-const sd_transport_plugin_descriptor_v1 kShuffleboardDescriptor = {
+const sd_transport_plugin_descriptor_v1 kNT4Descriptor = {
     sizeof(sd_transport_plugin_descriptor_v1),
     SD_TRANSPORT_PLUGIN_API_VERSION_1,
-    "shuffleboard",                                          // plugin_id
-    "Shuffleboard (NT4)",                                    // display_name
-    "shuffleboard",                                          // settings_profile_id
+    "nt4",                                                   // plugin_id
+    "NetworkTables V4",                                      // display_name
+    "nt4",                                                   // settings_profile_id
     SD_TRANSPORT_PLUGIN_FLAG_USE_SHORT_DISPLAY_KEYS,         // flags
-    &GetShuffleboardBoolProperty,
-    &GetShuffleboardConnectionFields,
-    &kShuffleboardApi
+    &GetNT4BoolProperty,
+    &GetNT4ConnectionFields,
+    &kNT4Api
 };
 
 } // anonymous namespace
 
 extern "C" SD_TRANSPORT_PLUGIN_EXPORT const sd_transport_plugin_descriptor_v1* SdGetTransportPluginV1(void)
 {
-    return &kShuffleboardDescriptor;
+    return &kNT4Descriptor;
 }

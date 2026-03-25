@@ -10,7 +10,7 @@ Goal: make `Robot_Simulation` a reliable interoperability target for SmartDashbo
   - Direct transport (native local shared-memory/event path)
   - Legacy NetworkTables transport (NT2-compatible behavior used for SmartDashboard/Shuffleboard interoperability)
 - Keep legacy NT behavior stable so old SmartDashboard remains a comparison oracle when debugging regressions.
-- Treat Shuffleboard-facing behavior as additive on top of legacy compatibility, not a replacement for it.
+- Treat NT4-facing behavior as additive on top of legacy compatibility, not a replacement for it.
 
 ## Required connection modes
 
@@ -93,7 +93,7 @@ Migration note for `AutonTest`:
 Use a dual-profile mindset:
 
 - Legacy profile is the contract anchor.
-- Shuffleboard-oriented additions are permitted only if they do not break legacy profile behavior.
+- NT4-oriented additions are permitted only if they do not break legacy profile behavior.
 
 Practical rule:
 

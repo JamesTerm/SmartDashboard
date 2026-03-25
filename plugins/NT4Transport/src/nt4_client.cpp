@@ -13,14 +13,14 @@
 #include <vector>
 
 // Ian: This file implements an NT4 WebSocket client that connects to an NT4
-// server (Robot_Simulation ShuffleboardBackend or a real ntcore server),
+// server (Robot_Simulation NT4Backend or a real ntcore server),
 // subscribes to all topics, decodes announce + binary value frames, and
 // delivers updates through callbacks. The protocol details were validated
 // against the Robot_Simulation NT4Server.cpp and the official Shuffleboard
 // app. Key lesson from the simulation side: announces only arrive AFTER the
 // client subscribes. Do not assume topics exist on connect.
 
-namespace sd::shuffleboard
+namespace sd::nt4
 {
 
 namespace
@@ -1161,4 +1161,4 @@ bool NT4Client::PublishString(const std::string& key, const std::string& value)
     return true;
 }
 
-} // namespace sd::shuffleboard
+} // namespace sd::nt4

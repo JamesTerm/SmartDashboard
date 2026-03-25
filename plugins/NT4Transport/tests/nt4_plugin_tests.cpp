@@ -15,23 +15,23 @@ namespace
 // Descriptor / ABI contract tests
 // ────────────────────────────────────────────────────────────────────────────
 
-TEST(ShuffleboardPluginTests, DescriptorIsNotNull)
+TEST(NT4PluginTests, DescriptorIsNotNull)
 {
     const sd_transport_plugin_descriptor_v1* descriptor = SdGetTransportPluginV1();
     ASSERT_NE(descriptor, nullptr);
 }
 
-TEST(ShuffleboardPluginTests, DescriptorHasCorrectIdentity)
+TEST(NT4PluginTests, DescriptorHasCorrectIdentity)
 {
     const sd_transport_plugin_descriptor_v1* descriptor = SdGetTransportPluginV1();
     ASSERT_NE(descriptor, nullptr);
     ASSERT_NE(descriptor->plugin_id, nullptr);
-    EXPECT_STREQ(descriptor->plugin_id, "shuffleboard");
+    EXPECT_STREQ(descriptor->plugin_id, "nt4");
     ASSERT_NE(descriptor->display_name, nullptr);
-    EXPECT_STREQ(descriptor->display_name, "Shuffleboard (NT4)");
+    EXPECT_STREQ(descriptor->display_name, "NetworkTables V4");
 }
 
-TEST(ShuffleboardPluginTests, DescriptorReportsCorrectApiVersion)
+TEST(NT4PluginTests, DescriptorReportsCorrectApiVersion)
 {
     const sd_transport_plugin_descriptor_v1* descriptor = SdGetTransportPluginV1();
     ASSERT_NE(descriptor, nullptr);
@@ -39,7 +39,7 @@ TEST(ShuffleboardPluginTests, DescriptorReportsCorrectApiVersion)
     EXPECT_EQ(descriptor->struct_size, sizeof(sd_transport_plugin_descriptor_v1));
 }
 
-TEST(ShuffleboardPluginTests, DescriptorHasTransportApi)
+TEST(NT4PluginTests, DescriptorHasTransportApi)
 {
     const sd_transport_plugin_descriptor_v1* descriptor = SdGetTransportPluginV1();
     ASSERT_NE(descriptor, nullptr);
@@ -53,14 +53,14 @@ TEST(ShuffleboardPluginTests, DescriptorHasTransportApi)
     EXPECT_NE(descriptor->transport_api->publish_string, nullptr);
 }
 
-TEST(ShuffleboardPluginTests, DescriptorUsesShortDisplayKeys)
+TEST(NT4PluginTests, DescriptorUsesShortDisplayKeys)
 {
     const sd_transport_plugin_descriptor_v1* descriptor = SdGetTransportPluginV1();
     ASSERT_NE(descriptor, nullptr);
     EXPECT_NE(descriptor->flags & SD_TRANSPORT_PLUGIN_FLAG_USE_SHORT_DISPLAY_KEYS, 0u);
 }
 
-TEST(ShuffleboardPluginTests, DescriptorAdvertisesMultiClient)
+TEST(NT4PluginTests, DescriptorAdvertisesMultiClient)
 {
     const sd_transport_plugin_descriptor_v1* descriptor = SdGetTransportPluginV1();
     ASSERT_NE(descriptor, nullptr);
@@ -68,7 +68,7 @@ TEST(ShuffleboardPluginTests, DescriptorAdvertisesMultiClient)
     EXPECT_NE(descriptor->get_bool_property(SD_TRANSPORT_PROPERTY_SUPPORTS_MULTI_CLIENT, 0), 0);
 }
 
-TEST(ShuffleboardPluginTests, ChooserSupportEnabled)
+TEST(NT4PluginTests, ChooserSupportEnabled)
 {
     // Ian: Chooser support is enabled now that the publish path works end-to-end.
     // The plugin sends a JSON publish claim + binary value frame to the NT4 server,
@@ -81,7 +81,7 @@ TEST(ShuffleboardPluginTests, ChooserSupportEnabled)
     EXPECT_NE(descriptor->get_bool_property(SD_TRANSPORT_PROPERTY_SUPPORTS_CHOOSER, 0), 0);
 }
 
-TEST(ShuffleboardPluginTests, UnknownPropertyReturnsDefault)
+TEST(NT4PluginTests, UnknownPropertyReturnsDefault)
 {
     const sd_transport_plugin_descriptor_v1* descriptor = SdGetTransportPluginV1();
     ASSERT_NE(descriptor, nullptr);
@@ -93,7 +93,7 @@ TEST(ShuffleboardPluginTests, UnknownPropertyReturnsDefault)
 // Connection field tests
 // ────────────────────────────────────────────────────────────────────────────
 
-TEST(ShuffleboardPluginTests, ConnectionFieldsArePresent)
+TEST(NT4PluginTests, ConnectionFieldsArePresent)
 {
     const sd_transport_plugin_descriptor_v1* descriptor = SdGetTransportPluginV1();
     ASSERT_NE(descriptor, nullptr);
@@ -105,7 +105,7 @@ TEST(ShuffleboardPluginTests, ConnectionFieldsArePresent)
     ASSERT_EQ(count, 5u);
 }
 
-TEST(ShuffleboardPluginTests, ConnectionFieldIds)
+TEST(NT4PluginTests, ConnectionFieldIds)
 {
     const sd_transport_plugin_descriptor_v1* descriptor = SdGetTransportPluginV1();
     ASSERT_NE(descriptor, nullptr);
@@ -121,7 +121,7 @@ TEST(ShuffleboardPluginTests, ConnectionFieldIds)
     EXPECT_STREQ(fields[4].field_id, "auto_connect");
 }
 
-TEST(ShuffleboardPluginTests, AutoConnectFieldDefaultIsTrue)
+TEST(NT4PluginTests, AutoConnectFieldDefaultIsTrue)
 {
     // Ian: auto_connect defaults to true for the same reason as NativeLink —
     // operators who want one-shot connect must opt in via settings JSON.
@@ -148,10 +148,10 @@ TEST(ShuffleboardPluginTests, AutoConnectFieldDefaultIsTrue)
         << "auto_connect must default to true (reconnect on)";
 }
 
-TEST(ShuffleboardPluginTests, UseTeamNumberDefaultsOff)
+TEST(NT4PluginTests, UseTeamNumberDefaultsOff)
 {
     // Ian: Unlike NativeLink (which defaults use_team_number to true for FRC
-    // team use), Shuffleboard transport defaults to false because the typical
+    // team use), NT4 transport defaults to false because the typical
     // use case is connecting to localhost or a known IP for the simulator.
     const sd_transport_plugin_descriptor_v1* descriptor = SdGetTransportPluginV1();
     ASSERT_NE(descriptor, nullptr);
@@ -172,14 +172,14 @@ TEST(ShuffleboardPluginTests, UseTeamNumberDefaultsOff)
 
     ASSERT_NE(teamField, nullptr);
     EXPECT_EQ(teamField->default_bool_value, 0)
-        << "use_team_number should default to false for Shuffleboard transport";
+        << "use_team_number should default to false for NT4 transport";
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // Instance lifecycle tests
 // ────────────────────────────────────────────────────────────────────────────
 
-TEST(ShuffleboardPluginTests, CreateAndDestroyInstance)
+TEST(NT4PluginTests, CreateAndDestroyInstance)
 {
     const sd_transport_plugin_descriptor_v1* descriptor = SdGetTransportPluginV1();
     ASSERT_NE(descriptor, nullptr);
@@ -191,7 +191,7 @@ TEST(ShuffleboardPluginTests, CreateAndDestroyInstance)
     descriptor->transport_api->destroy(instance);
 }
 
-TEST(ShuffleboardPluginTests, DestroyNullIsNoOp)
+TEST(NT4PluginTests, DestroyNullIsNoOp)
 {
     const sd_transport_plugin_descriptor_v1* descriptor = SdGetTransportPluginV1();
     ASSERT_NE(descriptor, nullptr);
@@ -200,7 +200,7 @@ TEST(ShuffleboardPluginTests, DestroyNullIsNoOp)
     descriptor->transport_api->destroy(nullptr);
 }
 
-TEST(ShuffleboardPluginTests, StartWithNullCallbacksFails)
+TEST(NT4PluginTests, StartWithNullCallbacksFails)
 {
     const sd_transport_plugin_descriptor_v1* descriptor = SdGetTransportPluginV1();
     ASSERT_NE(descriptor, nullptr);
@@ -218,7 +218,7 @@ TEST(ShuffleboardPluginTests, StartWithNullCallbacksFails)
     descriptor->transport_api->destroy(instance);
 }
 
-TEST(ShuffleboardPluginTests, StopWithoutStartIsNoOp)
+TEST(NT4PluginTests, StopWithoutStartIsNoOp)
 {
     const sd_transport_plugin_descriptor_v1* descriptor = SdGetTransportPluginV1();
     ASSERT_NE(descriptor, nullptr);
@@ -232,7 +232,7 @@ TEST(ShuffleboardPluginTests, StopWithoutStartIsNoOp)
     descriptor->transport_api->destroy(instance);
 }
 
-TEST(ShuffleboardPluginTests, PublishOnUnstartedInstanceReturnsZero)
+TEST(NT4PluginTests, PublishOnUnstartedInstanceReturnsZero)
 {
     const sd_transport_plugin_descriptor_v1* descriptor = SdGetTransportPluginV1();
     ASSERT_NE(descriptor, nullptr);

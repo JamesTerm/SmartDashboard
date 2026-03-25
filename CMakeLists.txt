@@ -32,7 +32,7 @@ if(SMARTDASHBOARD_BUILD_PLUGIN_LEGACY_NT)
 endif()
 
 add_subdirectory(plugins/NativeLinkTransport)
-add_subdirectory(plugins/ShuffleboardTransport)
+add_subdirectory(plugins/NT4Transport)
 
 # Ian: These transport plugins deploy themselves with POST_BUILD copy steps.
 # Make the app/test targets depend on the plugin targets so a normal
@@ -46,8 +46,8 @@ if(TARGET SmartDashboardApp AND TARGET NativeLinkTransportPlugin)
     add_dependencies(SmartDashboardApp NativeLinkTransportPlugin)
 endif()
 
-if(TARGET SmartDashboardApp AND TARGET ShuffleboardTransportPlugin)
-    add_dependencies(SmartDashboardApp ShuffleboardTransportPlugin)
+if(TARGET SmartDashboardApp AND TARGET NT4TransportPlugin)
+    add_dependencies(SmartDashboardApp NT4TransportPlugin)
 endif()
 
 if(BUILD_TESTING AND TARGET SmartDashboard_tests AND TARGET LegacyNtTransportPlugin)
@@ -58,6 +58,6 @@ if(BUILD_TESTING AND TARGET SmartDashboard_tests AND TARGET NativeLinkTransportP
     add_dependencies(SmartDashboard_tests NativeLinkTransportPlugin)
 endif()
 
-if(BUILD_TESTING AND TARGET SmartDashboard_tests AND TARGET ShuffleboardTransportPlugin)
-    add_dependencies(SmartDashboard_tests ShuffleboardTransportPlugin)
+if(BUILD_TESTING AND TARGET SmartDashboard_tests AND TARGET NT4TransportPlugin)
+    add_dependencies(SmartDashboard_tests NT4TransportPlugin)
 endif()
