@@ -127,6 +127,108 @@ MainWindow drives mode selection:
 
 Glass support details and NT4 protocol reference moved to `docs/project_history.md`.
 
+## In progress: Camera viewer dock (`feature/camera-widget`)
+
+MJPEG camera stream viewer as a dockable panel.  Full design in
+`docs/camera_widget_design.md`.
+
+### Research completed
+
+- Analyzed 2014 BroncBotz Dashboard video pipeline (FrameGrabber, Preview,
+  ProcessingVision, ProcAmp, Controls, FrameWork library).
+- Documented complete NT4 CameraPublisher key schema and stream URL format
+  (`/CameraPublisher/{Name}/streams` -> `mjpg:http://...`, base port 1181).
+- Confirmed Glass has no built-in camera viewer.
+- Confirmed SmartDashboard has zero existing camera/video code.
+
+### Architecture summary
+
+- **MjpegStreamSource**: `QNetworkAccessManager` HTTP client that parses
+  `multipart/x-mixed-replace` boundaries and decodes JPEG frames via
+  `QImage::loadFromData()`.  No new dependencies.
+- **CameraDisplayWidget**: Custom `QWidget::paintEvent()` with aspect-ratio
+  scaling and fighter-jet style targeting reticle overlay (dashboard-side,
+  QPainter, click-drag positionable).
+- **CameraViewerDock**: `QDockWidget` following `RunBrowserDock` pattern --
+  toolbar with camera selector combo, URL field, connect/disconnect, reticle
+  toggle.  View menu "Camera" checkbox, starts hidden.
+- **CameraPublisherDiscovery**: Watches NT4 `/CameraPublisher/` keys to
+  auto-populate the camera selector.
+- **CameraStreamSource**: Abstract interface so display widget accepts frames
+  from any backend (MJPEG, future Robot_Simulation, test pattern).
+
+Ian: Two separate overlay concepts exist and must not be conflated:
+1. **Targeting reticle** (SmartDashboard): Dashboard-side QPainter overlay
+   drawn on top of the video widget.  Fighter-jet crosshair + circle.
+2. **Backup camera guide lines** (Robot_Simulation): Simulator-side OSG
+   overlay drawn in 3D and baked into MJPEG frames.  Honda-style curved
+   path lines driven by velocity/angular velocity.
+These serve different purposes and live in different codebases.
+
+### Implementation phases
+
+1. ~~MJPEG stream reader + display widget + dock + CameraPublisher discovery + MainWindow wiring (MVP)~~ **COMPLETE**
+2. Targeting reticle overlay (dashboard-side, crosshair + circle)
+3. Robot Simulation MJPEG server (Robot_Simulation repo)
+4. Backup camera guide lines (Robot_Simulation repo, OSG-side)
+
+Ian: Phase 3/4 design note — the simulator's MJPEG server should support two
+source modes: (a) OSG framebuffer readback (vector graphics on black, the
+default) and (b) real USB camera feed with OSG guide-line overlay composited
+on top.  When a USB camera is available, the simulator can grab frames from
+it, draw the backup-camera guide lines over the live video, encode to JPEG,
+and serve via MJPEG.  When no camera is available, fall back to the existing
+pure-OSG render.  This keeps the MJPEG server API identical either way —
+the dashboard doesn't care whether frames come from a real camera or a
+synthetic render.  Test with a machine that has a USB camera connected.
+
+### Current status
+
+Phase 1 (MVP) is **complete and building clean** with all 137 existing tests passing.
+
+**All source files created and integrated:**
+- `camera_stream_source.h`, `mjpeg_stream_source.h/.cpp`, `camera_publisher_discovery.h/.cpp`
+- `camera_display_widget.h/.cpp`, `camera_viewer_dock.h/.cpp`
+- `main_window.h` modified (forward decls, 3 member variables)
+- `main_window.cpp` modified (7 integration points: includes, View menu action, dock+discovery creation, variable update routing, StopTransport camera stop, disconnect camera clear)
+- `CMakeLists.txt` modified (new sources in both app and test targets)
+
+**Build fixes applied during integration:**
+- `camera_viewer_dock.h`: Changed forward declaration of `CameraStreamSource` to full `#include "camera/camera_stream_source.h"` — the header uses `CameraStreamSource::State` enum in a slot signature, which requires the full type definition
+- `mjpeg_stream_source.cpp`: Fixed Most Vexing Parse — `QNetworkRequest request(QUrl(url))` was parsed as a function declaration; changed to brace-init `QNetworkRequest request{QUrl(url)}`
+- `CMakeLists.txt` (test target): Added `camera_stream_source.h` to sources so MOC generates the QObject meta-object for the abstract base class (Q_OBJECT signals need MOC even in header-only classes)
+
+**Next steps:**
+- Unit tests for `MjpegStreamSource` (boundary parsing, frame decode, error handling)
+- Unit tests for `CameraDisplayWidget` (aspect ratio, reticle positioning)
+- Manual testing with a real MJPEG stream or test server
+
+### Files
+
+| File | What |
+|---|---|
+| `src/camera/camera_stream_source.h` | Abstract frame source interface |
+| `src/camera/mjpeg_stream_source.h/.cpp` | MJPEG HTTP stream reader |
+| `src/camera/camera_publisher_discovery.h/.cpp` | NT4 CameraPublisher key watcher |
+| `src/widgets/camera_viewer_dock.h/.cpp` | Dock widget container |
+| `src/widgets/camera_display_widget.h/.cpp` | Custom paint widget + HUD overlay |
+| `docs/camera_widget_design.md` | Full design document |
+
+### 2014 reference codebase (read-only, at `D:\Stuff\BroncBotz\Code\BroncBotz_DashBoard\Source`)
+
+Key files consulted during research:
+
+| File | What |
+|---|---|
+| `Dashboard/Dashboard.cpp` | Main app, video pipeline orchestration, ini parsing |
+| `FFMpeg121125/FrameGrabber.h` | FrameGrabber facade with FFMpeg/HTTP/TestPattern backends |
+| `FrameWork/Preview.h/.cpp` | DirectDraw 7 multi-buffer renderer |
+| `FrameWork/Bitmap.h` | Templatized bitmap containers |
+| `ProcessingVision/ProcessingVision.h/.cpp` | Vision processing plugin interface |
+| `ProcessingVision/NI_VisionProcessing.cpp` | NI Vision particle analysis |
+| `Controls/Controls.cpp/.h` | Controls DLL plugin (file controls, procamp controls) |
+| `ProcAmp/procamp_matrix.h` | 4x4 color correction matrix math |
+
 ## Deferred work
 
 - Wire a UI toolbar/status-bar Connect button

@@ -6,6 +6,8 @@
 #include "sd_direct_types.h"
 #include "widgets/playback_timeline_widget.h"
 #include "widgets/run_browser_dock.h"
+#include "widgets/camera_viewer_dock.h"
+#include "camera/camera_publisher_discovery.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -438,6 +440,10 @@ MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
     m_runBrowserViewAction = viewMenu->addAction("Run Browser");
     m_runBrowserViewAction->setCheckable(true);
     m_runBrowserViewAction->setChecked(false);
+
+    m_cameraViewAction = viewMenu->addAction("Camera");
+    m_cameraViewAction->setCheckable(true);
+    m_cameraViewAction->setChecked(false);
 
     viewMenu->addSeparator();
     m_resetAllLinePlotsAction = viewMenu->addAction("Reset All Line Plots");
@@ -1100,6 +1106,58 @@ MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
     // Load Layout) leave the file-driven tree untouched.
     connect(this, &MainWindow::TilesCleared, m_runBrowserDock, &sd::widgets::RunBrowserDock::ClearDiscoveredKeys);
 
+    // Ian: Camera viewer dock — dockable MJPEG stream viewer.  Follows the
+    // same creation/wiring pattern as RunBrowserDock above: starts hidden,
+    // View menu action toggles visibility, visibilityChanged syncs the action
+    // state using blockSignals to avoid infinite loops.
+    m_cameraDock = new sd::widgets::CameraViewerDock(this);
+    addDockWidget(Qt::RightDockWidgetArea, m_cameraDock);
+    m_cameraDock->setVisible(false);
+    connect(
+        m_cameraViewAction,
+        &QAction::toggled,
+        this,
+        [this](bool checked)
+        {
+            if (m_cameraDock != nullptr)
+            {
+                m_cameraDock->setVisible(checked);
+            }
+        }
+    );
+    connect(
+        m_cameraDock,
+        &QDockWidget::visibilityChanged,
+        this,
+        [this](bool visible)
+        {
+            if (m_cameraViewAction != nullptr)
+            {
+                const bool prior = m_cameraViewAction->blockSignals(true);
+                m_cameraViewAction->setChecked(visible);
+                m_cameraViewAction->blockSignals(prior);
+            }
+        }
+    );
+
+    // Ian: CameraPublisherDiscovery monitors /CameraPublisher/ keys arriving
+    // via NT4 variable updates and emits CameraDiscovered / CamerasCleared
+    // signals.  The dock subscribes to these to auto-populate the camera
+    // selection combo.
+    m_cameraDiscovery = new sd::camera::CameraPublisherDiscovery(this);
+    connect(
+        m_cameraDiscovery,
+        &sd::camera::CameraPublisherDiscovery::CameraDiscovered,
+        m_cameraDock,
+        &sd::widgets::CameraViewerDock::AddDiscoveredCamera
+    );
+    connect(
+        m_cameraDiscovery,
+        &sd::camera::CameraPublisherDiscovery::CamerasCleared,
+        m_cameraDock,
+        &sd::widgets::CameraViewerDock::ClearDiscoveredCameras
+    );
+
     QSettings settings("SmartDashboard", "SmartDashboardApp");
     const int persistedKindValue = settings.value("connection/transportKind", static_cast<int>(sd::transport::TransportKind::Direct)).toInt();
     m_connectionConfig.kind = static_cast<sd::transport::TransportKind>(persistedKindValue);
@@ -1455,6 +1513,14 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
             .arg(key, valueText, QString::number(seq)));
     }
 
+    // Ian: Forward every variable update to CameraPublisherDiscovery.  It
+    // filters internally for /CameraPublisher/ keys and ignores everything
+    // else, so the cost is a cheap string prefix check per update.
+    if (m_cameraDiscovery != nullptr)
+    {
+        m_cameraDiscovery->OnVariableUpdate(key, valueType, value);
+    }
+
     if (valueType == static_cast<int>(sd::direct::ValueType::String)
         || valueType == static_cast<int>(sd::direct::ValueType::StringArray))
     {
@@ -1679,6 +1745,18 @@ void MainWindow::OnConnectionStateChanged(int state)
             {
                 m_reconnectTimer->start();
             }
+        }
+
+        // Ian: On disconnect, clear discovered cameras so stale entries don't
+        // linger in the combo.  If we reconnect, the server will re-announce
+        // /CameraPublisher/ keys and discovery will re-populate the list.
+        if (m_cameraDiscovery != nullptr)
+        {
+            m_cameraDiscovery->Clear();
+        }
+        if (m_cameraDock != nullptr)
+        {
+            m_cameraDock->ClearDiscoveredCameras();
         }
     }
 
@@ -3723,6 +3801,13 @@ void MainWindow::StartTransport()
 
 void MainWindow::StopTransport()
 {
+    // Ian: Stop the camera stream before tearing down the transport so the
+    // dock doesn't keep retrying a connection to a server that's going away.
+    if (m_cameraDock != nullptr)
+    {
+        m_cameraDock->StopStream();
+    }
+
     if (m_transport)
     {
         RecordConnectionEvent(static_cast<int>(sd::transport::ConnectionState::Disconnected));

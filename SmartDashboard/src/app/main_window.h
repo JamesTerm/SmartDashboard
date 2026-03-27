@@ -46,8 +46,14 @@ class QLocalServer;
 class QLocalSocket;
 #endif
 
+namespace sd::camera
+{
+    class CameraPublisherDiscovery;
+}
+
 namespace sd::widgets
 {
+    class CameraViewerDock;
     class PlaybackTimelineWidget;
     class RunBrowserDock;
 }
@@ -253,6 +259,14 @@ private:
     // default is "everything visible."  On reconnect, as keys re-arrive via
     // OnTileAdded, we re-apply this hidden set.  Not used in reading mode.
     QSet<QString> m_runBrowserHiddenKeys;  ///< Streaming-mode: keys the user has hidden (persisted).
+    // Ian: Camera viewer dock — dockable MJPEG stream viewer.
+    // CameraPublisherDiscovery monitors /CameraPublisher/ keys from NT4
+    // to auto-populate the camera selector.  The dock + discovery lifecycle
+    // follows the same pattern as RunBrowserDock: StopTransport() stops
+    // the stream, disconnect clears discovered cameras.
+    QAction* m_cameraViewAction = nullptr;
+    sd::widgets::CameraViewerDock* m_cameraDock = nullptr;
+    sd::camera::CameraPublisherDiscovery* m_cameraDiscovery = nullptr;
     QListWidget* m_replayMarkerList = nullptr;
     QLabel* m_replaySelectionSummaryLabel = nullptr;
     sd::widgets::PlaybackTimelineWidget* m_playbackTimeline = nullptr;
