@@ -169,8 +169,14 @@ These serve different purposes and live in different codebases.
 
 1. ~~MJPEG stream reader + display widget + dock + CameraPublisher discovery + MainWindow wiring (MVP)~~ **COMPLETE**
 2. Targeting reticle overlay (dashboard-side, crosshair + circle)
-3. Robot Simulation MJPEG server (Robot_Simulation repo)
+3. ~~Robot Simulation MJPEG server (Robot_Simulation repo)~~ **IN PROGRESS** — code written, pending build/test
 4. Backup camera guide lines (Robot_Simulation repo, OSG-side)
+
+Ian: Phase 3 implementation in Robot_Simulation (`feature/camera-widget` branch):
+- MjpegServer subclasses ix::SocketServer (not ix::HttpServer — that's request-response only)
+- SimCameraSource generates 320x240@15fps synthetic frames via stb_image_write JPEG encoding
+- NT4Backend publishes /CameraPublisher/SimCamera/streams for auto-discovery
+- Stream URL: mjpg:http://127.0.0.1:1181/?action=stream
 
 Ian: Phase 3/4 design note — the simulator's MJPEG server should support two
 source modes: (a) OSG framebuffer readback (vector graphics on black, the

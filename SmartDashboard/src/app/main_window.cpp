@@ -283,6 +283,16 @@ namespace
             tile->SetBoolCheckboxShowLabel(entry.boolCheckboxShowLabel.toBool());
         }
 
+        if (entry.boolLedShowLabel.isValid())
+        {
+            tile->SetBoolLedShowLabel(entry.boolLedShowLabel.toBool());
+        }
+
+        if (entry.stringTextShowLabel.isValid())
+        {
+            tile->SetStringTextShowLabel(entry.stringTextShowLabel.toBool());
+        }
+
         if (entry.stringChooserMode.isValid())
         {
             tile->SetStringChooserMode(entry.stringChooserMode.toBool());
@@ -292,6 +302,15 @@ namespace
         {
             tile->SetStringChooserOptions(entry.stringChooserOptions.toStringList());
         }
+
+        // Ian: Re-apply saved geometry after all property setters have run.
+        // Several setters (checkbox show-label, LED show-label, progress bar
+        // percentage) call UpdateWidgetPresentation() which can resize the tile
+        // to enforce minimum/compact widths.  If the property application order
+        // means an intermediate state triggers a resize, the originally-loaded
+        // geometry gets overwritten.  This final setGeometry ensures the
+        // persisted layout always wins.
+        tile->setGeometry(entry.geometry);
 
     }
 

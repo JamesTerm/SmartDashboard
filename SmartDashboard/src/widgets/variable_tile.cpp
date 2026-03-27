@@ -197,6 +197,8 @@ namespace sd::widgets
         SetTextFontPointSize(m_textFontPointSize);
         SetDoubleNumericEditable(m_doubleNumericEditable);
         SetBoolCheckboxShowLabel(m_boolCheckboxShowLabel);
+        SetBoolLedShowLabel(m_boolLedShowLabel);
+        SetStringTextShowLabel(m_stringTextShowLabel);
         UpdateWidgetPresentation();
         UpdateValueDisplay();
         DebugTileLog(QString("tile.create key=%1 widget=%2 type=%3").arg(m_key).arg(m_widgetType).arg(static_cast<int>(m_type)));
@@ -467,6 +469,28 @@ namespace sd::widgets
     {
         m_boolCheckboxShowLabel = showLabel;
         setProperty("boolCheckboxShowLabel", m_boolCheckboxShowLabel);
+        UpdateWidgetPresentation();
+    }
+
+    // Ian: Optional label for the LED indicator widget.  Follows the same
+    // pattern as SetBoolCheckboxShowLabel — stores value, sets Qt dynamic
+    // property (for layout serialization), and triggers a presentation update.
+    // Default is true (label visible) to preserve existing behavior.
+    void VariableTile::SetBoolLedShowLabel(bool showLabel)
+    {
+        m_boolLedShowLabel = showLabel;
+        setProperty("boolLedShowLabel", m_boolLedShowLabel);
+        UpdateWidgetPresentation();
+    }
+
+    // Ian: Optional label for the read-only string text widget.  When hidden,
+    // the value occupies the full tile width with no column-0 gap.  When shown,
+    // column-0 min width is reduced to let Qt size the label naturally instead
+    // of forcing 90px, closing the visual gap between label and value.
+    void VariableTile::SetStringTextShowLabel(bool showLabel)
+    {
+        m_stringTextShowLabel = showLabel;
+        setProperty("stringTextShowLabel", m_stringTextShowLabel);
         UpdateWidgetPresentation();
     }
 
@@ -1180,6 +1204,12 @@ namespace sd::widgets
 
             if (!m_boolCheckboxShowLabel)
             {
+                // Ian: Remember the current width before compacting so we can
+                // restore the user's layout when the label is shown again.
+                if (m_widthBeforeCompact == 0)
+                {
+                    m_widthBeforeCompact = width();
+                }
                 m_layout->setColumnMinimumWidth(0, 0);
                 const QMargins margins = m_layout->contentsMargins();
                 const int compactWidth = m_controlWidget->sizeHint().width() + margins.left() + margins.right() + 8;
@@ -1191,9 +1221,22 @@ namespace sd::widgets
             else
             {
                 m_layout->setColumnMinimumWidth(0, 90);
-                if (width() < 140)
+                // Ian: Only force a width restore when recovering from a
+                // hide→show cycle (m_widthBeforeCompact > 0).  When there
+                // was no prior hide (e.g. first value arrives after layout
+                // load with showLabel already true), the tile's current
+                // geometry is the user's saved size — don't override it
+                // with the 140px default.  This fixes the bug where a
+                // tile intentionally sized to e.g. 104px would jump to
+                // 140px on first transport value.
+                if (m_widthBeforeCompact > 0)
                 {
-                    resize(140, height());
+                    const int restoreWidth = m_widthBeforeCompact;
+                    m_widthBeforeCompact = 0;
+                    if (width() < restoreWidth)
+                    {
+                        resize(restoreWidth, height());
+                    }
                 }
             }
         }
@@ -1244,6 +1287,72 @@ namespace sd::widgets
         {
             m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignTop);
             m_layout->addWidget(m_valueLabel, 1, 0, 1, 2);
+            m_layout->setRowStretch(0, 0);
+            m_layout->setRowStretch(1, 0);
+        }
+        else if (!showControl && showBoolLed)
+        {
+            // Ian: LED indicator optional label — mirrors the checkbox pattern.
+            // When label is hidden the LED dot occupies the full tile width
+            // (left-aligned) and the tile auto-shrinks to compact size.
+            // m_widthBeforeCompact remembers the pre-hide width so toggling
+            // the label back on restores the user's layout.
+            m_titleLabel->setVisible(m_boolLedShowLabel);
+            if (m_boolLedShowLabel)
+            {
+                m_layout->setColumnMinimumWidth(0, 90);
+                m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
+                m_layout->addWidget(m_boolLed, 0, 1, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
+                // Ian: Same fix as checkbox — only restore width when
+                // recovering from a hide→show cycle.  Don't force 140px
+                // on tiles that were loaded with a user-chosen smaller width.
+                if (m_widthBeforeCompact > 0)
+                {
+                    const int restoreWidth = m_widthBeforeCompact;
+                    m_widthBeforeCompact = 0;
+                    if (width() < restoreWidth)
+                    {
+                        resize(restoreWidth, height());
+                    }
+                }
+            }
+            else
+            {
+                if (m_widthBeforeCompact == 0)
+                {
+                    m_widthBeforeCompact = width();
+                }
+                m_layout->setColumnMinimumWidth(0, 0);
+                m_layout->addWidget(m_boolLed, 0, 0, 1, 2, Qt::AlignCenter);
+                const QMargins margins = m_layout->contentsMargins();
+                const int compactWidth = m_boolLed->sizeHint().width() + margins.left() + margins.right() + 8;
+                if (width() > compactWidth)
+                {
+                    resize(compactWidth, height());
+                }
+            }
+            m_layout->setRowStretch(0, 0);
+            m_layout->setRowStretch(1, 0);
+        }
+        else if (!showControl && showStringText)
+        {
+            // Ian: Read-only label optional label with gap fix.  When the label
+            // is shown, column-0 min width is set to 0 so the label column
+            // sizes naturally to its text width — closing the 90px gap that
+            // used to push the value far to the right.  When hidden, the value
+            // spans both columns for full-width display.
+            m_titleLabel->setVisible(m_stringTextShowLabel);
+            if (m_stringTextShowLabel)
+            {
+                m_layout->setColumnMinimumWidth(0, 0);
+                m_layout->addWidget(m_titleLabel, 0, 0, 1, 1, Qt::AlignLeft | Qt::AlignVCenter);
+                m_layout->addWidget(m_valueLabel, 0, 1, 1, 1);
+            }
+            else
+            {
+                m_layout->setColumnMinimumWidth(0, 0);
+                m_layout->addWidget(m_valueLabel, 0, 0, 1, 2);
+            }
             m_layout->setRowStretch(0, 0);
             m_layout->setRowStretch(1, 0);
         }
@@ -1415,12 +1524,13 @@ namespace sd::widgets
         const bool isProgressBar = (m_widgetType == "double.progress");
         const bool isSlider = (m_widgetType == "double.slider");
         const bool isBoolCheckbox = (m_widgetType == "bool.checkbox");
+        const bool isBoolLed = (m_widgetType == "bool.led");
         const bool isTextDisplay =
             (m_widgetType == "bool.text") ||
             (m_widgetType == "string.text") ||
             (m_widgetType == "string.multiline") ||
             (m_widgetType == "string.edit");
-        return IsGaugeWidget() || IsLinePlotWidget() || IsDoubleNumericWidget() || isProgressBar || isSlider || isBoolCheckbox || isTextDisplay;
+        return IsGaugeWidget() || IsLinePlotWidget() || IsDoubleNumericWidget() || isProgressBar || isSlider || isBoolCheckbox || isBoolLed || isTextDisplay;
     }
 
     void VariableTile::OpenPropertiesDialog()
@@ -1649,6 +1759,16 @@ namespace sd::widgets
             fontSizeSpin->setValue(m_textFontPointSize);
             form->addRow("Font Size", fontSizeSpin);
 
+            // Ian: Show Label option only for string.text — the read-only label
+            // widget.  bool.text and string.multiline always show their label.
+            QCheckBox* showLabelCheck = nullptr;
+            if (m_widgetType == "string.text")
+            {
+                showLabelCheck = new QCheckBox(&dialog);
+                showLabelCheck->setChecked(m_stringTextShowLabel);
+                form->addRow("Show Label", showLabelCheck);
+            }
+
             auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
             form->addRow(buttons);
 
@@ -1661,6 +1781,10 @@ namespace sd::widgets
             }
 
             SetTextFontPointSize(fontSizeSpin->value());
+            if (showLabelCheck != nullptr)
+            {
+                SetStringTextShowLabel(showLabelCheck->isChecked());
+            }
             return;
         }
 
@@ -1712,6 +1836,31 @@ namespace sd::widgets
                 }
                 SetStringChooserOptions(options);
             }
+            return;
+        }
+
+        if (m_widgetType == "bool.led")
+        {
+            QDialog dialog(this);
+            dialog.setWindowTitle("LED Indicator Properties");
+
+            auto* form = new QFormLayout(&dialog);
+            auto* showLabelCheck = new QCheckBox(&dialog);
+            showLabelCheck->setChecked(m_boolLedShowLabel);
+            form->addRow("Show Label", showLabelCheck);
+
+            auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            form->addRow(buttons);
+
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+            if (dialog.exec() != QDialog::Accepted)
+            {
+                return;
+            }
+
+            SetBoolLedShowLabel(showLabelCheck->isChecked());
             return;
         }
 

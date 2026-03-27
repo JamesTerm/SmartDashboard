@@ -38,6 +38,8 @@ namespace sd::layout
         QVariant textFontPointSize;
         QVariant doubleNumericEditable;
         QVariant boolCheckboxShowLabel;
+        QVariant boolLedShowLabel;
+        QVariant stringTextShowLabel;
         QVariant stringChooserMode;
         QVariant stringChooserOptions;
     };

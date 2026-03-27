@@ -264,6 +264,16 @@ namespace sd::layout
             {
                 entry["boolCheckboxShowLabel"] = boolCheckboxShowLabel.toBool();
             }
+            const QVariant boolLedShowLabel = widget->property("boolLedShowLabel");
+            if (boolLedShowLabel.isValid())
+            {
+                entry["boolLedShowLabel"] = boolLedShowLabel.toBool();
+            }
+            const QVariant stringTextShowLabel = widget->property("stringTextShowLabel");
+            if (stringTextShowLabel.isValid())
+            {
+                entry["stringTextShowLabel"] = stringTextShowLabel.toBool();
+            }
             if (stringChooserMode.isValid())
             {
                 entry["stringChooserMode"] = stringChooserMode.toBool();
@@ -428,6 +438,14 @@ namespace sd::layout
             if (entry.contains("boolCheckboxShowLabel"))
             {
                 layoutEntry.boolCheckboxShowLabel = entry.value("boolCheckboxShowLabel").toBool();
+            }
+            if (entry.contains("boolLedShowLabel"))
+            {
+                layoutEntry.boolLedShowLabel = entry.value("boolLedShowLabel").toBool();
+            }
+            if (entry.contains("stringTextShowLabel"))
+            {
+                layoutEntry.stringTextShowLabel = entry.value("stringTextShowLabel").toBool();
             }
             if (entry.contains("stringChooserMode"))
             {
