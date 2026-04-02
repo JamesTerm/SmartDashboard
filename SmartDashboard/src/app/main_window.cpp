@@ -2143,6 +2143,34 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
             OnPlotSourceDisbanded(tile, sourceKey, originalWidgetType);
         }
     );
+    // Ian: Bidirectional visibility sync (Direction A).  When the user toggles
+    // per-series visibility in the Properties dialog, update the Run Browser
+    // check state to match.  The m_plotSourceOwners guard in
+    // OnRunBrowserCheckedSignalsChanged prevents this from feeding back into
+    // SetSeriesVisible — the loop terminates cleanly.
+    connect(tile, &sd::widgets::VariableTile::PlotSeriesVisibilityChanged, this,
+        [this](const QString& sourceKey, bool visible)
+        {
+            if (m_runBrowserDock == nullptr)
+            {
+                return;
+            }
+            // Only sync absorbed keys — the primary series is not in the
+            // Run Browser as an absorbed key; it has its own standalone tile.
+            if (m_plotSourceOwners.find(sourceKey.toStdString()) == m_plotSourceOwners.end())
+            {
+                return;
+            }
+            if (visible)
+            {
+                m_runBrowserDock->CheckSignalByKey(sourceKey);
+            }
+            else
+            {
+                m_runBrowserDock->UncheckSignalByKey(sourceKey);
+            }
+        }
+    );
 
     tile->setObjectName(QString("tile_%1").arg(QString::number(m_tiles.size() + 1)));
     tile->SetDefaultSize(QSize(220, 84));
@@ -2723,9 +2751,22 @@ void MainWindow::OnRunBrowserCheckedSignalsChanged(const QSet<QString>& checkedK
         // Without this guard, CheckedSignalsChanged emissions during transport
         // lifecycle (connect, reconnect, replay load) would re-show absorbed
         // tiles, breaking the multi-line plot visual.
-        if (m_plotSourceOwners.find(keyStd) != m_plotSourceOwners.end())
+        //
+        // Direction B of bidirectional sync: when the user unchecks an absorbed
+        // key in the Run Browser, hide the corresponding series line in the
+        // owning plot (and vice versa for re-checking).  The tile itself stays
+        // hidden — only the series rendering is affected.
+        auto ownerIt = m_plotSourceOwners.find(keyStd);
+        if (ownerIt != m_plotSourceOwners.end())
         {
             tile->hide();
+            // Sync series visibility with Run Browser check state
+            if (ownerIt->second != nullptr)
+            {
+                const QString key = QString::fromStdString(keyStd);
+                const bool shouldBeVisible = checkedKeys.contains(key);
+                ownerIt->second->SetSeriesVisibleBySource(key, shouldBeVisible);
+            }
             continue;
         }
 

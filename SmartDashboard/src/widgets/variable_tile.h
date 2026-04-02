@@ -115,6 +115,11 @@ namespace sd::widgets
         void AddSampleToPlotSource(const QString& key, double value);
         std::vector<PlotSourceEntry> GetPlotSources() const;
         void SetPlotSources(const std::vector<PlotSourceEntry>& sources);
+        // Ian: Programmatically set visibility of an absorbed series.  Updates
+        // both the LinePlotWidget rendering and the PlotSourceEntry persistence
+        // state.  Called by MainWindow when the Run Browser check state changes
+        // for an absorbed key (Direction B of bidirectional visibility sync).
+        void SetSeriesVisibleBySource(const QString& key, bool visible);
 
         QString GetKey() const;
         VariableType GetType() const;
@@ -142,6 +147,10 @@ namespace sd::widgets
         // that each additional source key gets its own tile back.
         // originalWidgetType is what the tile was before absorption (Fix 5).
         void PlotSourceDisbanded(const QString& sourceKey, const QString& originalWidgetType);
+        // Ian: Emitted when per-series visibility changes in the Properties
+        // dialog, so MainWindow can sync the Run Browser check state.
+        // Direction A of bidirectional visibility sync.
+        void PlotSeriesVisibilityChanged(const QString& sourceKey, bool visible);
 
     protected:
         void paintEvent(QPaintEvent* event) override;

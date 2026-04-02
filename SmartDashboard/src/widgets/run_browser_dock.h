@@ -213,6 +213,18 @@ namespace sd::widgets
         /// N signals and do N full tree walks — this avoids that.
         void UncheckSignalsByKeys(const QSet<QString>& keys);
 
+        /// @brief Programmatically check (re-check) a single signal leaf by key.
+        ///
+        /// Mirror of UncheckSignalByKey.  Finds the leaf matching @p key,
+        /// checks it, recomputes ancestor tri-states, and emits
+        /// CheckedSignalsChanged.  No-op if the key is not in the tree or
+        /// is already checked.
+        ///
+        /// Ian: Called by MainWindow when a multi-line plot series visibility
+        /// is toggled back on (via Properties dialog), keeping the Run Browser
+        /// tree in sync with the plot's per-series visibility state.
+        void CheckSignalByKey(const QString& key);
+
         // ----------------------------------------------------------------
         // Testing API
         // ----------------------------------------------------------------

@@ -638,6 +638,25 @@ namespace sd::widgets
         }
     }
 
+    void VariableTile::SetSeriesVisibleBySource(const QString& key, bool visible)
+    {
+        // Ian: Programmatic series visibility — called by MainWindow when
+        // the Run Browser check state changes for an absorbed key.  Updates
+        // both the LinePlotWidget rendering and the persisted PlotSourceEntry.
+        if (m_linePlot != nullptr)
+        {
+            m_linePlot->SetSeriesVisible(key, visible);
+        }
+        for (auto& src : m_plotSources)
+        {
+            if (src.key == key)
+            {
+                src.visible = visible;
+                return;
+            }
+        }
+    }
+
     void VariableTile::paintEvent(QPaintEvent* event)
     {
         QFrame::paintEvent(event);
@@ -2391,6 +2410,9 @@ namespace sd::widgets
                     src.visible = sc.visibleCheck->isChecked();
                 }
             }
+            // Ian: Notify MainWindow so the Run Browser tree stays in sync
+            // with per-series visibility (Direction A of bidirectional sync).
+            emit PlotSeriesVisibilityChanged(sc.key, sc.visibleCheck->isChecked());
         }
     }
 
