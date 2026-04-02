@@ -107,10 +107,11 @@ namespace sd::widgets
         /// @brief Return the file path of the loaded run at index 0, or empty if none.
         QString GetLoadedFilePath() const;
 
-        /// @brief Programmatically check group nodes whose signals match the given key set.
+        /// @brief Programmatically check signal leaves whose keys match the given key set.
         ///
         /// Ian: Used to restore persisted checked state on startup.  Walks the tree
-        /// and checks any group node that contains at least one signal in @p signalKeys.
+        /// and checks any signal leaf whose key is in @p signalKeys, then recomputes
+        /// ancestor group and run tri-states.
         /// Emits CheckedSignalsChanged once at the end.
         void SetCheckedGroupsBySignalKeys(const QSet<QString>& signalKeys);
 
@@ -188,6 +189,30 @@ namespace sd::widgets
         /// unchecked.
         void SetHiddenDiscoveredKeys(const QSet<QString>& hiddenKeys);
 
+        /// @brief Programmatically uncheck a single signal leaf by key.
+        ///
+        /// Finds the leaf node matching @p key in the tree (both reading
+        /// and streaming modes), unchecks it, recomputes ancestor tri-states,
+        /// and emits CheckedSignalsChanged.  No-op if the key is not in the tree.
+        ///
+        /// Ian: Called by MainWindow when the user right-clicks a tile and
+        /// selects "Hide."  This routes through the standard checkbox pipeline
+        /// so the Run Browser tree, hidden-keys persistence, and tile visibility
+        /// all stay in sync.
+        void UncheckSignalByKey(const QString& key);
+
+        /// @brief Batch-uncheck multiple signal leaves by key.
+        ///
+        /// Same as calling UncheckSignalByKey for each key, but performs a
+        /// single tree walk to find all matching leaves, unchecks them,
+        /// recomputes ancestor tri-states once, and emits CheckedSignalsChanged
+        /// exactly once at the end.
+        ///
+        /// Ian: Called by MainWindow when the user hides multiple selected
+        /// tiles at once.  Using the single-key version in a loop would emit
+        /// N signals and do N full tree walks — this avoids that.
+        void UncheckSignalsByKeys(const QSet<QString>& keys);
+
         // ----------------------------------------------------------------
         // Testing API
         // ----------------------------------------------------------------
@@ -236,6 +261,8 @@ namespace sd::widgets
         void UpdateSummaryLabel();
         void OnModelItemChanged(QStandardItem* item);
         void UpdateRunCheckState(QStandardItem* runItem);
+        void UpdateGroupCheckState(QStandardItem* groupItem);
+        void PushCheckStateToDescendants(QStandardItem* parent, Qt::CheckState state);
         void CollectAndEmitCheckedSignals();
         static QString BuildItemPath(const QStandardItem* item);
         void CollectExpandedPaths(const QModelIndex& parent, QStringList& outPaths) const;

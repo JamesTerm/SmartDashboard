@@ -46,16 +46,6 @@ Use these buckets to keep roadmap discussions grounded in product identity.
    - Layout/edit/save/load behavior, reconnect handling, and operator-controlled value survival should feel trustworthy.
    - Acceptance: a normal team can accomplish everyday dashboard tasks without first asking what is missing.
 
-6. **Command/Subsystem status display**
-   - Teams using command-based programming expect to see the Scheduler widget (running commands list), subsystem "required by" display, and command start/cancel buttons via `putData`.
-   - This is a core SmartDashboard feature that command-based teams rely on for debugging and development.
-   - Acceptance: `SmartDashboard.putData(CommandScheduler)`, `putData(subsystem)`, and `putData("name", command)` produce the expected interactive widgets.
-
-7. **Test Mode / LiveWindow support**
-   - SmartDashboard's Test Mode displays sensors and actuators grouped by subsystem with interactive sliders, plus PID tuning with live P/I/D parameter editing.
-   - Teams use this for mechanism bring-up, finding setpoints, and tuning PID controllers without writing throwaway code.
-   - Acceptance: entering Test Mode on the robot causes the dashboard to display LiveWindow sensor/actuator widgets with interactive controls.
-
 ### Want
 
 1. **Replay as a differentiator**
@@ -90,14 +80,24 @@ Use these buckets to keep roadmap discussions grounded in product identity.
      - field/mechanism-style views (`Field2d`, `Mechanism2d`)
      - other specialty semantic widgets that are useful but not foundational
 
-4. **Major UX polish layers**
+4. **Manipulator arm visualization enhancements** **(cross-repo)**
+   - Phase 1 (done): side-view line-strip rendering ported from Curivator (OSG_Viewer DLL, same pattern as SwerveRobot_UI).
+   - Future ideas to revisit:
+     - **3D cylinders/boxes** — replace line-strip with `osg::ShapeDrawable` cylinders for arm segments, giving depth and visual weight without a full 3D model.
+     - **Top-down reach shadow** — project the arm's horizontal extent as a semi-transparent arc/line in the main top-down view, showing how far the arm extends from the chassis.
+     - **Side-view inset panel** — render the arm side view into a separate orthographic camera viewport (picture-in-picture), so it doesn't overlap the main field view.
+     - **SmartDashboard Mechanism2d widget** — publish the arm chain as a Mechanism2d NT structure so the SmartDashboard (or official one) can render it natively without the OSG viewer.
+     - **Color-coded joint stress** — blend joint segment colors based on torque/stall proximity (red = near stall, green = comfortable).
+     - **IK goal overlay** — when Phase 2 commands are active, draw a ghost/wireframe of the target pose alongside the current pose to visualize tracking error.
+
+5. **Major UX polish layers**
    - Consider broader visual/design-system sophistication only after the product is already trusted for reliability and workflow fit.
 
 ---
 
 ## Foundation before enabling NetworkTables broadly
 
-Treat this as the readiness gate before presenting NetworkTables support as a core team-facing feature.
+Treat this as the readiness gate before presenting NetworkTables support as a core team-facing feature. **Status: COMPLETE** — all must-have items are checked. Command/Subsystem and LiveWindow were evaluated and intentionally excluded (see "Intentionally unsupported features" below).
 
 ### Must-have before broad NT rollout
 
@@ -110,8 +110,6 @@ Treat this as the readiness gate before presenting NetworkTables support as a co
 - [ ] Legacy compatibility baseline is explicit (preserve `legacy-smartdashboard-baseline` behavior profile for validation; allow additive behaviors only when they do not break legacy baseline)
 - [ ] Key migration policy is explicit for operator-controlled values (canonical scoped keys preferred, legacy flat aliases remain supported during migration)
 - [x] Dashboard-owned control values replay/re-publish correctly across simulator reconnects in direct mode
-- [ ] Command/Subsystem status display (`putData` for Scheduler, subsystems, and commands produces expected interactive widgets)
-- [ ] Test Mode / LiveWindow support (sensor/actuator display grouped by subsystem, interactive sliders, PID tuning)
 
 ### High-priority near-foundation items
 
@@ -122,9 +120,9 @@ Treat this as the readiness gate before presenting NetworkTables support as a co
 ### Not required to unblock NT rollout
 
 - ~~Enhanced multi-trace plotting beyond normal SmartDashboard graph expectations~~ (active — see "Multi-trace line plot" section below)
-- Compass widget
 - Deep replay-analysis additions beyond the current practical workflow
 - Broader specialty WPILib widgets such as `Field2d`, `Mechanism2d`, or other advanced sendable surfaces
+- Features intentionally excluded (compass, command/subsystem, LiveWindow) — see "Intentionally unsupported features" below
 
 ### Readiness question
 
@@ -145,40 +143,38 @@ Camera discovery is not part of the transport contract and should not be. A Dire
 
 ---
 
-## Next up: Command/Subsystem status display and Test Mode/LiveWindow
+## Intentionally unsupported features
 
-These are Need #6 and #7 and the last two unchecked items in the "Must-have before broad NT rollout" checklist. Both are core SmartDashboard features that command-based teams rely on daily.
+These SmartDashboard-classic features have been evaluated and intentionally excluded. The existing feature set covers the same workflows through simpler, more composable mechanisms.
 
 ### Command/Subsystem status display
 
-- [ ] `SmartDashboard.putData(CommandScheduler)` produces a running-commands list widget
-- [ ] `SmartDashboard.putData(subsystem)` produces a "required by" display showing the currently-requiring command
-- [ ] `SmartDashboard.putData("name", command)` produces an interactive widget with start/cancel buttons
-- [ ] All three integrate with NT4 transport (these use Sendable publishing patterns under `/SmartDashboard/`)
+SmartDashboard's `putData(CommandScheduler)`, `putData(subsystem)`, and `putData("name", command)` create dedicated Scheduler, Subsystem, and Command widgets with start/cancel buttons and "required by" displays.
 
-### Test Mode / LiveWindow support
+**Why excluded**: These Sendable-based widgets add significant protocol complexity (nested sub-key trees, `.type` dispatch for `"Scheduler"`, `"Subsystem"`, `"Command v2"` types, two-way lifecycle state management) for a feature that serves only command-based teams. The same debugging information — which command is running, which subsystem is active — can be published as simple string/bool keys that the existing widget set already handles. The tradeoff favors simplicity and reliability over protocol-level Sendable interop.
 
-- [ ] Entering Test Mode on the robot causes the dashboard to display LiveWindow widgets
-- [ ] Sensors and actuators grouped by subsystem with interactive sliders
-- [ ] PID tuning widgets with live P/I/D parameter editing
-- [ ] LiveWindow data published under `/LiveWindow/` key prefix is recognized and rendered appropriately
+### Test Mode / LiveWindow
 
----
+SmartDashboard's Test Mode displays sensors and actuators grouped by subsystem under `/LiveWindow/` keys, with interactive sliders for motor output and PID parameter tuning.
 
-## Known issues
+**Why excluded**: The Run Browser's tile visibility system (hide/show via checkboxes, `hiddenKeys` in layout files) already provides the mechanism-grouping and view-switching workflows that LiveWindow addresses. Instead of a dedicated mode triggered by robot state, users can:
+- Create a layout with mechanism/actuator tiles visible and drive/autonomous tiles hidden (the "LiveWindow" view)
+- Create a layout with drive/autonomous tiles visible and mechanism internals hidden (the "driver" view)
+- Switch between layouts via File > Load Layout — no special protocol support needed
 
-### Chooser reset on Enable (Direct Connect only)
+This is demonstrated by the Curivator layout pair in `Robot_Simulation/Design/`: `Curivatorlayout.json` hides 26 `Manipulator/*` keys for a focused driver view, while `Curivatorlayout_all.json` shows all signals including manipulator internals.
 
-**Status**: Documented, deprioritized. Does NOT reproduce on NativeLink or NT4.
+PID tuning specifically can be accomplished by publishing P/I/D as writable double keys — the existing editable numeric and slider widgets provide the same interactive control.
 
-**Symptom**: When the user manually selects an autonomous routine (e.g. "Just Move Forward") in SmartDashboard's chooser widget before launching DriverStation and then clicks Enable, the selection resets to the default ("Do Nothing").
+### Compass widget
 
-**Investigation conducted**:
-- Tested at two historical baselines (`e7aeb27` 2026-03-27 and `26129d8` 2026-03-23) — bug reproduced at both, confirming this is a long-standing latent issue, not a regression from recent work.
-- One real bug was found and fixed: `DirectCommandSubscriber` skipped pre-existing ring buffer writes because `m_readCursor` was initialized to `header->writeIndex` instead of `header->consumerReadIndex` (commit `0551491` in Robot_Simulation). This was correct but did not fully resolve the symptom.
-- There is likely a second mechanism in the auton resolution chain (`FindAutonChooserSelection`, `PublishAutonChooser`, or the `Activate` sequence) that overwrites or ignores the dashboard-selected value on the Direct Connect path.
+SmartDashboard includes a `Gyro`-type compass widget for heading display.
 
-**Workaround**: Use NativeLink or NT4 transport, where chooser selection survives Enable correctly.
+**Why excluded**: Qt has no native compass/circular gauge widget. The existing `double.gauge` widget (half-arc dial with configurable limits, e.g. -180 to 180) provides heading visualization that covers the practical need. Implementing a dedicated circular compass would require custom QPainter rendering for marginal visual improvement over the gauge.
+
+### Field2d / Mechanism2d
+
+These are Shuffleboard/Glass-specific visualization widgets, not part of the original SmartDashboard feature set. Out of scope per the SmartDashboard-only product direction (see 2026-03-29 project history entry).
 
 ---
 
@@ -224,3 +220,4 @@ Lower-priority items parked for future consideration.
 - Write-ack protocol on TCP Publish (currently fire-and-forget)
 - Expand smoke test published keys from ~6 + chooser to full TeleAutonV2 (~49 keys)
 - Dedicated recorder-to-replay roundtrip test and replay seek correctness test (timeline widget and transport parity tests exist, but no end-to-end record → file → replay-load → seek → verify-state coverage)
+- NT4 announce properties ABI forwarding (the NT4 client already parses `properties` from server announce messages; remaining work is wiring `on_topic_announce` through the C ABI and host — deprioritized since Command/Subsystem widgets are intentionally excluded)

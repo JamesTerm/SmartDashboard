@@ -2084,6 +2084,7 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
     connect(tile, &sd::widgets::VariableTile::ControlDoubleEdited, this, &MainWindow::OnControlDoubleEdited);
     connect(tile, &sd::widgets::VariableTile::ControlStringEdited, this, &MainWindow::OnControlStringEdited);
     connect(tile, &sd::widgets::VariableTile::RemoveRequested, this, &MainWindow::OnRemoveWidgetRequested);
+    connect(tile, &sd::widgets::VariableTile::HideRequested, this, &MainWindow::OnHideTileRequested);
 
     tile->setObjectName(QString("tile_%1").arg(QString::number(m_tiles.size() + 1)));
     tile->SetDefaultSize(QSize(220, 84));
@@ -2130,7 +2131,9 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
     // only show the tile if its key is in the checked set.  An empty checked
     // set with an active session means "nothing checked" — hide all.  When no
     // Run Browser session is active (m_runBrowserActive == false), show
-    // everything.
+    // everything UNLESS the key is in the layout-persisted hidden set
+    // (m_runBrowserHiddenKeys), which carries over from a previously loaded
+    // layout file.
     //
     // Layout-mirror mode: the Run Browser tree is populated via the TileAdded
     // signal (emitted below after m_tiles.emplace), not by direct calls here.
@@ -2148,6 +2151,10 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
         {
             tile->show();
         }
+    }
+    else if (m_runBrowserHiddenKeys.contains(key))
+    {
+        tile->hide();
     }
     else
     {
@@ -2525,6 +2532,82 @@ void MainWindow::OnRemoveWidgetRequested(const QString& key)
     emit TileRemoved(key);
 }
 
+// Ian: Called when the user right-clicks a tile and selects "Hide."
+// We delegate to the Run Browser dock which unchecks the corresponding
+// leaf, recomputes tri-states, and emits CheckedSignalsChanged.
+// The standard OnRunBrowserCheckedSignalsChanged handler then hides the
+// tile.  This keeps the Run Browser as the single source of truth for
+// tile visibility.
+//
+// If the Run Browser is not active, we just hide the tile directly
+// (there is no tree to uncheck).  The tile will reappear on next
+// transport start since m_runBrowserActive will be false and all tiles
+// are shown.
+void MainWindow::OnHideTileRequested(const QString& key)
+{
+    if (m_runBrowserDock != nullptr && m_runBrowserActive)
+    {
+        m_runBrowserDock->UncheckSignalByKey(key);
+        // CheckedSignalsChanged emission from the dock will call
+        // OnRunBrowserCheckedSignalsChanged, which hides the tile.
+    }
+    else
+    {
+        // No active Run Browser session — hide directly.
+        const std::string keyStd = key.toStdString();
+        auto it = m_tiles.find(keyStd);
+        if (it != m_tiles.end() && it->second != nullptr)
+        {
+            it->second->hide();
+        }
+    }
+}
+
+// Ian: Called when the user right-clicks a selected tile in multi-select and
+// chooses "Hide N tiles."  Collects keys from all selected tiles, delegates
+// to the batch UncheckSignalsByKeys (single signal emission), then clears
+// the selection.  When the Run Browser is not active, falls back to hiding
+// tiles directly.
+void MainWindow::HideSelectedTiles()
+{
+    if (m_selectedTiles.isEmpty())
+    {
+        return;
+    }
+
+    // Collect keys from the selection before clearing it.
+    QSet<QString> keysToHide;
+    for (auto* tile : m_selectedTiles)
+    {
+        if (tile != nullptr)
+        {
+            keysToHide.insert(tile->GetKey());
+        }
+    }
+
+    ClearTileSelection();
+
+    if (m_runBrowserDock != nullptr && m_runBrowserActive)
+    {
+        m_runBrowserDock->UncheckSignalsByKeys(keysToHide);
+        // Single CheckedSignalsChanged emission from the dock will call
+        // OnRunBrowserCheckedSignalsChanged, which hides the tiles.
+    }
+    else
+    {
+        // No active Run Browser session — hide directly.
+        for (const QString& key : keysToHide)
+        {
+            const std::string keyStd = key.toStdString();
+            auto it = m_tiles.find(keyStd);
+            if (it != m_tiles.end() && it->second != nullptr)
+            {
+                it->second->hide();
+            }
+        }
+    }
+}
+
 // Ian: Called when the user checks/unchecks groups in the Run Browser dock.
 // We show tiles whose keys are in the checked set and hide tiles whose keys
 // are not.  The tiles themselves are created by the replay transport pipeline
@@ -2534,9 +2617,14 @@ void MainWindow::OnRemoveWidgetRequested(const QString& key)
 //
 // Important: an empty checkedKeys set does NOT mean "show all."  It means
 // "nothing is checked" — which should hide all tiles when the Run Browser
-// has a replay loaded (m_runBrowserActive).  The only time an empty set
-// means "show all" is when m_runBrowserActive is false (no replay loaded,
-// e.g. after switching to a live transport).
+// has a replay loaded (m_runBrowserActive).  When m_runBrowserActive is
+// false (no replay loaded), we still respect m_runBrowserHiddenKeys so that
+// layout-persisted hidden state is never overridden by transport lifecycle
+// events (connect, disconnect, reconnect, ClearDiscoveredKeys, etc.).
+//
+// Ian: SOVEREIGNTY RULE — only explicit user action (unchecking in the Run
+// Browser, right-click Hide, loading a different layout) can change what is
+// hidden.  No transport lifecycle event should override hidden state.
 void MainWindow::OnRunBrowserCheckedSignalsChanged(const QSet<QString>& checkedKeys, const QMap<QString, QString>& /*keyToType*/)
 {
     m_runBrowserCheckedKeys = checkedKeys;
@@ -2551,8 +2639,22 @@ void MainWindow::OnRunBrowserCheckedSignalsChanged(const QSet<QString>& checkedK
 
         if (!m_runBrowserActive)
         {
-            // No Run Browser session — show everything.
-            tile->show();
+            // Ian: No active Run Browser session.  Respect the layout's
+            // hidden keys — tiles whose keys are in m_runBrowserHiddenKeys
+            // must stay hidden.  This path fires during StartTransport()
+            // when m_runBrowserActive is temporarily false and the dock
+            // emits CheckedSignalsChanged as it rebuilds.  Without this
+            // guard, every emission would show all tiles, wiping the
+            // layout's hidden state.
+            const QString key = QString::fromStdString(keyStd);
+            if (m_runBrowserHiddenKeys.contains(key))
+            {
+                tile->hide();
+            }
+            else
+            {
+                tile->show();
+            }
         }
         else if (checkedKeys.isEmpty())
         {
@@ -2571,6 +2673,19 @@ void MainWindow::OnRunBrowserCheckedSignalsChanged(const QSet<QString>& checkedK
                 tile->hide();
             }
         }
+    }
+
+    // Ian: Keep the in-memory hidden-keys cache in sync with the dock's
+    // live state.  m_runBrowserHiddenKeys is the value StartTransport()
+    // passes to SetHiddenDiscoveredKeys() on reconnect.  Without this
+    // update, any tiles hidden AFTER startup would revert to visible on
+    // the next auto-reconnect cycle because m_runBrowserHiddenKeys still
+    // held the stale value loaded from QSettings at startup.
+    if (m_runBrowserActive
+        && m_runBrowserDock != nullptr
+        && m_runBrowserDock->IsStreamingModeForTesting())
+    {
+        m_runBrowserHiddenKeys = m_runBrowserDock->GetHiddenDiscoveredKeys();
     }
 
     // Persist checked keys so the next launch restores the same state.
@@ -2765,6 +2880,24 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                 // Apply the same delta to all sibling tiles.
                 UpdateGroupDrag(QCursor::pos());
             }
+            // Ian: Multi-select context menu.  When the user right-clicks a
+            // tile that is part of a multi-selection (>1 tile), show a context
+            // menu with "Hide N tiles" instead of the single-tile menu.  We
+            // intercept ContextMenu here so it never reaches the tile's own
+            // contextMenuEvent.
+            else if (event->type() == QEvent::ContextMenu
+                     && tile->IsSelected()
+                     && m_selectedTiles.size() > 1)
+            {
+                auto* ce = static_cast<QContextMenuEvent*>(event);
+                QMenu menu;
+                const int count = m_selectedTiles.size();
+                QAction* hideAction = menu.addAction(
+                    QString("Hide %1 tiles").arg(count));
+                connect(hideAction, &QAction::triggered, this, &MainWindow::HideSelectedTiles);
+                menu.exec(ce->globalPos());
+                return true;
+            }
         }
     }
 
@@ -2821,7 +2954,20 @@ void MainWindow::closeEvent(QCloseEvent* event)
 
 bool MainWindow::SaveLayoutToPath(const QString& path)
 {
-    const bool saved = sd::layout::SaveLayout(m_canvas, path);
+    // Ian: Snapshot current tile visibility state into the layout file.
+    // We walk actual tile visibility rather than querying mode-specific state
+    // (checked keys, hidden keys) so the saved set is always ground truth
+    // regardless of whether we're in streaming, reading, or no-browser mode.
+    QSet<QString> hiddenKeys;
+    for (const auto& [keyStd, tile] : m_tiles)
+    {
+        if (tile != nullptr && tile->isHidden())
+        {
+            hiddenKeys.insert(QString::fromStdString(keyStd));
+        }
+    }
+
+    const bool saved = sd::layout::SaveLayout(m_canvas, path, hiddenKeys);
     if (saved)
     {
         m_layoutFilePath = path;
@@ -2862,7 +3008,8 @@ bool MainWindow::SaveLayoutUsingCurrentOrPrompt()
 bool MainWindow::LoadLayoutFromPath(const QString& path, bool applyToExistingTiles, bool persistAsCurrentPath)
 {
     std::vector<sd::layout::WidgetLayoutEntry> entries;
-    if (!sd::layout::LoadLayoutEntries(path, entries))
+    QSet<QString> layoutHiddenKeys;
+    if (!sd::layout::LoadLayoutEntries(path, entries, &layoutHiddenKeys))
     {
         return false;
     }
@@ -2877,6 +3024,12 @@ bool MainWindow::LoadLayoutFromPath(const QString& path, bool applyToExistingTil
 
     if (applyToExistingTiles)
     {
+        // Ian: Update the hidden keys set BEFORE creating tiles so that
+        // GetOrCreateTile respects the layout's visibility state for newly
+        // created tiles (e.g. when the Run Browser is not active and tiles
+        // start hidden based on m_runBrowserHiddenKeys).
+        m_runBrowserHiddenKeys = layoutHiddenKeys;
+
         for (const sd::layout::WidgetLayoutEntry& entry : entries)
         {
             const sd::widgets::VariableType inferredType = ToVariableTypeFromWidgetType(entry.widgetType);
@@ -2885,6 +3038,47 @@ bool MainWindow::LoadLayoutFromPath(const QString& path, bool applyToExistingTil
         }
 
         ApplyTemporaryDefaultValuesToTiles();
+
+        // Ian: Apply layout-persisted visibility state.
+        //
+        // When the Run Browser is active (reading/streaming), route through
+        // the dock so its checkboxes stay consistent — UncheckSignalsByKeys
+        // emits CheckedSignalsChanged, which re-walks all tiles.
+        //
+        // When the Run Browser is NOT active (e.g. Direct transport, no replay
+        // loaded), walk tiles directly.  This handles both newly created tiles
+        // and pre-existing tiles whose visibility must be updated when
+        // switching between layout files.
+        //
+        // IMPORTANT: m_runBrowserDock is NEVER null (it's created during
+        // MainWindow construction), so we must NOT gate on its pointer.
+        // Instead, use m_runBrowserActive to decide whether to route through
+        // the dock or walk tiles directly.
+        if (m_runBrowserActive && !layoutHiddenKeys.isEmpty())
+        {
+            m_runBrowserDock->UncheckSignalsByKeys(layoutHiddenKeys);
+        }
+        else if (!m_runBrowserActive)
+        {
+            for (auto& [keyStd, tile] : m_tiles)
+            {
+                if (tile == nullptr)
+                {
+                    continue;
+                }
+                const QString key = QString::fromStdString(keyStd);
+                if (layoutHiddenKeys.contains(key))
+                {
+                    tile->hide();
+                }
+                else
+                {
+                    tile->show();
+                }
+            }
+        }
+
+        PersistRunBrowserState();
     }
 
     if (persistAsCurrentPath)
@@ -5044,6 +5238,11 @@ bool MainWindow::LoadLayoutFromPathForTesting(const QString& path, bool applyToE
     return LoadLayoutFromPath(path, applyToExistingTiles, persistAsCurrentPath);
 }
 
+bool MainWindow::SaveLayoutToPathForTesting(const QString& path)
+{
+    return SaveLayoutToPath(path);
+}
+
 void MainWindow::ClearWidgetsForTesting()
 {
     OnClearWidgets();
@@ -5071,6 +5270,16 @@ bool MainWindow::TileIsTemporaryDefaultForTesting(const QString& key) const
     return it != m_tiles.end() && it->second != nullptr && it->second->IsShowingTemporaryDefault();
 }
 
+bool MainWindow::TileIsVisibleForTesting(const QString& key) const
+{
+    const auto it = m_tiles.find(key.toStdString());
+    // Ian: Use !isHidden() rather than isVisible() because isVisible()
+    // requires the entire ancestor chain (including the MainWindow) to be
+    // shown.  In tests the window is never displayed, so isVisible() would
+    // always return false.  isHidden() checks only the widget's own flag.
+    return it != m_tiles.end() && it->second != nullptr && !it->second->isHidden();
+}
+
 void MainWindow::SetConnectionFieldValueForTesting(const QString& fieldId, const QVariant& value)
 {
     SetConnectionFieldValue(fieldId, value);
@@ -5088,6 +5297,50 @@ bool MainWindow::GetConnectionFieldBoolForTesting(const QString& fieldId, bool d
     field.type = sd::transport::ConnectionFieldType::Bool;
     field.defaultValue = defaultValue;
     return GetConnectionFieldValue(field).toBool();
+}
+
+// Ian: Replay the exact streaming-mode setup block from StartTransport()
+// without creating a real transport.  This simulates what happens during
+// an auto-reconnect cycle: the dock is cleared, hidden keys are re-applied,
+// and existing tiles are re-fed to the dock.  Callers should first create
+// tiles via SimulateVariableUpdateForTesting, hide some via the dock,
+// then call this to verify hidden state survives the reconnect.
+void MainWindow::SimulateStreamingReconnectForTesting()
+{
+    m_runBrowserActive = false;
+    if (m_runBrowserDock != nullptr)
+    {
+        m_runBrowserDock->ClearDiscoveredKeys();
+        m_runBrowserDock->SetStreamingRootLabel(GetSelectedTransportDisplayName());
+        if (!m_runBrowserHiddenKeys.isEmpty())
+        {
+            m_runBrowserDock->SetHiddenDiscoveredKeys(m_runBrowserHiddenKeys);
+        }
+
+        for (const auto& [tileKeyStd, tile] : m_tiles)
+        {
+            if (tile == nullptr)
+            {
+                continue;
+            }
+            QString typeStr;
+            const auto tileType = tile->GetType();
+            switch (tileType)
+            {
+                case sd::widgets::VariableType::Bool:   typeStr = QStringLiteral("bool");   break;
+                case sd::widgets::VariableType::Double:  typeStr = QStringLiteral("double"); break;
+                case sd::widgets::VariableType::String:  typeStr = QStringLiteral("string"); break;
+            }
+            m_runBrowserDock->OnTileAdded(QString::fromStdString(tileKeyStd), typeStr);
+        }
+    }
+    m_runBrowserActive = true;
+    PersistRunBrowserState();
+}
+
+sd::widgets::RunBrowserDock* MainWindow::GetRunBrowserDockForTesting() const
+{
+    return m_runBrowserDock;
 }
 #endif
 

@@ -87,14 +87,18 @@ public:
     void SimulateControlDoubleEditForTesting(const QString& key, double value);
     void LoadRememberedControlValuesForTesting();
     bool LoadLayoutFromPathForTesting(const QString& path, bool applyToExistingTiles = true, bool persistAsCurrentPath = false);
+    bool SaveLayoutToPathForTesting(const QString& path);
     void ClearWidgetsForTesting();
     int RememberedControlValueCountForTesting() const;
     bool HasRememberedControlValueForTesting(const QString& key) const;
     bool TileHasValueForTesting(const QString& key) const;
     bool TileIsTemporaryDefaultForTesting(const QString& key) const;
+    bool TileIsVisibleForTesting(const QString& key) const;
     void SetConnectionFieldValueForTesting(const QString& fieldId, const QVariant& value);
     void SyncConnectionConfigToPluginSettingsJsonForTesting();
     bool GetConnectionFieldBoolForTesting(const QString& fieldId, bool defaultValue) const;
+    void SimulateStreamingReconnectForTesting();
+    sd::widgets::RunBrowserDock* GetRunBrowserDockForTesting() const;
 #endif
 
 private slots:
@@ -112,6 +116,7 @@ private slots:
     void OnImportLegacyXmlLayout();
     void OnClearWidgets();
     void OnRemoveWidgetRequested(const QString& key);
+    void OnHideTileRequested(const QString& key);
     void OnRunBrowserCheckedSignalsChanged(const QSet<QString>& checkedKeys, const QMap<QString, QString>& keyToType);
     void OnControlBoolEdited(const QString& key, bool value);
     void OnControlDoubleEdited(const QString& key, double value);
@@ -215,6 +220,7 @@ private:
     void ApplyTemporaryDefaultValuesToTiles();
     void ClearTileSelection();
     void SelectTilesInRect(const QRect& selectionRect);
+    void HideSelectedTiles();
     void BeginGroupDrag(sd::widgets::VariableTile* anchorTile, const QPoint& globalPos);
     void UpdateGroupDrag(const QPoint& globalPos);
     void EndGroupDrag();

@@ -22,6 +22,7 @@ namespace
 using sd::nt4::ConnectionState;
 using sd::nt4::NT4Client;
 using sd::nt4::NT4ClientConfig;
+using sd::nt4::TopicAnnounce;
 using sd::nt4::TopicUpdate;
 using sd::nt4::ValueType;
 
@@ -413,6 +414,20 @@ int StartNT4(
                     static_cast<int>(state)
                 );
             }
+        },
+        // Ian (Layer 3): Announce callback — receives topic metadata including
+        // the properties JSON from the server. Currently logged for diagnostics.
+        // Future iterations will forward this through the C ABI so the host can
+        // pre-create typed widgets (Scheduler, Subsystem, Command) before value
+        // frames arrive. The existing sub-key .type mechanism already delivers
+        // the same information via normal value updates, so this is supplemental.
+        [](const TopicAnnounce& announce)
+        {
+            // Placeholder — announce metadata is parsed and available.
+            // When the C ABI gains an on_topic_announce callback, this lambda
+            // will forward announce.topicPath, announce.typeStr, and
+            // announce.propertiesJson to the host.
+            (void)announce;
         }
     );
 

@@ -470,10 +470,10 @@ TEST(RunBrowserDockTests, TreeGroupsSignalsBySlashPrefix)
     const QStandardItem* groupItem = runItem->child(0, 0);
     EXPECT_EQ(groupItem->text(), "flush_fence");
 
-    // Two leaf signals under the group.
+    // Two leaf signals under the group (sorted alphabetically).
     ASSERT_EQ(groupItem->rowCount(), 2);
-    EXPECT_EQ(groupItem->child(0, 0)->text(), "TotalMs");
-    EXPECT_EQ(groupItem->child(1, 0)->text(), "Count");
+    EXPECT_EQ(groupItem->child(0, 0)->text(), "Count");
+    EXPECT_EQ(groupItem->child(1, 0)->text(), "TotalMs");
 }
 
 TEST(RunBrowserDockTests, TreeHandlesDeeplyNestedKeys)
@@ -594,7 +594,7 @@ TEST(RunBrowserDockTests, SignalActivatedEmittedOnLeafActivation)
     const QStandardItemModel* model = dock.GetTreeModelForTesting();
     const QStandardItem* runItem = model->item(0, 0);
     const QStandardItem* groupItem = runItem->child(0, 0);     // "flush_fence"
-    const QStandardItem* leafItem = groupItem->child(0, 0);    // "TotalMs"
+    const QStandardItem* leafItem = groupItem->child(0, 0);    // "Count" (first alphabetically)
 
     // The QTreeView::activated signal drives OnTreeActivated.
     // We call the view's activated signal indirectly by finding the view
@@ -608,7 +608,7 @@ TEST(RunBrowserDockTests, SignalActivatedEmittedOnLeafActivation)
     ASSERT_EQ(spy.count(), 1);
     const QList<QVariant> args = spy.takeFirst();
     EXPECT_EQ(args.at(0).toInt(), 0);   // runIndex
-    EXPECT_EQ(args.at(1).toString(), "flush_fence/TotalMs");
+    EXPECT_EQ(args.at(1).toString(), "flush_fence/Count");
 }
 
 TEST(RunBrowserDockTests, RunActivatedEmittedOnRunNodeActivation)
@@ -1226,7 +1226,7 @@ TEST(RunBrowserDockTests, TriStateWithThreeGroups)
     EXPECT_EQ(runItem->checkState(), Qt::PartiallyChecked);
 }
 
-TEST(RunBrowserDockTests, SignalLeavesAreNotCheckable)
+TEST(RunBrowserDockTests, SignalLeavesAreCheckable)
 {
     ASSERT_NE(EnsureApp(), nullptr);
 
@@ -1245,12 +1245,12 @@ TEST(RunBrowserDockTests, SignalLeavesAreNotCheckable)
     EXPECT_TRUE(runItem->isCheckable());
     EXPECT_TRUE(groupItem->isCheckable());
 
-    // Signal leaves should not be checkable.
+    // Signal leaves should also be checkable (each tile can be individually hidden).
     for (int row = 0; row < groupItem->rowCount(); ++row)
     {
         QStandardItem* leaf = groupItem->child(row, 0);
         ASSERT_NE(leaf, nullptr);
-        EXPECT_FALSE(leaf->isCheckable()) << "Signal leaf '" << leaf->text().toStdString() << "' should not be checkable";
+        EXPECT_TRUE(leaf->isCheckable()) << "Signal leaf '" << leaf->text().toStdString() << "' should be checkable";
     }
 }
 
@@ -1739,8 +1739,12 @@ TEST(RunBrowserDockTests, StreamingSetHiddenKeysUnchecksGroups)
     EXPECT_TRUE(checked.contains("sensor/Temperature"));
 }
 
-TEST(RunBrowserDockTests, StreamingSetHiddenKeysPartialGroupStaysChecked)
+TEST(RunBrowserDockTests, StreamingSetHiddenKeysPartialGroupBecomesPartial)
 {
+    // Ian: With leaf-level checkboxes, hiding one of two leaves in a group
+    // sets that leaf to Unchecked while the other stays Checked.  The group
+    // recomputes as PartiallyChecked (not fully Checked as in the old
+    // group-granularity model).
     ASSERT_NE(EnsureApp(), nullptr);
 
     sd::widgets::RunBrowserDock dock;
@@ -1749,7 +1753,7 @@ TEST(RunBrowserDockTests, StreamingSetHiddenKeysPartialGroupStaysChecked)
     dock.OnTileAdded("motor/Current", "double");
     dock.OnTileAdded("sensor/Temperature", "bool");
 
-    // Only hide one of motor's two signals — group should stay checked.
+    // Only hide one of motor's two signals.
     QSet<QString> hidden;
     hidden.insert("motor/RPM");
     dock.SetHiddenDiscoveredKeys(hidden);
@@ -1759,8 +1763,17 @@ TEST(RunBrowserDockTests, StreamingSetHiddenKeysPartialGroupStaysChecked)
     QStandardItem* motorGroup = FindChild(root, "motor");
     ASSERT_NE(motorGroup, nullptr);
 
-    // motor group should stay checked because motor/Current is NOT hidden.
-    EXPECT_EQ(motorGroup->checkState(), Qt::Checked);
+    // motor group should be PartiallyChecked — motor/RPM is unchecked,
+    // motor/Current is still checked.
+    EXPECT_EQ(motorGroup->checkState(), Qt::PartiallyChecked);
+
+    // Verify individual leaf states.
+    QStandardItem* rpmLeaf = FindChild(motorGroup, "RPM");
+    QStandardItem* currentLeaf = FindChild(motorGroup, "Current");
+    ASSERT_NE(rpmLeaf, nullptr);
+    ASSERT_NE(currentLeaf, nullptr);
+    EXPECT_EQ(rpmLeaf->checkState(), Qt::Unchecked);
+    EXPECT_EQ(currentLeaf->checkState(), Qt::Checked);
 }
 
 TEST(RunBrowserDockTests, StreamingLazyHiddenKeysOnReconnect)
@@ -1807,8 +1820,9 @@ TEST(RunBrowserDockTests, StreamingLazyHiddenKeysOnReconnect)
 
 TEST(RunBrowserDockTests, StreamingLazyHiddenKeysPartialGroup)
 {
-    // If only some signals in a group are hidden, the group stays checked
-    // because there are visible descendants.
+    // Ian: With leaf-level checkboxes, hiding one of two leaves via the
+    // lazy hidden-keys path (SetHiddenDiscoveredKeys before OnTileAdded)
+    // unchecks that individual leaf.  The group recomputes as PartiallyChecked.
     ASSERT_NE(EnsureApp(), nullptr);
 
     sd::widgets::RunBrowserDock dock;
@@ -1827,8 +1841,17 @@ TEST(RunBrowserDockTests, StreamingLazyHiddenKeysPartialGroup)
     QStandardItem* motorGroup = FindChild(root, "motor");
     ASSERT_NE(motorGroup, nullptr);
 
-    // motor group should stay checked — motor/Current is not hidden.
-    EXPECT_EQ(motorGroup->checkState(), Qt::Checked);
+    // motor group should be PartiallyChecked — motor/RPM is unchecked,
+    // motor/Current is checked.
+    EXPECT_EQ(motorGroup->checkState(), Qt::PartiallyChecked);
+
+    // Verify individual leaf states.
+    QStandardItem* rpmLeaf = FindChild(motorGroup, "RPM");
+    QStandardItem* currentLeaf = FindChild(motorGroup, "Current");
+    ASSERT_NE(rpmLeaf, nullptr);
+    ASSERT_NE(currentLeaf, nullptr);
+    EXPECT_EQ(rpmLeaf->checkState(), Qt::Unchecked);
+    EXPECT_EQ(currentLeaf->checkState(), Qt::Checked);
 }
 
 TEST(RunBrowserDockTests, StreamingLazyHiddenKeysNestedGroups)
@@ -2643,4 +2666,1082 @@ TEST(RunBrowserDockTests, StreamingClearDiscoveredKeysEmitsCheckedSignalsForNewT
     const auto keys = spy.last().at(0).value<QSet<QString>>();
     EXPECT_TRUE(keys.contains("motor/RPM"));
     EXPECT_FALSE(keys.contains("old/Signal"));
+}
+
+// ============================================================================
+// Leaf-level checkbox tests (individual signal tile visibility)
+// ============================================================================
+
+TEST(RunBrowserDockTests, ReadingModeLeafStartsUnchecked)
+{
+    // Ian: In reading mode, leaves start unchecked (opt-in model).
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    const QString path = WriteFixture(tmp, "run.json", kMinimalValidJson);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.AddRunFromFile(path);
+
+    QStandardItemModel* model = dock.GetTreeModelForTesting();
+    QStandardItem* runItem = model->item(0, 0);
+    QStandardItem* groupItem = runItem->child(0, 0);  // "flush_fence"
+
+    for (int row = 0; row < groupItem->rowCount(); ++row)
+    {
+        QStandardItem* leaf = groupItem->child(row, 0);
+        ASSERT_NE(leaf, nullptr);
+        EXPECT_EQ(leaf->checkState(), Qt::Unchecked)
+            << "Reading mode leaf '" << leaf->text().toStdString()
+            << "' should start unchecked";
+    }
+}
+
+TEST(RunBrowserDockTests, StreamingModeLeafStartsChecked)
+{
+    // Ian: In streaming mode, leaves start checked (opt-out model).
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+    dock.OnTileAdded("motor/RPM", "double");
+    dock.OnTileAdded("motor/Current", "double");
+
+    QStandardItem* root = GetStreamingRoot(dock.GetTreeModelForTesting());
+    ASSERT_NE(root, nullptr);
+    QStandardItem* motorGroup = FindChild(root, "motor");
+    ASSERT_NE(motorGroup, nullptr);
+
+    for (int row = 0; row < motorGroup->rowCount(); ++row)
+    {
+        QStandardItem* leaf = motorGroup->child(row, 0);
+        ASSERT_NE(leaf, nullptr);
+        EXPECT_EQ(leaf->checkState(), Qt::Checked)
+            << "Streaming mode leaf '" << leaf->text().toStdString()
+            << "' should start checked";
+    }
+}
+
+TEST(RunBrowserDockTests, ReadingModeUncheckSingleLeafMakesGroupPartial)
+{
+    // Ian: Checking a group pushes to all leaves.  Then unchecking one leaf
+    // should make the group PartiallyChecked and the run PartiallyChecked.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    const QString path = WriteFixture(tmp, "two_groups.json", kTwoGroupsJson);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.AddRunFromFile(path);
+
+    QStandardItemModel* model = dock.GetTreeModelForTesting();
+    QStandardItem* runItem = model->item(0, 0);
+    QStandardItem* motorGroup = FindChild(runItem, "motor");
+    ASSERT_NE(motorGroup, nullptr);
+
+    // Check the motor group — pushes checked to both leaves.
+    motorGroup->setCheckState(Qt::Checked);
+    ASSERT_EQ(motorGroup->checkState(), Qt::Checked);
+
+    // Find and uncheck just one leaf.
+    QStandardItem* rpmLeaf = FindChild(motorGroup, "RPM");
+    ASSERT_NE(rpmLeaf, nullptr);
+    rpmLeaf->setCheckState(Qt::Unchecked);
+
+    // Group should now be PartiallyChecked.
+    EXPECT_EQ(motorGroup->checkState(), Qt::PartiallyChecked);
+
+    // Run should also be PartiallyChecked (motor is partial, sensor is unchecked).
+    EXPECT_EQ(runItem->checkState(), Qt::PartiallyChecked);
+
+    // Only motor/Current should be in checked keys, not motor/RPM.
+    QSet<QString> checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_FALSE(checked.contains("motor/RPM"));
+    EXPECT_TRUE(checked.contains("motor/Current"));
+}
+
+TEST(RunBrowserDockTests, StreamingUncheckSingleLeafMakesGroupPartial)
+{
+    // Ian: In streaming mode, unchecking one leaf from a fully-checked
+    // group should set the group to PartiallyChecked.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+    dock.OnTileAdded("motor/RPM", "double");
+    dock.OnTileAdded("motor/Current", "double");
+    dock.OnTileAdded("sensor/Temperature", "bool");
+
+    QStandardItem* root = GetStreamingRoot(dock.GetTreeModelForTesting());
+    ASSERT_NE(root, nullptr);
+    QStandardItem* motorGroup = FindChild(root, "motor");
+    ASSERT_NE(motorGroup, nullptr);
+
+    // All start checked.
+    ASSERT_EQ(motorGroup->checkState(), Qt::Checked);
+    ASSERT_EQ(root->checkState(), Qt::Checked);
+
+    // Uncheck one leaf.
+    QStandardItem* rpmLeaf = FindChild(motorGroup, "RPM");
+    ASSERT_NE(rpmLeaf, nullptr);
+    rpmLeaf->setCheckState(Qt::Unchecked);
+
+    // Group should be partial, root should be partial.
+    EXPECT_EQ(motorGroup->checkState(), Qt::PartiallyChecked);
+    EXPECT_EQ(root->checkState(), Qt::PartiallyChecked);
+
+    // Checked set should exclude only motor/RPM.
+    QSet<QString> checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_FALSE(checked.contains("motor/RPM"));
+    EXPECT_TRUE(checked.contains("motor/Current"));
+    EXPECT_TRUE(checked.contains("sensor/Temperature"));
+}
+
+TEST(RunBrowserDockTests, StreamingRecheckLeafRestoresGroupToChecked)
+{
+    // Ian: After unchecking then re-checking a leaf, the group should
+    // return to fully Checked.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+    dock.OnTileAdded("motor/RPM", "double");
+    dock.OnTileAdded("motor/Current", "double");
+
+    QStandardItem* root = GetStreamingRoot(dock.GetTreeModelForTesting());
+    ASSERT_NE(root, nullptr);
+    QStandardItem* motorGroup = FindChild(root, "motor");
+    ASSERT_NE(motorGroup, nullptr);
+    QStandardItem* rpmLeaf = FindChild(motorGroup, "RPM");
+    ASSERT_NE(rpmLeaf, nullptr);
+
+    // Uncheck then re-check the leaf.
+    rpmLeaf->setCheckState(Qt::Unchecked);
+    ASSERT_EQ(motorGroup->checkState(), Qt::PartiallyChecked);
+
+    rpmLeaf->setCheckState(Qt::Checked);
+    EXPECT_EQ(motorGroup->checkState(), Qt::Checked);
+    EXPECT_EQ(root->checkState(), Qt::Checked);
+
+    // Both leaves should be in the checked set.
+    QSet<QString> checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_TRUE(checked.contains("motor/RPM"));
+    EXPECT_TRUE(checked.contains("motor/Current"));
+}
+
+TEST(RunBrowserDockTests, StreamingUncheckAllLeavesManuallyMakesGroupUnchecked)
+{
+    // Ian: Unchecking every leaf in a group one by one should result in
+    // the group being Unchecked (not PartiallyChecked).
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+    dock.OnTileAdded("motor/RPM", "double");
+    dock.OnTileAdded("motor/Current", "double");
+
+    QStandardItem* root = GetStreamingRoot(dock.GetTreeModelForTesting());
+    ASSERT_NE(root, nullptr);
+    QStandardItem* motorGroup = FindChild(root, "motor");
+    ASSERT_NE(motorGroup, nullptr);
+
+    QStandardItem* rpmLeaf = FindChild(motorGroup, "RPM");
+    QStandardItem* currentLeaf = FindChild(motorGroup, "Current");
+    ASSERT_NE(rpmLeaf, nullptr);
+    ASSERT_NE(currentLeaf, nullptr);
+
+    rpmLeaf->setCheckState(Qt::Unchecked);
+    EXPECT_EQ(motorGroup->checkState(), Qt::PartiallyChecked);
+
+    currentLeaf->setCheckState(Qt::Unchecked);
+    EXPECT_EQ(motorGroup->checkState(), Qt::Unchecked);
+
+    EXPECT_TRUE(dock.GetCheckedSignalKeysForTesting().isEmpty());
+}
+
+TEST(RunBrowserDockTests, StreamingLeafToggleEmitsCheckedSignalsChanged)
+{
+    // Ian: Toggling a single leaf should emit CheckedSignalsChanged with
+    // the correct updated key set.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+    dock.OnTileAdded("motor/RPM", "double");
+    dock.OnTileAdded("motor/Current", "double");
+
+    QSignalSpy spy(&dock, &sd::widgets::RunBrowserDock::CheckedSignalsChanged);
+    ASSERT_TRUE(spy.isValid());
+
+    QStandardItem* root = GetStreamingRoot(dock.GetTreeModelForTesting());
+    ASSERT_NE(root, nullptr);
+    QStandardItem* motorGroup = FindChild(root, "motor");
+    ASSERT_NE(motorGroup, nullptr);
+    QStandardItem* rpmLeaf = FindChild(motorGroup, "RPM");
+    ASSERT_NE(rpmLeaf, nullptr);
+
+    // Uncheck one leaf.
+    rpmLeaf->setCheckState(Qt::Unchecked);
+
+    ASSERT_GE(spy.count(), 1);
+    const auto keys = spy.last().at(0).value<QSet<QString>>();
+    EXPECT_FALSE(keys.contains("motor/RPM"));
+    EXPECT_TRUE(keys.contains("motor/Current"));
+}
+
+TEST(RunBrowserDockTests, StreamingGroupCheckOverridesIndividualLeafStates)
+{
+    // Ian: If a user unchecks individual leaves (making group partial),
+    // then checks the group, all leaves should become checked.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+    dock.OnTileAdded("motor/RPM", "double");
+    dock.OnTileAdded("motor/Current", "double");
+
+    QStandardItem* root = GetStreamingRoot(dock.GetTreeModelForTesting());
+    ASSERT_NE(root, nullptr);
+    QStandardItem* motorGroup = FindChild(root, "motor");
+    ASSERT_NE(motorGroup, nullptr);
+    QStandardItem* rpmLeaf = FindChild(motorGroup, "RPM");
+    QStandardItem* currentLeaf = FindChild(motorGroup, "Current");
+    ASSERT_NE(rpmLeaf, nullptr);
+    ASSERT_NE(currentLeaf, nullptr);
+
+    // Uncheck one leaf.
+    rpmLeaf->setCheckState(Qt::Unchecked);
+    ASSERT_EQ(motorGroup->checkState(), Qt::PartiallyChecked);
+
+    // Check the group — should override and check all leaves.
+    motorGroup->setCheckState(Qt::Checked);
+
+    EXPECT_EQ(rpmLeaf->checkState(), Qt::Checked);
+    EXPECT_EQ(currentLeaf->checkState(), Qt::Checked);
+
+    QSet<QString> checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_EQ(checked.size(), 2);
+    EXPECT_TRUE(checked.contains("motor/RPM"));
+    EXPECT_TRUE(checked.contains("motor/Current"));
+}
+
+TEST(RunBrowserDockTests, StreamingGetHiddenKeysReturnsIndividuallyUncheckedLeaves)
+{
+    // Ian: GetHiddenDiscoveredKeys should return individually unchecked
+    // leaves, not just group-level hidden keys.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+    dock.OnTileAdded("motor/RPM", "double");
+    dock.OnTileAdded("motor/Current", "double");
+    dock.OnTileAdded("sensor/Temperature", "bool");
+
+    // Uncheck just one leaf — RPM.
+    QStandardItem* root = GetStreamingRoot(dock.GetTreeModelForTesting());
+    ASSERT_NE(root, nullptr);
+    QStandardItem* motorGroup = FindChild(root, "motor");
+    ASSERT_NE(motorGroup, nullptr);
+    QStandardItem* rpmLeaf = FindChild(motorGroup, "RPM");
+    ASSERT_NE(rpmLeaf, nullptr);
+    rpmLeaf->setCheckState(Qt::Unchecked);
+
+    QSet<QString> hidden = dock.GetHiddenDiscoveredKeys();
+    EXPECT_EQ(hidden.size(), 1);
+    EXPECT_TRUE(hidden.contains("motor/RPM"));
+    EXPECT_FALSE(hidden.contains("motor/Current"));
+    EXPECT_FALSE(hidden.contains("sensor/Temperature"));
+}
+
+TEST(RunBrowserDockTests, ReadingModeCheckSingleLeafWithoutGroup)
+{
+    // Ian: In reading mode, a user should be able to check an individual
+    // leaf without checking the entire group.  The group becomes partial
+    // and the run becomes partial.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    const QString path = WriteFixture(tmp, "two_groups.json", kTwoGroupsJson);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.AddRunFromFile(path);
+
+    QStandardItemModel* model = dock.GetTreeModelForTesting();
+    QStandardItem* runItem = model->item(0, 0);
+    QStandardItem* motorGroup = FindChild(runItem, "motor");
+    ASSERT_NE(motorGroup, nullptr);
+
+    // Check just one leaf directly.
+    QStandardItem* rpmLeaf = FindChild(motorGroup, "RPM");
+    ASSERT_NE(rpmLeaf, nullptr);
+    rpmLeaf->setCheckState(Qt::Checked);
+
+    // Group should be partial (one checked, one unchecked).
+    EXPECT_EQ(motorGroup->checkState(), Qt::PartiallyChecked);
+    // Run should be partial.
+    EXPECT_EQ(runItem->checkState(), Qt::PartiallyChecked);
+
+    // Only motor/RPM should be in the checked set.
+    QSet<QString> checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_EQ(checked.size(), 1);
+    EXPECT_TRUE(checked.contains("motor/RPM"));
+}
+
+TEST(RunBrowserDockTests, StreamingSingleSegmentLeafCheckable)
+{
+    // Ian: Single-segment keys (no group folder) sit directly under the
+    // streaming root.  They should be individually checkable.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+    dock.OnTileAdded("TopLevel", "string");
+    dock.OnTileAdded("motor/RPM", "double");
+
+    QStandardItem* root = GetStreamingRoot(dock.GetTreeModelForTesting());
+    ASSERT_NE(root, nullptr);
+    QStandardItem* topLevelLeaf = FindChild(root, "TopLevel");
+    ASSERT_NE(topLevelLeaf, nullptr);
+    EXPECT_TRUE(topLevelLeaf->isCheckable());
+    EXPECT_EQ(topLevelLeaf->checkState(), Qt::Checked);
+
+    // Uncheck the single-segment leaf.
+    topLevelLeaf->setCheckState(Qt::Unchecked);
+
+    // Root should be partial (motor group still checked, TopLevel unchecked).
+    EXPECT_EQ(root->checkState(), Qt::PartiallyChecked);
+
+    QSet<QString> checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_FALSE(checked.contains("TopLevel"));
+    EXPECT_TRUE(checked.contains("motor/RPM"));
+}
+
+TEST(RunBrowserDockTests, ReadingModeSetCheckedGroupsBySignalKeysChecksIndividualLeaves)
+{
+    // Ian: SetCheckedGroupsBySignalKeys should check individual leaves
+    // and compute group tri-states correctly.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    const QString path = WriteFixture(tmp, "two_groups.json", kTwoGroupsJson);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.AddRunFromFile(path);
+
+    // Check only one of two motor signals.
+    QSet<QString> keys;
+    keys.insert("motor/RPM");
+    dock.SetCheckedGroupsBySignalKeys(keys);
+
+    QStandardItemModel* model = dock.GetTreeModelForTesting();
+    QStandardItem* runItem = model->item(0, 0);
+    QStandardItem* motorGroup = FindChild(runItem, "motor");
+    ASSERT_NE(motorGroup, nullptr);
+
+    // motor/RPM should be checked, motor/Current should still be unchecked.
+    QStandardItem* rpmLeaf = FindChild(motorGroup, "RPM");
+    QStandardItem* currentLeaf = FindChild(motorGroup, "Current");
+    ASSERT_NE(rpmLeaf, nullptr);
+    ASSERT_NE(currentLeaf, nullptr);
+    EXPECT_EQ(rpmLeaf->checkState(), Qt::Checked);
+    EXPECT_EQ(currentLeaf->checkState(), Qt::Unchecked);
+
+    // Group should be partial.
+    EXPECT_EQ(motorGroup->checkState(), Qt::PartiallyChecked);
+    // Run should be partial.
+    EXPECT_EQ(runItem->checkState(), Qt::PartiallyChecked);
+
+    QSet<QString> checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_EQ(checked.size(), 1);
+    EXPECT_TRUE(checked.contains("motor/RPM"));
+}
+
+TEST(RunBrowserDockTests, StreamingNestedGroupLeafUncheckPropagatesUpMultipleLevels)
+{
+    // Ian: In deeply nested groups, unchecking a leaf should propagate
+    // tri-state up through all ancestor groups to the root.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+    dock.OnTileAdded("a/b/c", "double");
+    dock.OnTileAdded("a/b/d", "double");
+    dock.OnTileAdded("x/y", "bool");
+
+    QStandardItem* root = GetStreamingRoot(dock.GetTreeModelForTesting());
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->checkState(), Qt::Checked);
+
+    // Find leaf a/b/c and uncheck it.
+    QStandardItem* aGroup = FindChild(root, "a");
+    ASSERT_NE(aGroup, nullptr);
+    QStandardItem* bGroup = FindChild(aGroup, "b");
+    ASSERT_NE(bGroup, nullptr);
+    QStandardItem* cLeaf = FindChild(bGroup, "c");
+    ASSERT_NE(cLeaf, nullptr);
+
+    cLeaf->setCheckState(Qt::Unchecked);
+
+    // b group: one checked (d) + one unchecked (c) → partial
+    EXPECT_EQ(bGroup->checkState(), Qt::PartiallyChecked);
+    // a group: one partial child (b) → partial
+    EXPECT_EQ(aGroup->checkState(), Qt::PartiallyChecked);
+    // root: a is partial, x is checked → partial
+    EXPECT_EQ(root->checkState(), Qt::PartiallyChecked);
+
+    // Checked set should include a/b/d and x/y, but not a/b/c.
+    QSet<QString> checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_FALSE(checked.contains("a/b/c"));
+    EXPECT_TRUE(checked.contains("a/b/d"));
+    EXPECT_TRUE(checked.contains("x/y"));
+}
+
+// ---------------------------------------------------------------------------
+// UncheckSignalByKey tests
+// ---------------------------------------------------------------------------
+
+TEST(RunBrowserDockTests, StreamingUncheckSignalByKeyHidesLeafAndEmitsChanged)
+{
+    // Ian: UncheckSignalByKey should uncheck the leaf, update group
+    // tri-state, and emit CheckedSignalsChanged.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+    dock.OnTileAdded("motor/RPM", "double");
+    dock.OnTileAdded("motor/Current", "double");
+
+    QSignalSpy spy(&dock, &sd::widgets::RunBrowserDock::CheckedSignalsChanged);
+
+    dock.UncheckSignalByKey("motor/RPM");
+
+    // Signal should have been emitted.
+    EXPECT_GE(spy.count(), 1);
+
+    // The unchecked key should not be in the checked set.
+    QSet<QString> checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_FALSE(checked.contains("motor/RPM"));
+    EXPECT_TRUE(checked.contains("motor/Current"));
+
+    // Group should be partial, root should be partial.
+    QStandardItem* root = GetStreamingRoot(dock.GetTreeModelForTesting());
+    ASSERT_NE(root, nullptr);
+    QStandardItem* motorGroup = FindChild(root, "motor");
+    ASSERT_NE(motorGroup, nullptr);
+    EXPECT_EQ(motorGroup->checkState(), Qt::PartiallyChecked);
+    EXPECT_EQ(root->checkState(), Qt::PartiallyChecked);
+}
+
+TEST(RunBrowserDockTests, StreamingUncheckSignalByKeyNoOpForUnknownKey)
+{
+    // UncheckSignalByKey with a key not in the tree should be a no-op.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+    dock.OnTileAdded("motor/RPM", "double");
+
+    QSignalSpy spy(&dock, &sd::widgets::RunBrowserDock::CheckedSignalsChanged);
+
+    dock.UncheckSignalByKey("nonexistent/key");
+
+    // No signal should have been emitted.
+    EXPECT_EQ(spy.count(), 0);
+
+    // Checked set unchanged.
+    QSet<QString> checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_TRUE(checked.contains("motor/RPM"));
+}
+
+TEST(RunBrowserDockTests, StreamingUncheckSignalByKeyNoOpWhenAlreadyUnchecked)
+{
+    // Calling UncheckSignalByKey on an already-unchecked leaf should be a no-op.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+    dock.OnTileAdded("motor/RPM", "double");
+    dock.OnTileAdded("motor/Current", "double");
+
+    // First uncheck.
+    dock.UncheckSignalByKey("motor/RPM");
+
+    QSignalSpy spy(&dock, &sd::widgets::RunBrowserDock::CheckedSignalsChanged);
+
+    // Second uncheck — should be a no-op.
+    dock.UncheckSignalByKey("motor/RPM");
+
+    EXPECT_EQ(spy.count(), 0);
+}
+
+TEST(RunBrowserDockTests, StreamingUncheckSignalByKeySingleSegmentKey)
+{
+    // UncheckSignalByKey should work on single-segment keys (no group).
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+    dock.OnTileAdded("TopLevel", "bool");
+    dock.OnTileAdded("motor/RPM", "double");
+
+    dock.UncheckSignalByKey("TopLevel");
+
+    QSet<QString> checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_FALSE(checked.contains("TopLevel"));
+    EXPECT_TRUE(checked.contains("motor/RPM"));
+
+    QStandardItem* root = GetStreamingRoot(dock.GetTreeModelForTesting());
+    ASSERT_NE(root, nullptr);
+    EXPECT_EQ(root->checkState(), Qt::PartiallyChecked);
+}
+
+TEST(RunBrowserDockTests, StreamingUncheckSignalByKeyNestedGroupPropagatesUp)
+{
+    // In deeply nested groups, UncheckSignalByKey should propagate
+    // tri-state up through all ancestor groups.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+    dock.OnTileAdded("a/b/c", "double");
+    dock.OnTileAdded("a/b/d", "double");
+    dock.OnTileAdded("x/y", "bool");
+
+    dock.UncheckSignalByKey("a/b/c");
+
+    QStandardItem* root = GetStreamingRoot(dock.GetTreeModelForTesting());
+    ASSERT_NE(root, nullptr);
+    QStandardItem* aGroup = FindChild(root, "a");
+    ASSERT_NE(aGroup, nullptr);
+    QStandardItem* bGroup = FindChild(aGroup, "b");
+    ASSERT_NE(bGroup, nullptr);
+
+    EXPECT_EQ(bGroup->checkState(), Qt::PartiallyChecked);
+    EXPECT_EQ(aGroup->checkState(), Qt::PartiallyChecked);
+    EXPECT_EQ(root->checkState(), Qt::PartiallyChecked);
+
+    QSet<QString> checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_FALSE(checked.contains("a/b/c"));
+    EXPECT_TRUE(checked.contains("a/b/d"));
+    EXPECT_TRUE(checked.contains("x/y"));
+}
+
+TEST(RunBrowserDockTests, StreamingUncheckSignalByKeyAppearsInHiddenKeys)
+{
+    // After UncheckSignalByKey, GetHiddenDiscoveredKeys should include the key.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+    dock.OnTileAdded("motor/RPM", "double");
+    dock.OnTileAdded("motor/Current", "double");
+
+    dock.UncheckSignalByKey("motor/RPM");
+
+    QSet<QString> hidden = dock.GetHiddenDiscoveredKeys();
+    EXPECT_TRUE(hidden.contains("motor/RPM"));
+    EXPECT_FALSE(hidden.contains("motor/Current"));
+}
+
+TEST(RunBrowserDockTests, ReadingModeUncheckSignalByKeyWorks)
+{
+    // Ian: UncheckSignalByKey should also work in reading mode.
+    // Check some leaves first, then uncheck one via UncheckSignalByKey.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    const QString path = WriteFixture(tmp, "two_groups.json", kTwoGroupsJson);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.AddRunFromFile(path);
+
+    // Check both motor signals.
+    QSet<QString> keys;
+    keys.insert("motor/RPM");
+    keys.insert("motor/Current");
+    dock.SetCheckedGroupsBySignalKeys(keys);
+
+    // Verify both are checked.
+    QSet<QString> checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_TRUE(checked.contains("motor/RPM"));
+    EXPECT_TRUE(checked.contains("motor/Current"));
+
+    // Now uncheck one via UncheckSignalByKey.
+    dock.UncheckSignalByKey("motor/RPM");
+
+    checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_FALSE(checked.contains("motor/RPM"));
+    EXPECT_TRUE(checked.contains("motor/Current"));
+
+    // Motor group should be partial.
+    QStandardItemModel* model = dock.GetTreeModelForTesting();
+    QStandardItem* runItem = model->item(0, 0);
+    QStandardItem* motorGroup = FindChild(runItem, "motor");
+    ASSERT_NE(motorGroup, nullptr);
+    EXPECT_EQ(motorGroup->checkState(), Qt::PartiallyChecked);
+}
+
+// ============================================================
+// UncheckSignalsByKeys (batch) tests
+// ============================================================
+
+TEST(RunBrowserDockTests, StreamingUncheckSignalsByKeysHidesMultipleLeavesAndEmitsOnce)
+{
+    // Ian: Batch uncheck should uncheck all matching leaves, update
+    // group tri-states, and emit CheckedSignalsChanged exactly once.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel("Robot");
+    dock.OnTileAdded("motor/RPM", "double");
+    dock.OnTileAdded("motor/Current", "double");
+    dock.OnTileAdded("sensor/Gyro", "double");
+
+    QSignalSpy spy(&dock, &sd::widgets::RunBrowserDock::CheckedSignalsChanged);
+
+    QSet<QString> keysToHide;
+    keysToHide.insert("motor/RPM");
+    keysToHide.insert("sensor/Gyro");
+    dock.UncheckSignalsByKeys(keysToHide);
+
+    // Exactly one emission.
+    EXPECT_EQ(spy.count(), 1);
+
+    // Only motor/Current should remain checked.
+    QSet<QString> checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_FALSE(checked.contains("motor/RPM"));
+    EXPECT_TRUE(checked.contains("motor/Current"));
+    EXPECT_FALSE(checked.contains("sensor/Gyro"));
+}
+
+TEST(RunBrowserDockTests, StreamingUncheckSignalsByKeysUpdatesGroupTriStates)
+{
+    // When some leaves in a group are unchecked, the group should become
+    // partial; when all are unchecked, the group should be unchecked.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel("Robot");
+    dock.OnTileAdded("motor/RPM", "double");
+    dock.OnTileAdded("motor/Current", "double");
+    dock.OnTileAdded("sensor/Gyro", "double");
+
+    // Uncheck one of two motor leaves + the only sensor leaf.
+    QSet<QString> keysToHide;
+    keysToHide.insert("motor/RPM");
+    keysToHide.insert("sensor/Gyro");
+    dock.UncheckSignalsByKeys(keysToHide);
+
+    QStandardItemModel* model = dock.GetTreeModelForTesting();
+    QStandardItem* root = model->item(0, 0);  // "Robot"
+    QStandardItem* motorGroup = FindChild(root, "motor");
+    QStandardItem* sensorGroup = FindChild(root, "sensor");
+    ASSERT_NE(motorGroup, nullptr);
+    ASSERT_NE(sensorGroup, nullptr);
+
+    // Motor group: 1 of 2 checked -> partial.
+    EXPECT_EQ(motorGroup->checkState(), Qt::PartiallyChecked);
+    // Sensor group: 0 of 1 checked -> unchecked.
+    EXPECT_EQ(sensorGroup->checkState(), Qt::Unchecked);
+}
+
+TEST(RunBrowserDockTests, StreamingUncheckSignalsByKeysEmptySetIsNoOp)
+{
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel("Robot");
+    dock.OnTileAdded("motor/RPM", "double");
+
+    QSignalSpy spy(&dock, &sd::widgets::RunBrowserDock::CheckedSignalsChanged);
+
+    QSet<QString> empty;
+    dock.UncheckSignalsByKeys(empty);
+
+    // No emission for empty set.
+    EXPECT_EQ(spy.count(), 0);
+
+    // Tile still checked.
+    QSet<QString> checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_TRUE(checked.contains("motor/RPM"));
+}
+
+TEST(RunBrowserDockTests, StreamingUncheckSignalsByKeysUnknownKeysAreIgnored)
+{
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel("Robot");
+    dock.OnTileAdded("motor/RPM", "double");
+
+    QSignalSpy spy(&dock, &sd::widgets::RunBrowserDock::CheckedSignalsChanged);
+
+    QSet<QString> keysToHide;
+    keysToHide.insert("nonexistent/key");
+    keysToHide.insert("also/missing");
+    dock.UncheckSignalsByKeys(keysToHide);
+
+    // No leaves were unchecked, so no emission.
+    EXPECT_EQ(spy.count(), 0);
+
+    QSet<QString> checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_TRUE(checked.contains("motor/RPM"));
+}
+
+TEST(RunBrowserDockTests, StreamingUncheckSignalsByKeysAlreadyUncheckedIsNoOp)
+{
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel("Robot");
+    dock.OnTileAdded("motor/RPM", "double");
+    dock.OnTileAdded("motor/Current", "double");
+
+    // Uncheck RPM first.
+    dock.UncheckSignalByKey("motor/RPM");
+
+    QSignalSpy spy(&dock, &sd::widgets::RunBrowserDock::CheckedSignalsChanged);
+
+    // Batch-uncheck RPM (already unchecked) + Current (new).
+    QSet<QString> keysToHide;
+    keysToHide.insert("motor/RPM");
+    keysToHide.insert("motor/Current");
+    dock.UncheckSignalsByKeys(keysToHide);
+
+    // Should still emit once (Current was unchecked).
+    EXPECT_EQ(spy.count(), 1);
+
+    QSet<QString> checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_FALSE(checked.contains("motor/RPM"));
+    EXPECT_FALSE(checked.contains("motor/Current"));
+}
+
+TEST(RunBrowserDockTests, StreamingUncheckSignalsByKeysAppearsInHiddenKeys)
+{
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel("Robot");
+    dock.OnTileAdded("motor/RPM", "double");
+    dock.OnTileAdded("motor/Current", "double");
+    dock.OnTileAdded("sensor/Gyro", "double");
+
+    QSet<QString> keysToHide;
+    keysToHide.insert("motor/RPM");
+    keysToHide.insert("sensor/Gyro");
+    dock.UncheckSignalsByKeys(keysToHide);
+
+    QSet<QString> hidden = dock.GetHiddenDiscoveredKeys();
+    EXPECT_TRUE(hidden.contains("motor/RPM"));
+    EXPECT_TRUE(hidden.contains("sensor/Gyro"));
+    EXPECT_FALSE(hidden.contains("motor/Current"));
+}
+
+TEST(RunBrowserDockTests, StreamingUncheckSignalsByKeysNestedGroupsPropagateUp)
+{
+    // Ian: Deeply nested groups should all get recomputed.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel("Robot");
+    dock.OnTileAdded("a/b/c", "double");
+    dock.OnTileAdded("a/b/d", "double");
+    dock.OnTileAdded("a/e", "double");
+
+    QSet<QString> keysToHide;
+    keysToHide.insert("a/b/c");
+    keysToHide.insert("a/e");
+    dock.UncheckSignalsByKeys(keysToHide);
+
+    QStandardItemModel* model = dock.GetTreeModelForTesting();
+    QStandardItem* root = model->item(0, 0);
+    QStandardItem* groupA = FindChild(root, "a");
+    ASSERT_NE(groupA, nullptr);
+    QStandardItem* groupB = FindChild(groupA, "b");
+    ASSERT_NE(groupB, nullptr);
+
+    // b has 1 of 2 checked -> partial.
+    EXPECT_EQ(groupB->checkState(), Qt::PartiallyChecked);
+    // a has partial b + unchecked e -> partial.
+    EXPECT_EQ(groupA->checkState(), Qt::PartiallyChecked);
+}
+
+TEST(RunBrowserDockTests, ReadingModeUncheckSignalsByKeysWorks)
+{
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    const QString path = WriteFixture(tmp, "two_groups.json", kTwoGroupsJson);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.AddRunFromFile(path);
+
+    // Check all signals in both groups.
+    QSet<QString> allKeys;
+    allKeys.insert("motor/RPM");
+    allKeys.insert("motor/Current");
+    allKeys.insert("sensor/Heading");
+    dock.SetCheckedGroupsBySignalKeys(allKeys);
+
+    QSignalSpy spy(&dock, &sd::widgets::RunBrowserDock::CheckedSignalsChanged);
+
+    // Batch-uncheck motor/RPM and sensor/Heading.
+    QSet<QString> keysToHide;
+    keysToHide.insert("motor/RPM");
+    keysToHide.insert("sensor/Heading");
+    dock.UncheckSignalsByKeys(keysToHide);
+
+    EXPECT_EQ(spy.count(), 1);
+
+    QSet<QString> checked = dock.GetCheckedSignalKeysForTesting();
+    EXPECT_FALSE(checked.contains("motor/RPM"));
+    EXPECT_TRUE(checked.contains("motor/Current"));
+    EXPECT_FALSE(checked.contains("sensor/Heading"));
+}
+
+// ============================================================================
+// Alphabetical ordering tests — groups before leaves, A-Z within each kind.
+// ============================================================================
+
+TEST(RunBrowserDockTests, StreamingTreeGroupsSortedAlphabetically)
+{
+    // Ian: Groups added in reverse order should still appear A-Z.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+
+    // Add signals whose group prefixes arrive in reverse alphabetical order.
+    dock.OnTileAdded("zebra/Speed", "double");
+    dock.OnTileAdded("motor/RPM", "double");
+    dock.OnTileAdded("arm/Position", "double");
+
+    QStandardItem* root = GetStreamingRoot(dock.GetTreeModelForTesting());
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(root->rowCount(), 3);
+
+    EXPECT_EQ(root->child(0, 0)->text(), "arm");
+    EXPECT_EQ(root->child(1, 0)->text(), "motor");
+    EXPECT_EQ(root->child(2, 0)->text(), "zebra");
+}
+
+TEST(RunBrowserDockTests, StreamingTreeLeavesSortedAlphabetically)
+{
+    // Ian: Leaves within a group should be sorted A-Z.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+
+    // Add leaves in reverse order within the same group.
+    dock.OnTileAdded("motor/Voltage", "double");
+    dock.OnTileAdded("motor/Current", "double");
+    dock.OnTileAdded("motor/RPM", "double");
+
+    QStandardItem* root = GetStreamingRoot(dock.GetTreeModelForTesting());
+    ASSERT_NE(root, nullptr);
+    QStandardItem* motorGroup = FindChild(root, "motor");
+    ASSERT_NE(motorGroup, nullptr);
+    ASSERT_EQ(motorGroup->rowCount(), 3);
+
+    EXPECT_EQ(motorGroup->child(0, 0)->text(), "Current");
+    EXPECT_EQ(motorGroup->child(1, 0)->text(), "RPM");
+    EXPECT_EQ(motorGroup->child(2, 0)->text(), "Voltage");
+}
+
+TEST(RunBrowserDockTests, StreamingTreeGroupsBeforeLeaves)
+{
+    // Ian: When a parent has both group children and leaf children,
+    // groups must appear first (sorted), then leaves (sorted).
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+
+    // "a" will be a parent with:
+    //   - leaf "Zeta" (from "a/Zeta")
+    //   - group "sub" (from "a/sub/Leaf")
+    //   - leaf "Alpha" (from "a/Alpha")
+    dock.OnTileAdded("a/Zeta", "double");
+    dock.OnTileAdded("a/sub/Leaf", "double");
+    dock.OnTileAdded("a/Alpha", "double");
+
+    QStandardItem* root = GetStreamingRoot(dock.GetTreeModelForTesting());
+    ASSERT_NE(root, nullptr);
+    QStandardItem* groupA = FindChild(root, "a");
+    ASSERT_NE(groupA, nullptr);
+    ASSERT_EQ(groupA->rowCount(), 3);
+
+    // Group "sub" comes first, then leaves alphabetically.
+    EXPECT_EQ(groupA->child(0, 0)->text(), "sub");
+    EXPECT_EQ(groupA->child(1, 0)->text(), "Alpha");
+    EXPECT_EQ(groupA->child(2, 0)->text(), "Zeta");
+}
+
+TEST(RunBrowserDockTests, StreamingTreeCaseInsensitiveSort)
+{
+    // Ian: Sorting should be case-insensitive: "apple" < "Banana" < "cherry".
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+
+    dock.OnTileAdded("cherry/X", "double");
+    dock.OnTileAdded("apple/X", "double");
+    dock.OnTileAdded("Banana/X", "double");
+
+    QStandardItem* root = GetStreamingRoot(dock.GetTreeModelForTesting());
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(root->rowCount(), 3);
+
+    EXPECT_EQ(root->child(0, 0)->text(), "apple");
+    EXPECT_EQ(root->child(1, 0)->text(), "Banana");
+    EXPECT_EQ(root->child(2, 0)->text(), "cherry");
+}
+
+TEST(RunBrowserDockTests, StreamingTreeIncrementalArrivalsStaySorted)
+{
+    // Ian: Keys arriving one at a time (the normal streaming scenario)
+    // should produce the same sorted result as if they all arrived at once.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.SetStreamingRootLabel(kTestTransportLabel);
+
+    // Arrive in a deliberately scrambled order.
+    dock.OnTileAdded("motor/RPM", "double");
+    dock.OnTileAdded("arm/Position", "double");
+    dock.OnTileAdded("motor/Current", "double");
+    dock.OnTileAdded("zebra/Speed", "double");
+    dock.OnTileAdded("arm/Velocity", "double");
+
+    QStandardItem* root = GetStreamingRoot(dock.GetTreeModelForTesting());
+    ASSERT_NE(root, nullptr);
+    ASSERT_EQ(root->rowCount(), 3);
+
+    // Groups: arm, motor, zebra
+    EXPECT_EQ(root->child(0, 0)->text(), "arm");
+    EXPECT_EQ(root->child(1, 0)->text(), "motor");
+    EXPECT_EQ(root->child(2, 0)->text(), "zebra");
+
+    // Leaves within arm: Position, Velocity
+    QStandardItem* armGroup = FindChild(root, "arm");
+    ASSERT_NE(armGroup, nullptr);
+    ASSERT_EQ(armGroup->rowCount(), 2);
+    EXPECT_EQ(armGroup->child(0, 0)->text(), "Position");
+    EXPECT_EQ(armGroup->child(1, 0)->text(), "Velocity");
+
+    // Leaves within motor: Current, RPM
+    QStandardItem* motorGroup = FindChild(root, "motor");
+    ASSERT_NE(motorGroup, nullptr);
+    ASSERT_EQ(motorGroup->rowCount(), 2);
+    EXPECT_EQ(motorGroup->child(0, 0)->text(), "Current");
+    EXPECT_EQ(motorGroup->child(1, 0)->text(), "RPM");
+}
+
+TEST(RunBrowserDockTests, ReadingTreeGroupsSortedAlphabetically)
+{
+    // Ian: In reading mode, groups under a run node should be sorted A-Z.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    // Fixture with groups arriving in reverse order.
+    const QByteArray reverseGroupsJson = R"({
+        "metadata": { "label": "ReverseGroups" },
+        "signals": [
+            { "key": "zebra/Speed", "type": "double", "sample_count": 10 },
+            { "key": "motor/RPM", "type": "double", "sample_count": 10 },
+            { "key": "arm/Position", "type": "double", "sample_count": 10 }
+        ]
+    })";
+
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    const QString path = WriteFixture(tmp, "reverse_groups.json", reverseGroupsJson);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.AddRunFromFile(path);
+
+    QStandardItemModel* model = dock.GetTreeModelForTesting();
+    ASSERT_EQ(model->rowCount(), 1);
+    QStandardItem* runItem = model->item(0, 0);
+    ASSERT_NE(runItem, nullptr);
+    ASSERT_EQ(runItem->rowCount(), 3);
+
+    EXPECT_EQ(runItem->child(0, 0)->text(), "arm");
+    EXPECT_EQ(runItem->child(1, 0)->text(), "motor");
+    EXPECT_EQ(runItem->child(2, 0)->text(), "zebra");
+}
+
+TEST(RunBrowserDockTests, ReadingTreeLeavesSortedAlphabetically)
+{
+    // Ian: Leaves within a group should be sorted A-Z in reading mode.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    const QByteArray reverseLeavesJson = R"({
+        "metadata": { "label": "ReverseLeaves" },
+        "signals": [
+            { "key": "motor/Voltage", "type": "double", "sample_count": 10 },
+            { "key": "motor/Current", "type": "double", "sample_count": 10 },
+            { "key": "motor/RPM", "type": "double", "sample_count": 10 }
+        ]
+    })";
+
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    const QString path = WriteFixture(tmp, "reverse_leaves.json", reverseLeavesJson);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.AddRunFromFile(path);
+
+    QStandardItemModel* model = dock.GetTreeModelForTesting();
+    QStandardItem* runItem = model->item(0, 0);
+    ASSERT_NE(runItem, nullptr);
+    QStandardItem* motorGroup = FindChild(runItem, "motor");
+    ASSERT_NE(motorGroup, nullptr);
+    ASSERT_EQ(motorGroup->rowCount(), 3);
+
+    EXPECT_EQ(motorGroup->child(0, 0)->text(), "Current");
+    EXPECT_EQ(motorGroup->child(1, 0)->text(), "RPM");
+    EXPECT_EQ(motorGroup->child(2, 0)->text(), "Voltage");
+}
+
+TEST(RunBrowserDockTests, ReadingTreeGroupsBeforeLeaves)
+{
+    // Ian: When a parent has both groups and leaves in reading mode,
+    // groups come first.
+    ASSERT_NE(EnsureApp(), nullptr);
+
+    const QByteArray mixedJson = R"({
+        "metadata": { "label": "Mixed" },
+        "signals": [
+            { "key": "a/Zeta", "type": "double", "sample_count": 5 },
+            { "key": "a/sub/Leaf", "type": "double", "sample_count": 5 },
+            { "key": "a/Alpha", "type": "double", "sample_count": 5 }
+        ]
+    })";
+
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    const QString path = WriteFixture(tmp, "mixed.json", mixedJson);
+
+    sd::widgets::RunBrowserDock dock;
+    dock.AddRunFromFile(path);
+
+    QStandardItemModel* model = dock.GetTreeModelForTesting();
+    QStandardItem* runItem = model->item(0, 0);
+    ASSERT_NE(runItem, nullptr);
+    QStandardItem* groupA = FindChild(runItem, "a");
+    ASSERT_NE(groupA, nullptr);
+    ASSERT_EQ(groupA->rowCount(), 3);
+
+    // Group "sub" first, then leaves Alpha, Zeta.
+    EXPECT_EQ(groupA->child(0, 0)->text(), "sub");
+    EXPECT_EQ(groupA->child(1, 0)->text(), "Alpha");
+    EXPECT_EQ(groupA->child(2, 0)->text(), "Zeta");
 }

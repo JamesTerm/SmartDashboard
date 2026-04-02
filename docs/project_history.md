@@ -7,6 +7,289 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-03-31 - Feature-complete declaration: SmartDashboard scope achieved
+
+The dashboard is now feature-complete relative to the original SmartDashboard product scope. All must-have items in the "Foundation before enabling NetworkTables broadly" gate are checked. The next active work item is the multi-trace line plot (Want #2).
+
+### What feature-complete means
+
+Every feature that a typical FRC team uses in SmartDashboard on a daily basis is implemented: live telemetry (bool/double/string), writable controls, SendableChooser support, graph/plot for numeric data, layout save/load, camera stream viewing, and a Run Browser for signal navigation and visibility management. NT4 interoperability is functional across SmartDashboard, Glass, and Robot_Simulation backends.
+
+### Intentionally unsupported features (with rationale)
+
+Four SmartDashboard-classic features were evaluated and intentionally excluded:
+
+1. **Command/Subsystem status display** — Adds significant protocol complexity (nested Sendable sub-key trees, `.type` dispatch, two-way lifecycle state management) for a feature that serves only command-based teams. The same debugging information can be published as simple string/bool keys that the existing widget set already handles. The tradeoff favors simplicity and reliability over protocol-level Sendable interop.
+
+2. **Test Mode / LiveWindow** — The Run Browser's tile visibility system (`hiddenKeys` in layout files, checkbox-driven show/hide) already provides the mechanism-grouping and view-switching workflows that LiveWindow addresses. Users can create a "driver" layout (mechanism internals hidden) and a "LiveWindow" layout (mechanism tiles visible, drive tiles hidden), then switch via File > Load Layout. Demonstrated by the Curivator layout pair in `Robot_Simulation/Design/`. PID tuning is accomplished by publishing P/I/D as writable double keys with existing slider/numeric widgets.
+
+3. **Compass widget** — Qt has no native compass/circular gauge widget. The existing `double.gauge` (half-arc dial, configurable -180 to 180) covers the practical heading visualization need. Dedicated circular compass would require custom QPainter rendering for marginal improvement.
+
+4. **Field2d / Mechanism2d** — Shuffleboard/Glass-specific visualization widgets, not part of the original SmartDashboard feature set. Out of scope per the SmartDashboard-only product direction.
+
+### Documentation updated
+
+- `docs/roadmap.md`: Added "Intentionally unsupported features" section with full rationale; marked Foundation gate as COMPLETE; moved NT4 announce properties ABI forwarding to Deferred; multi-trace line plot is the active next item.
+- `docs/project_history.md`: This entry.
+
+---
+
+## 2026-03-31 - Reconnect sovereignty fix: hidden tiles survive streaming reconnect
+
+Fixed a bug where tiles hidden by the user in streaming mode reverted to visible when auto-connect triggered a disconnect/reconnect cycle.
+
+### Root cause
+
+`m_runBrowserHiddenKeys` (MainWindow member) was only populated from QSettings at startup via `LoadRunBrowserState()`. During runtime, when the user hid tiles, `PersistRunBrowserState()` wrote the dock's hidden keys to QSettings but **never updated `m_runBrowserHiddenKeys` in memory**. On reconnect, `StartTransport()` passed the stale startup value to `SetHiddenDiscoveredKeys()`, losing any runtime hide actions.
+
+The reconnect sequence: `StartTransport()` sets `m_runBrowserActive = false` then calls `ClearDiscoveredKeys()` (which clears `m_streamingHiddenKeys` and emits empty `CheckedSignalsChanged`), `SetStreamingRootLabel()` (reinitializes tree), `SetHiddenDiscoveredKeys(m_runBrowserHiddenKeys)` (re-stores hidden keys for lazy application), the `OnTileAdded` loop (re-feeds tiles), then `m_runBrowserActive = true`. The stale `m_runBrowserHiddenKeys` meant only startup-time hidden keys were replayed, not any the user added during the session.
+
+### Fix
+
+Added a sync block in `OnRunBrowserCheckedSignalsChanged` that updates `m_runBrowserHiddenKeys` from the dock's live hidden state whenever the Run Browser is active in streaming mode. This ensures `m_runBrowserHiddenKeys` always reflects the user's current hide choices, so reconnect replays the correct set.
+
+### Sovereignty rule
+
+Only explicit user action (unchecking in Run Browser, right-click Hide, loading a different layout) can change what is hidden. No transport lifecycle event (disconnect, reconnect, auto-connect) should override hidden state.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/app/main_window.cpp` | Added `m_runBrowserHiddenKeys` sync in `OnRunBrowserCheckedSignalsChanged` (~line 2678); Added `SimulateStreamingReconnectForTesting()` and `GetRunBrowserDockForTesting()` test helpers |
+| `src/app/main_window.h` | Added `SimulateStreamingReconnectForTesting()` and `GetRunBrowserDockForTesting()` declarations in `#ifdef SMARTDASHBOARD_TESTS` block |
+| `tests/main_window_persistence_tests.cpp` | Added `#include "widgets/run_browser_dock.h"`; Added `HiddenTilesSurviveStreamingReconnect` regression test |
+
+### Test coverage
+
+1 new test:
+- `HiddenTilesSurviveStreamingReconnect` — creates tiles in streaming mode, hides one via `UncheckSignalByKey`, simulates a reconnect cycle via `SimulateStreamingReconnectForTesting()`, re-feeds tiles, and verifies the hidden tile remains hidden.
+
+Total test count: 247 (2 disabled, 1 pre-existing failure).
+
+---
+
+## 2026-03-31 - Alphabetical tree sorting in Run Browser
+
+The Run Browser tree now displays groups and leaves in alphabetical order, like a file explorer. Groups appear first (sorted A-Z case-insensitively), then leaves (sorted A-Z case-insensitively) within each parent node. This applies to both streaming mode (live) and reading mode (replay files).
+
+### Implementation
+
+Added a static helper `FindSortedInsertionRow()` in the anonymous namespace of `run_browser_dock.cpp`. It walks a parent's children, comparing node kinds (group vs signal) and names (case-insensitive), and returns the correct row index for insertion. Four `appendRow` calls were replaced with `insertRow` at the computed position:
+
+1. Streaming leaf insertion (`OnTileAdded`)
+2. Streaming group creation (`GetOrCreateGroupItemForStreaming`)
+3. Reading leaf insertion (`RebuildTree`)
+4. Reading group creation (`GetOrCreateGroupItem`)
+
+Top-level nodes (streaming root, run items) remain as `appendRow` since they don't need sorting.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/widgets/run_browser_dock.cpp` | Added `FindSortedInsertionRow()` helper; replaced 4 `appendRow` calls with sorted `insertRow` |
+| `tests/run_browser_dock_tests.cpp` | 8 new ordering tests; fixed 2 existing tests that assumed insertion order |
+
+### Test coverage
+
+8 new tests:
+
+Streaming mode (5):
+- `StreamingTreeGroupsSortedAlphabetically` — groups in reverse order arrive sorted
+- `StreamingTreeLeavesSortedAlphabetically` — leaves within a group sorted A-Z
+- `StreamingTreeGroupsBeforeLeaves` — mixed groups and leaves: groups first
+- `StreamingTreeCaseInsensitiveSort` — case-insensitive comparison
+- `StreamingTreeIncrementalArrivalsStaySorted` — scrambled incremental arrivals stay sorted
+
+Reading mode (3):
+- `ReadingTreeGroupsSortedAlphabetically` — groups under run node sorted A-Z
+- `ReadingTreeLeavesSortedAlphabetically` — leaves within a group sorted A-Z
+- `ReadingTreeGroupsBeforeLeaves` — mixed groups and leaves: groups first
+
+Total test count at time of completion: 246 (2 disabled, 1 pre-existing failure).
+
+## 2026-03-31 - Layout-persisted visibility complete (Feature 4)
+
+Layout files now carry a `hiddenKeys` JSON array that records which tiles were hidden when the layout was saved. Loading a layout restores tile visibility — tiles whose keys are in `hiddenKeys` are hidden, all others are shown. This enables a workflow where users can switch between different layout files to get different "views" of their dashboard.
+
+### Behavior
+
+- **Save**: `SaveLayoutToPath()` walks all tiles, collects keys of hidden tiles (`tile->isHidden()`), and passes them to `SaveLayout()`. The serializer writes a sorted `hiddenKeys` JSON array at the top level. When no tiles are hidden, the field is omitted entirely for backward compatibility.
+- **Load**: `LoadLayoutFromPath()` reads the `hiddenKeys` array via `LoadLayoutEntries()`, sets `m_runBrowserHiddenKeys` BEFORE creating tiles (so `GetOrCreateTile` respects hidden state for new tiles), then applies visibility to all tiles after creation. When the Run Browser is active, hidden keys route through `UncheckSignalsByKeys()` to keep dock checkboxes in sync. When inactive, tiles are shown/hidden directly.
+- **Backward compatibility**: Older layout files without `hiddenKeys` load with an empty set, showing all tiles.
+- **Switching layouts**: Loading a second layout correctly updates visibility for pre-existing tiles — tiles hidden by the first layout are shown if the second layout has no hidden keys.
+
+### Bug fixed
+
+The initial implementation had a dead-code branch: `else if (m_runBrowserDock == nullptr)` was unreachable because the dock is always created during MainWindow construction. This meant loading a layout with no hidden keys after one with hidden keys left tiles hidden. Fixed by gating on `m_runBrowserActive` instead of the dock pointer.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/layout/layout_serializer.h` | Added `QSet<QString>` to `SaveLayout()` and `LoadLayoutEntries()` signatures (with defaults for backward compat) |
+| `src/layout/layout_serializer.cpp` | `SaveLayout()` writes sorted `hiddenKeys` array; `LoadLayoutEntries()` reads `hiddenKeys` array with null out-param safety |
+| `src/app/main_window.h` | Added `SaveLayoutToPathForTesting()` and `TileIsVisibleForTesting()` test helpers |
+| `src/app/main_window.cpp` | `SaveLayoutToPath()` collects hidden keys; `LoadLayoutFromPath()` reads/applies hidden keys; `GetOrCreateTile()` respects `m_runBrowserHiddenKeys` when Run Browser inactive |
+| `tests/main_window_persistence_tests.cpp` | 11 new tests: 5 serializer-level + 6 integration; includes `ScopedRunBrowserSettings` RAII helper |
+
+### Test coverage
+
+11 new tests:
+
+Serializer-level (5):
+- `LoadLayoutEntries_WithHiddenKeys_ReturnsHiddenKeys`
+- `LoadLayoutEntries_WithoutHiddenKeys_ReturnsEmptySet`
+- `LoadLayoutEntries_NullOutParam_DoesNotCrash`
+- `LoadLayoutEntries_EmptyHiddenKeysArray_ReturnsEmptySet`
+- `LoadLayoutEntries_HiddenKeysWithEmptyStrings_IgnoresEmpty`
+
+Integration (6):
+- `LoadLayoutWithHiddenKeys_HidesTiles`
+- `LoadLayoutWithoutHiddenKeys_ShowsAllTiles`
+- `LoadLayoutWithAllHidden_HidesAllTiles`
+- `LoadLayoutWithHidden_ThenLoadWithout_ShowsAll`
+- `SaveLayoutRoundTrip_PersistsHiddenKeys`
+- `SaveLayoutWithNoHiddenTiles_OmitsHiddenKeysField`
+
+### Build & test results
+
+238 tests total: 236 ran (235 passed, 1 pre-existing failure), 2 disabled. All 11 Feature 4 tests pass. All 132 RunBrowserDock tests pass. No regressions.
+
+---
+
+## 2026-03-30 - Multi-select hide complete
+
+When multiple tiles are selected (via lasso or Ctrl+click), right-clicking any selected tile now shows a "Hide N tiles" context menu that hides all selected tiles in a single batch operation. This extends the single-tile "Hide" feature to work with the existing multi-select infrastructure.
+
+### Behavior
+
+- **Multi-select context menu**: When 2+ tiles are selected and the user right-clicks any selected tile, the MainWindow event filter intercepts the `ContextMenu` event before it reaches the tile's own `contextMenuEvent`. A context menu with "Hide N tiles" is shown instead of the single-tile menu.
+- **Batch uncheck**: `HideSelectedTiles()` collects keys from all selected tiles, clears the selection, then delegates to `RunBrowserDock::UncheckSignalsByKeys()` which performs a single tree walk, unchecks all matching leaves, recomputes tri-states once, and emits `CheckedSignalsChanged` exactly once. This avoids N signal emissions and N tree walks.
+- **Fallback**: When the Run Browser is not active, tiles are hidden directly (same as single-tile hide).
+
+### New methods
+
+- `RunBrowserDock::UncheckSignalsByKeys(const QSet<QString>& keys)` — batch version of `UncheckSignalByKey`: single tree walk, single signal emission
+- `MainWindow::HideSelectedTiles()` — collects keys from selection, delegates to batch uncheck or direct hide
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/widgets/run_browser_dock.h` | Added `UncheckSignalsByKeys(const QSet<QString>&)` declaration |
+| `src/widgets/run_browser_dock.cpp` | Implemented `UncheckSignalsByKeys` — batch tree walk, leaf uncheck, tri-state recompute, single emission |
+| `src/app/main_window.h` | Added `HideSelectedTiles()` private method declaration |
+| `src/app/main_window.cpp` | Implemented `HideSelectedTiles()`; added multi-select context menu interception in `eventFilter` |
+| `tests/run_browser_dock_tests.cpp` | 8 new tests for `UncheckSignalsByKeys` |
+
+### Test coverage
+
+8 new tests:
+- `StreamingUncheckSignalsByKeysHidesMultipleLeavesAndEmitsOnce`
+- `StreamingUncheckSignalsByKeysUpdatesGroupTriStates`
+- `StreamingUncheckSignalsByKeysEmptySetIsNoOp`
+- `StreamingUncheckSignalsByKeysUnknownKeysAreIgnored`
+- `StreamingUncheckSignalsByKeysAlreadyUncheckedIsNoOp`
+- `StreamingUncheckSignalsByKeysAppearsInHiddenKeys`
+- `StreamingUncheckSignalsByKeysNestedGroupsPropagateUp`
+- `ReadingModeUncheckSignalsByKeysWorks`
+
+### Build & test results
+
+285 tests total: 283 passed, 2 disabled, 1 pre-existing failure. All 132 RunBrowserDock tests pass.
+
+---
+
+## 2026-03-30 - Hide tile via right-click context menu complete
+
+Added a "Hide" action to the tile right-click context menu that unchecks the corresponding Run Browser leaf, hiding the tile. The Run Browser remains the single source of truth for tile visibility — the Hide action routes through the dock's checkbox pipeline rather than hiding tiles directly.
+
+### Behavior
+
+- **"Hide" in context menu**: Available in both non-editable mode (always visible, even without edit mode) and editable mode (after "Remove" in the full context menu). Emits `HideRequested(key)` signal from `VariableTile`.
+- **MainWindow routing**: `OnHideTileRequested` delegates to `RunBrowserDock::UncheckSignalByKey()` when the Run Browser is active. When the Run Browser is not active, hides the tile directly.
+- **UncheckSignalByKey**: Searches the entire tree for the leaf matching the given signal key, unchecks it, recomputes ancestor tri-states via `UpdateGroupCheckState` → `UpdateRunCheckState`, and emits `CheckedSignalsChanged`. Works in both streaming and reading modes.
+
+### New methods
+
+- `VariableTile::HideRequested(const QString& key)` — signal emitted when user clicks "Hide"
+- `RunBrowserDock::UncheckSignalByKey(const QString& key)` — unchecks a specific leaf and propagates tri-state
+- `MainWindow::OnHideTileRequested(const QString& key)` — routes hide request through Run Browser or hides directly
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/widgets/variable_tile.h` | Added `HideRequested(const QString& key)` signal |
+| `src/widgets/variable_tile.cpp` | Added "Hide" action in both non-editable and editable context menus |
+| `src/widgets/run_browser_dock.h` | Added `UncheckSignalByKey(const QString& key)` public method declaration |
+| `src/widgets/run_browser_dock.cpp` | Implemented `UncheckSignalByKey` |
+| `src/app/main_window.h` | Added `OnHideTileRequested(const QString& key)` private slot |
+| `src/app/main_window.cpp` | Connected `HideRequested` signal; implemented `OnHideTileRequested` |
+| `tests/run_browser_dock_tests.cpp` | 7 new tests for `UncheckSignalByKey` |
+
+### Test coverage
+
+7 new tests:
+- `StreamingUncheckSignalByKeyHidesLeafAndEmitsChanged`
+- `StreamingUncheckSignalByKeyNoOpForUnknownKey`
+- `StreamingUncheckSignalByKeyNoOpWhenAlreadyUnchecked`
+- `StreamingUncheckSignalByKeySingleSegmentKey`
+- `StreamingUncheckSignalByKeyNestedGroupPropagatesUp`
+- `StreamingUncheckSignalByKeyAppearsInHiddenKeys`
+- `ReadingModeUncheckSignalByKeyWorks`
+
+### Build & test results
+
+277 tests total: 275 passed, 2 disabled, 1 pre-existing failure (`MainWindowPersistenceTests.ClearWidgetsThenReloadLayoutReappliesTemporaryDefaults` — unrelated to this change). All 124 RunBrowserDock tests pass.
+
+---
+
+## 2026-03-30 - Run Browser leaf-level checkboxes complete
+
+Signal leaf nodes (individual tiles) in the Run Browser tree now have their own checkboxes, enabling per-signal visibility control. Previously, only group and run nodes were checkable — signal leaves inherited visibility from their parent group, making it impossible to hide a single signal without hiding the entire group.
+
+### Behavior
+
+- **Reading mode (Replay)**: Leaves start unchecked (opt-in, matching group behavior). `SetCheckedGroupsBySignalKeys` now checks individual leaves by key, then recomputes group tri-state.
+- **Streaming mode (Live)**: Leaves start checked (opt-out, matching group behavior). Hidden keys persistence now operates at leaf level — `SetHiddenDiscoveredKeys` unchecks individual leaves, and `OnTileAdded` lazy-applies hidden keys per leaf.
+- **Tri-state propagation**: Checking/unchecking a group pushes state to all descendant leaves via `PushCheckStateToDescendants`. Toggling a leaf recomputes its parent group's state via `UpdateGroupCheckState`, which propagates up to the run node via `UpdateRunCheckState`. Groups show `Qt::PartiallyChecked` when some (but not all) leaves are checked.
+- **Signal collection**: `CollectAndEmitCheckedSignals` and `GetCheckedSignalKeysForTesting` now walk the entire tree and collect only leaves with `Qt::Checked`, regardless of parent group state.
+
+### New methods
+
+- `PushCheckStateToDescendants(QStandardItem*, Qt::CheckState)` — recursively sets check state on all descendant groups and leaves
+- `UpdateGroupCheckState(QStandardItem*)` — computes tri-state for a group from its checkable children (leaves + sub-groups)
+
+### Functions modified
+
+`OnModelItemChanged` (complete rewrite for 3 node kinds), `UpdateRunCheckState`, `CollectAndEmitCheckedSignals`, `GetCheckedSignalKeysForTesting`, `SetCheckedGroupsBySignalKeys`, `SetHiddenDiscoveredKeys`, `OnTileAdded` (lazy hidden-keys path), plus leaf creation in `RebuildTree` and `OnTileAdded`.
+
+### Test coverage
+
+124 RunBrowserDock-specific tests (up from 104). 3 existing tests renamed/updated to reflect new leaf-level behavior:
+- `SignalLeavesAreNotCheckable` → `SignalLeavesAreCheckable`
+- `StreamingSetHiddenKeysPartialGroupStaysChecked` → `StreamingSetHiddenKeysPartialGroupBecomesPartial`
+- `StreamingLazyHiddenKeysPartialGroup` updated to expect `Qt::PartiallyChecked`
+
+13 new leaf-level tests + 7 new UncheckSignalByKey tests (see Hide feature entry above).
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/widgets/run_browser_dock.h` | Added `UpdateGroupCheckState()`, `PushCheckStateToDescendants()`, and `UncheckSignalByKey()` declarations; updated doc comment on `SetCheckedGroupsBySignalKeys` |
+| `src/widgets/run_browser_dock.cpp` | Extensive changes to ~10 functions, 3 new functions added |
+| `tests/run_browser_dock_tests.cpp` | 3 tests renamed/updated, 20 new tests added |
+
+### Build & test results
+
+277 tests total: 275 passed, 2 disabled, 1 pre-existing failure (`MainWindowPersistenceTests.ClearWidgetsThenReloadLayoutReappliesTemporaryDefaults` — unrelated to this change).
+
+---
+
 ## 2026-03-29 - Product scope clarified: SmartDashboard-only, Command/Subsystem promoted to Need
 
 ### Scope decision

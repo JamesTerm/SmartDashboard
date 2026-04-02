@@ -26,7 +26,7 @@ cmake -G "Visual Studio 17 2022" -B build -DCMAKE_TOOLCHAIN_FILE="<your-vcpkg-ro
 # Build
 cmake --build build --config Debug
 
-# Test (225 tests, 2 disabled, 1 pre-existing failure)
+# Test (247 tests, 2 disabled, 1 pre-existing failure)
 ctest -C Debug --output-on-failure
 ```
 
@@ -39,6 +39,7 @@ ctest -C Debug --output-on-failure
 - `OnDisconnectTransport` must route through `OnConnectionStateChanged`, not `UpdateWindowConnectionText` directly. The full pipeline (title, menu enable states, recording event) must all fire together on any state transition.
 - **Host-level auto-reconnect:** All plugin transports make a single connect attempt per `Start()` call. The reconnect timer in `MainWindow` (`m_reconnectTimer`, 1-second single-shot) drives retries via Stop()+Start() cycles. Plugins must NOT implement their own retry loops.
 - **WSAStartup is deferred:** Winsock is initialized only when a WebSocket-based transport actually connects (via `ix::initNetSystem()`). Direct/NativeLink sessions never trigger it.
+- **NT4Client::Start() is backward-compatible:** The 4th `onAnnounce` callback parameter defaults to `nullptr`. Existing callers that pass 3 arguments continue to work unchanged.
 
 ## Transport architecture
 

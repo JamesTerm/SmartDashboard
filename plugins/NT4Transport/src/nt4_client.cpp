@@ -570,6 +570,92 @@ int64_t JsonExtractInt(const std::string& json, const std::string& key)
     return std::strtoll(token.c_str(), nullptr, 10);
 }
 
+/// @brief Find the position of the closing '}' that matches an opening '{'
+/// at position `openPos`, handling nested braces and quoted strings.
+///
+/// Ian: The original `}}` heuristic broke when `properties` contained nested
+/// objects (e.g. `{"SmartDashboard":"Scheduler"}`). The announce params block
+/// is `{"name":"...","id":N,"type":"...","properties":{...}}` — two closing
+/// braces only if properties is a flat object, but three or more if properties
+/// contain nested objects. A proper brace-counter is needed. String interiors
+/// are skipped so that braces inside quoted values don't confuse the count.
+/// Returns std::string::npos if no matching brace is found.
+size_t JsonFindObjectEnd(const std::string& json, size_t openPos)
+{
+    if (openPos >= json.size() || json[openPos] != '{')
+    {
+        return std::string::npos;
+    }
+
+    int depth = 0;
+    bool inString = false;
+    for (size_t i = openPos; i < json.size(); ++i)
+    {
+        const char c = json[i];
+
+        if (inString)
+        {
+            if (c == '\\')
+            {
+                ++i; // skip escaped character
+            }
+            else if (c == '"')
+            {
+                inString = false;
+            }
+            continue;
+        }
+
+        switch (c)
+        {
+            case '"':
+                inString = true;
+                break;
+            case '{':
+                ++depth;
+                break;
+            case '}':
+                --depth;
+                if (depth == 0)
+                {
+                    return i; // position of the matching '}'
+                }
+                break;
+        }
+    }
+
+    return std::string::npos; // unmatched
+}
+
+/// @brief Extract the raw JSON object substring for a given key.
+///
+/// Looks for `"key" : { ... }` and returns the substring from the opening
+/// `{` through the matching `}` (inclusive). Returns empty string if the
+/// key is not found or the value is not an object.
+///
+/// Ian: This is used to extract the `properties` field from announce
+/// params blocks. We return the raw JSON string so the host can parse it
+/// with whatever level of detail it needs — no need for the client to
+/// understand property semantics.
+std::string JsonExtractObject(const std::string& json, const std::string& key)
+{
+    const std::string needle = "\"" + key + "\"";
+    const size_t keyPos = json.find(needle);
+    if (keyPos == std::string::npos) return {};
+
+    const size_t colonPos = json.find(':', keyPos + needle.size());
+    if (colonPos == std::string::npos) return {};
+
+    // Skip whitespace after colon to find the opening brace
+    const size_t openBrace = json.find_first_not_of(" \t\r\n", colonPos + 1);
+    if (openBrace == std::string::npos || json[openBrace] != '{') return {};
+
+    const size_t closeBrace = JsonFindObjectEnd(json, openBrace);
+    if (closeBrace == std::string::npos) return {};
+
+    return json.substr(openBrace, closeBrace - openBrace + 1);
+}
+
 /// @brief NT4 type string → NT4TypeCode mapping.
 NT4TypeCode TypeCodeFromString(const std::string& typeStr)
 {
@@ -627,11 +713,19 @@ std::string StripSmartDashboardPrefix(const std::string& topicPath)
 }
 
 /// @brief Server-assigned topic metadata stored after an announce.
+///
+/// Ian: propertiesJson was added for Layer 3 (command/subsystem support).
+/// The NT4 server now emits non-empty properties on announce for topics
+/// tagged via SetTopicProperties() (e.g. Sendable types). Storing the raw
+/// JSON here means the client has the metadata available for the announce
+/// callback without needing to re-parse the frame.
 struct AnnouncedTopic
 {
-    std::string name;       // Full NT4 path, e.g. "/SmartDashboard/Velocity"
+    std::string name;           // Full NT4 path, e.g. "/SmartDashboard/Velocity"
+    std::string typeStr;        // NT4 type string, e.g. "string", "double[]"
     NT4TypeCode typeCode;
-    int32_t serverId;       // Server-assigned topic ID used in binary frames
+    int32_t serverId;           // Server-assigned topic ID used in binary frames
+    std::string propertiesJson; // Raw JSON object, e.g. R"({"SmartDashboard":"Scheduler"})" or "{}"
 };
 
 } // anonymous namespace
@@ -645,6 +739,7 @@ struct NT4Client::Impl
     NT4ClientConfig config;
     NT4UpdateCallback onUpdate;
     NT4ConnectionStateCallback onConnectionState;
+    NT4AnnounceCallback onAnnounce;  // Optional — null if host doesn't need announce metadata
 
     ix::WebSocket ws;
     std::atomic<bool> connected{false};
@@ -688,6 +783,12 @@ struct NT4Client::Impl
         // Format: [{"method":"announce","params":{"name":"...","id":N,"type":"...","properties":{...}}}]
         //
         // We split on {"method" boundaries to handle multiple messages in one frame.
+        //
+        // Ian (Layer 3): The original `}}` heuristic for finding the end of
+        // the params block broke when `properties` contained non-empty objects
+        // (e.g. `{"SmartDashboard":"Scheduler"}`). Now we use JsonFindObjectEnd()
+        // which counts braces properly. We also extract the raw properties JSON
+        // and fire the announce callback so the host can use it for widget hints.
 
         size_t searchPos = 0;
         while (searchPos < text.size())
@@ -705,24 +806,53 @@ struct NT4Client::Impl
                 const size_t paramsPos = text.find("\"params\"", methodPos);
                 if (paramsPos != std::string::npos)
                 {
-                    // Extract a generous substring covering the params object
-                    const size_t blockEnd = text.find("}}", paramsPos);
-                    const size_t endPos = (blockEnd != std::string::npos) ? blockEnd + 2 : text.size();
-                    const std::string paramsBlock = text.substr(paramsPos, endPos - paramsPos);
+                    // Ian: Find the params object's opening brace, then use
+                    // brace-counting to find the matching close. This correctly
+                    // handles nested objects inside properties.
+                    const size_t paramsColon = text.find(':', paramsPos + 8);
+                    const size_t paramsOpen = (paramsColon != std::string::npos)
+                        ? text.find('{', paramsColon + 1)
+                        : std::string::npos;
+                    const size_t paramsClose = (paramsOpen != std::string::npos)
+                        ? JsonFindObjectEnd(text, paramsOpen)
+                        : std::string::npos;
+
+                    const size_t endPos = (paramsClose != std::string::npos)
+                        ? paramsClose + 1
+                        : text.size();
+                    const std::string paramsBlock = text.substr(
+                        paramsPos, endPos - paramsPos);
 
                     const std::string name = JsonExtractString(paramsBlock, "name");
                     const int64_t id = JsonExtractInt(paramsBlock, "id");
                     const std::string typeStr = JsonExtractString(paramsBlock, "type");
+                    const std::string propsJson = JsonExtractObject(paramsBlock, "properties");
 
                     if (!name.empty() && id >= 0 && !typeStr.empty())
                     {
                         AnnouncedTopic topic;
                         topic.name = name;
+                        topic.typeStr = typeStr;
                         topic.serverId = static_cast<int32_t>(id);
                         topic.typeCode = TypeCodeFromString(typeStr);
+                        topic.propertiesJson = propsJson.empty() ? "{}" : propsJson;
 
-                        std::lock_guard<std::mutex> lock(topicMutex);
-                        topicsById[topic.serverId] = std::move(topic);
+                        {
+                            std::lock_guard<std::mutex> lock(topicMutex);
+                            topicsById[topic.serverId] = topic;
+                        }
+
+                        // Ian: Fire the announce callback outside the lock.
+                        // The plugin bridge can use this to log or forward
+                        // topic metadata to the host for widget-type hinting.
+                        if (onAnnounce)
+                        {
+                            TopicAnnounce announce;
+                            announce.topicPath = StripSmartDashboardPrefix(topic.name);
+                            announce.typeStr = topic.typeStr;
+                            announce.propertiesJson = topic.propertiesJson;
+                            onAnnounce(announce);
+                        }
                     }
                 }
             }
@@ -968,11 +1098,13 @@ NT4Client::~NT4Client()
 bool NT4Client::Start(
     const NT4ClientConfig& config,
     NT4UpdateCallback onUpdate,
-    NT4ConnectionStateCallback onConnectionState)
+    NT4ConnectionStateCallback onConnectionState,
+    NT4AnnounceCallback onAnnounce)
 {
     m_impl->config = config;
     m_impl->onUpdate = std::move(onUpdate);
     m_impl->onConnectionState = std::move(onConnectionState);
+    m_impl->onAnnounce = std::move(onAnnounce);
     m_impl->stopping.store(false);
     m_impl->connected.store(false);
     m_impl->sequence.store(0);

@@ -28,6 +28,48 @@ namespace sd::widgets
         constexpr int kNodeKindRun    = 0;
         constexpr int kNodeKindGroup  = 1;
         constexpr int kNodeKindSignal = 2;
+
+        // Ian: Find the sorted insertion row for a new child under parentItem.
+        // Groups sort before leaves (like a file explorer), and within each
+        // kind items are sorted case-insensitively by display name.  This
+        // gives a stable, predictable tree order regardless of the arrival
+        // order of keys from the transport or replay file.
+        int FindSortedInsertionRow(QStandardItem* parentItem, int newNodeKind, const QString& newName)
+        {
+            const int count = parentItem->rowCount();
+            const bool newIsGroup = (newNodeKind == kNodeKindGroup);
+
+            for (int row = 0; row < count; ++row)
+            {
+                QStandardItem* child = parentItem->child(row, 0);
+                if (child == nullptr)
+                {
+                    continue;
+                }
+                const int childKind = child->data(kRoleNodeKind).toInt();
+                const bool childIsGroup = (childKind == kNodeKindGroup);
+
+                // Groups come before leaves.
+                if (newIsGroup && !childIsGroup)
+                {
+                    // Insert new group before the first non-group.
+                    return row;
+                }
+                if (!newIsGroup && childIsGroup)
+                {
+                    // New leaf — skip past all groups.
+                    continue;
+                }
+
+                // Same kind — compare names case-insensitively.
+                if (newName.compare(child->text(), Qt::CaseInsensitive) < 0)
+                {
+                    return row;
+                }
+            }
+            // Append at the end.
+            return count;
+        }
     }
 
     RunBrowserDock::RunBrowserDock(QWidget* parent)
@@ -254,65 +296,41 @@ namespace sd::widgets
         }
 
         // Leaf: the signal name.
+        // Ian: Signal leaves are checkable so each tile can be individually
+        // hidden/shown.  In streaming mode they start checked (visible by
+        // default), matching the group behavior.  Hidden-keys application
+        // below may flip individual leaves to unchecked.
         const QString leafName = parts.back();
         auto* signalItem = new QStandardItem(leafName);
         signalItem->setData(kNodeKindSignal, kRoleNodeKind);
         signalItem->setData(-1, kRoleRunIndex);  // No run index in streaming mode.
         signalItem->setData(key, kRoleSignalKey);
+        signalItem->setCheckable(true);
+        signalItem->setCheckState(Qt::Checked);
 
         auto* signalDetailItem = new QStandardItem(type);
         signalDetailItem->setData(kNodeKindSignal, kRoleNodeKind);
         signalDetailItem->setData(-1, kRoleRunIndex);
         signalDetailItem->setData(key, kRoleSignalKey);
 
-        parent->appendRow({signalItem, signalDetailItem});
+        // Ian: Insert leaves in sorted position (groups before leaves, A-Z
+        // within each kind) so the tree reads like a file explorer.
+        const int leafRow = FindSortedInsertionRow(parent, kNodeKindSignal, leafName);
+        parent->insertRow(leafRow, {signalItem, signalDetailItem});
 
         // Ian: Lazy hidden-keys application.  If SetHiddenDiscoveredKeys was
         // called before keys arrived (the normal reconnect path), we stored
-        // the hidden set in m_streamingHiddenKeys.  Now that this key's group
-        // hierarchy exists, walk up from the leaf's parent and uncheck any
-        // group where ALL descendant signals are hidden.  A group that already
-        // has some visible descendants stays checked.
+        // the hidden set in m_streamingHiddenKeys.  Now that this leaf exists,
+        // uncheck it if its key is hidden.  Then recompute ancestor group
+        // tri-states up to the root.
         if (!m_streamingHiddenKeys.isEmpty())
         {
-            // Recursive helper: returns true if ALL signal descendants of @p item
-            // are in m_streamingHiddenKeys.
-            std::function<bool(const QStandardItem*)> allDescendantsHidden;
-            allDescendantsHidden = [&](const QStandardItem* item) -> bool
+            if (m_streamingHiddenKeys.contains(key))
             {
-                bool hasSignalDescendant = false;
-                for (int row = 0; row < item->rowCount(); ++row)
-                {
-                    const QStandardItem* child = item->child(row, 0);
-                    if (child == nullptr)
-                    {
-                        continue;
-                    }
-                    const int kind = child->data(kRoleNodeKind).toInt();
-                    if (kind == kNodeKindSignal)
-                    {
-                        hasSignalDescendant = true;
-                        const QString childKey = child->data(kRoleSignalKey).toString();
-                        if (!m_streamingHiddenKeys.contains(childKey))
-                        {
-                            return false;  // At least one visible signal.
-                        }
-                    }
-                    else if (kind == kNodeKindGroup)
-                    {
-                        hasSignalDescendant = true;
-                        if (!allDescendantsHidden(child))
-                        {
-                            return false;
-                        }
-                    }
-                }
-                return hasSignalDescendant;
-            };
+                signalItem->setCheckState(Qt::Unchecked);
+            }
 
-            // Walk from the leaf's parent up to the top-level groups.
-            // Stop before the streaming root node (kNodeKindRun) — we update
-            // its tri-state via UpdateRunCheckState after all groups are set.
+            // Walk from the leaf's parent up, recomputing group tri-states.
             QStandardItem* ancestor = parent;
             while (ancestor != nullptr
                    && ancestor != m_treeModel->invisibleRootItem()
@@ -321,14 +339,7 @@ namespace sd::widgets
                 const int kind = ancestor->data(kRoleNodeKind).toInt();
                 if (kind == kNodeKindGroup)
                 {
-                    if (allDescendantsHidden(ancestor))
-                    {
-                        ancestor->setCheckState(Qt::Unchecked);
-                    }
-                    else
-                    {
-                        ancestor->setCheckState(Qt::Checked);
-                    }
+                    UpdateGroupCheckState(ancestor);
                 }
                 ancestor = ancestor->parent();
             }
@@ -345,7 +356,7 @@ namespace sd::widgets
             // tri-state still needs updating.  After a remove-then-re-add
             // cycle the root may have been set to Qt::Unchecked when its
             // last child was removed.  Re-adding a key creates a new checked
-            // group, but without this call the root would stay unchecked
+            // leaf, but without this call the root would stay unchecked
             // and CollectAndEmitCheckedSignals would skip the subtree.
             if (m_streamingRootItem != nullptr)
             {
@@ -558,11 +569,10 @@ namespace sd::widgets
         return hidden;
     }
 
-    // Ian: SetHiddenDiscoveredKeys unchecks groups whose ALL descendant signals
-    // are in the hidden set.  Called after a reconnect when keys re-arrive and
-    // we want to restore the user's previous opt-out choices.  We walk the tree
-    // top-down: for each group node, if every signal leaf under it is hidden,
-    // we uncheck the group.  Otherwise the group stays checked (the default).
+    // Ian: SetHiddenDiscoveredKeys unchecks individual signal leaves whose
+    // keys are in the hidden set, then recomputes ancestor group and root
+    // tri-states.  Called after a reconnect when keys re-arrive and we want
+    // to restore the user's previous opt-out choices.
 
     void RunBrowserDock::SetHiddenDiscoveredKeys(const QSet<QString>& hiddenKeys)
     {
@@ -570,7 +580,7 @@ namespace sd::widgets
         // apply it as new keys arrive.  Even if the tree is currently empty
         // (e.g. called right after ClearDiscoveredKeys before any keys arrive),
         // storing the set here means future OnTileAdded calls will create
-        // groups with the correct check state.
+        // leaves with the correct check state.
         m_streamingHiddenKeys = hiddenKeys;
 
         if (!m_streamingMode || hiddenKeys.isEmpty())
@@ -578,13 +588,11 @@ namespace sd::widgets
             return;
         }
 
-        // Recursive helper: returns true if ALL descendant signals are hidden.
-        std::function<bool(QStandardItem*)> allHidden;
-        allHidden = [&](QStandardItem* item) -> bool
+        // Recursive helper: uncheck leaves that are in the hidden set,
+        // then recompute group tri-states bottom-up.
+        std::function<void(QStandardItem*)> applyHidden;
+        applyHidden = [&](QStandardItem* item)
         {
-            bool allChildrenHidden = true;
-            bool hasSignalDescendant = false;
-
             for (int row = 0; row < item->rowCount(); ++row)
             {
                 QStandardItem* child = item->child(row, 0);
@@ -596,31 +604,22 @@ namespace sd::widgets
                 const int kind = child->data(kRoleNodeKind).toInt();
                 if (kind == kNodeKindSignal)
                 {
-                    hasSignalDescendant = true;
                     const QString key = child->data(kRoleSignalKey).toString();
-                    if (!hiddenKeys.contains(key))
+                    if (hiddenKeys.contains(key))
                     {
-                        allChildrenHidden = false;
+                        child->setCheckState(Qt::Unchecked);
                     }
                 }
                 else if (kind == kNodeKindGroup)
                 {
-                    hasSignalDescendant = true;
-                    if (!allHidden(child))
-                    {
-                        allChildrenHidden = false;
-                    }
+                    applyHidden(child);
+                    UpdateGroupCheckState(child);
                 }
             }
-
-            return hasSignalDescendant && allChildrenHidden;
         };
 
         m_suppressCheckSignal = true;
 
-        // Ian: Walk the streaming root's children (groups and signal leaves).
-        // With the synthetic root node, groups are children of
-        // m_streamingRootItem, not top-level model items.
         QStandardItem* rootItem = m_streamingRootItem;
         if (rootItem == nullptr)
         {
@@ -628,28 +627,162 @@ namespace sd::widgets
             return;
         }
 
-        for (int row = 0; row < rootItem->rowCount(); ++row)
-        {
-            QStandardItem* item = rootItem->child(row, 0);
-            if (item == nullptr)
-            {
-                continue;
-            }
-
-            const int kind = item->data(kRoleNodeKind).toInt();
-            if (kind == kNodeKindGroup)
-            {
-                if (allHidden(item))
-                {
-                    item->setCheckState(Qt::Unchecked);
-                }
-            }
-            // Single-segment signals are not checkable — their visibility
-            // is governed by the root node's check state.
-        }
+        applyHidden(rootItem);
 
         // Update the streaming root's tri-state to reflect its children.
         UpdateRunCheckState(rootItem);
+
+        m_suppressCheckSignal = false;
+        CollectAndEmitCheckedSignals();
+    }
+
+    void RunBrowserDock::UncheckSignalByKey(const QString& key)
+    {
+        // Ian: Recursive helper to find a signal leaf by key under any parent.
+        // Works in both reading and streaming modes — it searches by kRoleSignalKey
+        // regardless of tree structure.
+        std::function<QStandardItem*(QStandardItem*)> findLeaf;
+        findLeaf = [&](QStandardItem* parent) -> QStandardItem*
+        {
+            for (int row = 0; row < parent->rowCount(); ++row)
+            {
+                QStandardItem* child = parent->child(row, 0);
+                if (child == nullptr)
+                {
+                    continue;
+                }
+
+                const int kind = child->data(kRoleNodeKind).toInt();
+                if (kind == kNodeKindSignal)
+                {
+                    if (child->data(kRoleSignalKey).toString() == key)
+                    {
+                        return child;
+                    }
+                }
+                else if (kind == kNodeKindGroup || kind == kNodeKindRun)
+                {
+                    QStandardItem* found = findLeaf(child);
+                    if (found != nullptr)
+                    {
+                        return found;
+                    }
+                }
+            }
+            return nullptr;
+        };
+
+        QStandardItem* root = m_treeModel->invisibleRootItem();
+        QStandardItem* leaf = findLeaf(root);
+        if (leaf == nullptr || leaf->checkState() == Qt::Unchecked)
+        {
+            return;  // Key not in tree or already unchecked.
+        }
+
+        m_suppressCheckSignal = true;
+        leaf->setCheckState(Qt::Unchecked);
+
+        // Recompute ancestor tri-states up to the run/root node.
+        QStandardItem* ancestor = leaf->parent();
+        while (ancestor != nullptr)
+        {
+            const int ancestorKind = ancestor->data(kRoleNodeKind).toInt();
+            if (ancestorKind == kNodeKindGroup)
+            {
+                UpdateGroupCheckState(ancestor);
+            }
+            else if (ancestorKind == kNodeKindRun)
+            {
+                UpdateRunCheckState(ancestor);
+                break;
+            }
+            ancestor = ancestor->parent();
+        }
+
+        m_suppressCheckSignal = false;
+        CollectAndEmitCheckedSignals();
+    }
+
+    void RunBrowserDock::UncheckSignalsByKeys(const QSet<QString>& keys)
+    {
+        if (keys.isEmpty())
+        {
+            return;
+        }
+
+        // Ian: Batch version of UncheckSignalByKey.  Single tree walk finds all
+        // matching leaves, unchecks them, collects the set of affected ancestors,
+        // then recomputes tri-states once and emits a single CheckedSignalsChanged.
+        // This avoids N signal emissions and N tree walks when hiding N tiles.
+
+        // Recursive helper — collects all matching leaves.
+        QSet<QStandardItem*> affectedAncestors;
+        std::function<void(QStandardItem*)> findAndUncheck;
+        findAndUncheck = [&](QStandardItem* parent)
+        {
+            for (int row = 0; row < parent->rowCount(); ++row)
+            {
+                QStandardItem* child = parent->child(row, 0);
+                if (child == nullptr)
+                {
+                    continue;
+                }
+
+                const int kind = child->data(kRoleNodeKind).toInt();
+                if (kind == kNodeKindSignal)
+                {
+                    if (keys.contains(child->data(kRoleSignalKey).toString())
+                        && child->checkState() != Qt::Unchecked)
+                    {
+                        child->setCheckState(Qt::Unchecked);
+
+                        // Collect all ancestors for tri-state recompute.
+                        QStandardItem* ancestor = child->parent();
+                        while (ancestor != nullptr)
+                        {
+                            affectedAncestors.insert(ancestor);
+                            ancestor = ancestor->parent();
+                        }
+                    }
+                }
+                else if (kind == kNodeKindGroup || kind == kNodeKindRun)
+                {
+                    findAndUncheck(child);
+                }
+            }
+        };
+
+        m_suppressCheckSignal = true;
+
+        QStandardItem* root = m_treeModel->invisibleRootItem();
+        findAndUncheck(root);
+
+        if (affectedAncestors.isEmpty())
+        {
+            m_suppressCheckSignal = false;
+            return;  // No leaves were unchecked.
+        }
+
+        // Recompute tri-states bottom-up.  Groups first (may be nested), then
+        // run nodes.  UpdateGroupCheckState only reads children, so order among
+        // sibling groups doesn't matter — we just need groups before their
+        // ancestor runs.
+        for (QStandardItem* item : affectedAncestors)
+        {
+            const int kind = item->data(kRoleNodeKind).toInt();
+            if (kind == kNodeKindGroup)
+            {
+                UpdateGroupCheckState(item);
+            }
+        }
+        for (QStandardItem* item : affectedAncestors)
+        {
+            const int kind = item->data(kRoleNodeKind).toInt();
+            if (kind == kNodeKindRun)
+            {
+                UpdateRunCheckState(item);
+            }
+        }
 
         m_suppressCheckSignal = false;
         CollectAndEmitCheckedSignals();
@@ -722,7 +855,9 @@ namespace sd::widgets
 
         auto* emptyDetail = new QStandardItem();
         emptyDetail->setData(kNodeKindGroup, kRoleNodeKind);
-        parentItem->appendRow({groupItem, emptyDetail});
+        // Ian: Insert groups in sorted position (groups before leaves, A-Z).
+        const int groupRow = FindSortedInsertionRow(parentItem, kNodeKindGroup, groupName);
+        parentItem->insertRow(groupRow, {groupItem, emptyDetail});
         return groupItem;
     }
 
@@ -883,11 +1018,18 @@ namespace sd::widgets
                 }
 
                 // Leaf: the metric name.
+                // Ian: Signal leaves are checkable so each tile can be
+                // individually hidden/shown.  In reading mode they start
+                // unchecked — the user opts in by checking a group (which
+                // pushes checked state to its leaves) or by checking
+                // individual leaves.
                 const QString leafName = parts.back();
                 auto* signalItem = new QStandardItem(leafName);
                 signalItem->setData(kNodeKindSignal, kRoleNodeKind);
                 signalItem->setData(runIdx, kRoleRunIndex);
                 signalItem->setData(sig.key, kRoleSignalKey);
+                signalItem->setCheckable(true);
+                signalItem->setCheckState(Qt::Unchecked);
 
                 auto* signalDetailItem = new QStandardItem(
                     QString("%1  (%2 samples)").arg(sig.type).arg(sig.sampleCount)
@@ -896,7 +1038,9 @@ namespace sd::widgets
                 signalDetailItem->setData(runIdx, kRoleRunIndex);
                 signalDetailItem->setData(sig.key, kRoleSignalKey);
 
-                parent->appendRow({signalItem, signalDetailItem});
+                // Ian: Insert leaves in sorted position (groups before leaves, A-Z).
+                const int leafRow = FindSortedInsertionRow(parent, kNodeKindSignal, leafName);
+                parent->insertRow(leafRow, {signalItem, signalDetailItem});
             }
         }
 
@@ -932,7 +1076,9 @@ namespace sd::widgets
 
         auto* emptyDetail = new QStandardItem();
         emptyDetail->setData(kNodeKindGroup, kRoleNodeKind);
-        parentItem->appendRow({groupItem, emptyDetail});
+        // Ian: Insert groups in sorted position (groups before leaves, A-Z).
+        const int groupRow = FindSortedInsertionRow(parentItem, kNodeKindGroup, groupName);
+        parentItem->insertRow(groupRow, {groupItem, emptyDetail});
         return groupItem;
     }
 
@@ -1022,16 +1168,14 @@ namespace sd::widgets
 
     // Ian: Checkbox propagation logic.
     //
-    // Reading mode: When the user checks/unchecks a *group* folder, we update
-    // the parent run node to reflect the aggregate state (tri-state).  When the
-    // user checks/unchecks a *run* node, we push the new state down to all its
-    // immediate group children.
+    // Every node (run, group, signal leaf) is checkable.  The rules are:
     //
-    // Streaming mode: There are no run nodes — groups sit directly under the
-    // root.  A group toggle simply re-collects checked signals and emits.
-    //
-    // In both cases we then collect the full set of checked signal keys and
-    // emit CheckedSignalsChanged.
+    //   1. Signal leaf toggled → recompute parent group's tri-state, then
+    //      recompute the ancestor run/root tri-state.
+    //   2. Group toggled → push the new state to all child leaves (and sub-groups
+    //      recursively), then recompute the parent run/root tri-state.
+    //   3. Run/root toggled → push the new state to all group children (which
+    //      in turn push to their leaves).
     //
     // m_suppressCheckSignal prevents recursive re-entry: setting child check
     // states from code fires itemChanged again, so we guard against it.
@@ -1051,37 +1195,79 @@ namespace sd::widgets
 
         const int nodeKind = item->data(kRoleNodeKind).toInt();
 
-        if (nodeKind == kNodeKindGroup)
+        if (nodeKind == kNodeKindSignal)
         {
-            if (m_streamingMode)
+            // Ian: A signal leaf was toggled by the user.  Recompute the
+            // parent group's tri-state (and the grandparent run's tri-state).
+            m_suppressCheckSignal = true;
+
+            QStandardItem* parentItem = item->parent();
+            if (parentItem != nullptr)
             {
-                // Ian: In streaming mode, groups sit under the synthetic root
-                // node (kNodeKindRun).  Update the root's tri-state to reflect
-                // the change, then re-collect and emit.
-                if (m_streamingRootItem != nullptr)
+                const int parentKind = parentItem->data(kRoleNodeKind).toInt();
+                if (parentKind == kNodeKindGroup)
                 {
-                    m_suppressCheckSignal = true;
-                    UpdateRunCheckState(m_streamingRootItem);
-                    m_suppressCheckSignal = false;
+                    UpdateGroupCheckState(parentItem);
+
+                    // Walk up to the run/root ancestor and update its tri-state.
+                    QStandardItem* ancestor = parentItem->parent();
+                    while (ancestor != nullptr)
+                    {
+                        const int ancestorKind = ancestor->data(kRoleNodeKind).toInt();
+                        if (ancestorKind == kNodeKindRun)
+                        {
+                            UpdateRunCheckState(ancestor);
+                            break;
+                        }
+                        else if (ancestorKind == kNodeKindGroup)
+                        {
+                            UpdateGroupCheckState(ancestor);
+                        }
+                        ancestor = ancestor->parent();
+                    }
                 }
-                CollectAndEmitCheckedSignals();
+                else if (parentKind == kNodeKindRun)
+                {
+                    // Single-segment key directly under the run/root.
+                    UpdateRunCheckState(parentItem);
+                }
             }
-            else
+
+            m_suppressCheckSignal = false;
+            CollectAndEmitCheckedSignals();
+        }
+        else if (nodeKind == kNodeKindGroup)
+        {
+            // Ian: A group was toggled — push the new state to all descendant
+            // leaves and sub-groups, then recompute the ancestor run/root.
+            const Qt::CheckState newState = item->checkState();
+
+            m_suppressCheckSignal = true;
+            PushCheckStateToDescendants(item, newState);
+
+            // Walk up ancestors to update their tri-state.
+            QStandardItem* ancestor = item->parent();
+            while (ancestor != nullptr)
             {
-                // Reading mode: update the parent run's tri-state.
-                QStandardItem* parentRun = item->parent();
-                if (parentRun != nullptr && parentRun->data(kRoleNodeKind).toInt() == kNodeKindRun)
+                const int ancestorKind = ancestor->data(kRoleNodeKind).toInt();
+                if (ancestorKind == kNodeKindRun)
                 {
-                    m_suppressCheckSignal = true;
-                    UpdateRunCheckState(parentRun);
-                    m_suppressCheckSignal = false;
+                    UpdateRunCheckState(ancestor);
+                    break;
                 }
-                CollectAndEmitCheckedSignals();
+                else if (ancestorKind == kNodeKindGroup)
+                {
+                    UpdateGroupCheckState(ancestor);
+                }
+                ancestor = ancestor->parent();
             }
+
+            m_suppressCheckSignal = false;
+            CollectAndEmitCheckedSignals();
         }
         else if (nodeKind == kNodeKindRun)
         {
-            // A run was toggled — push the new binary state to all group children.
+            // A run was toggled — push the new binary state to all descendants.
             // (Tri-state partial is only computed from children, never set by user click.)
             const Qt::CheckState newState = item->checkState();
             const Qt::CheckState childState = (newState == Qt::PartiallyChecked)
@@ -1089,41 +1275,25 @@ namespace sd::widgets
                 : newState;
 
             m_suppressCheckSignal = true;
-            for (int row = 0; row < item->rowCount(); ++row)
-            {
-                QStandardItem* child = item->child(row, 0);
-                if (child != nullptr && child->data(kRoleNodeKind).toInt() == kNodeKindGroup)
-                {
-                    child->setCheckState(childState);
-                }
-            }
+            PushCheckStateToDescendants(item, childState);
             // Ian: Force the root to the user's intended state rather than
-            // recomputing from children.  In streaming mode single-segment
-            // signal keys sit directly under the root and are implicitly
-            // "always visible" — UpdateRunCheckState would count them as
-            // checked, overriding the user's explicit uncheck to
-            // PartiallyChecked (the confusing minus sign).  Setting
-            // childState directly respects the user's intent: unchecked
-            // means "hide everything", checked means "show everything".
+            // recomputing from children.  This respects the user's intent:
+            // unchecked means "hide everything", checked means "show everything".
             item->setCheckState(childState);
             m_suppressCheckSignal = false;
             CollectAndEmitCheckedSignals();
         }
     }
 
-    void RunBrowserDock::UpdateRunCheckState(QStandardItem* runItem)
+    // Ian: Push a check state down to all descendants of a parent node
+    // (groups, sub-groups, and signal leaves).  Used when a group or run
+    // is toggled to cascade the state to everything beneath it.
+
+    void RunBrowserDock::PushCheckStateToDescendants(QStandardItem* parent, Qt::CheckState state)
     {
-        if (runItem == nullptr)
+        for (int row = 0; row < parent->rowCount(); ++row)
         {
-            return;
-        }
-
-        int checkedCount = 0;
-        int childCount = 0;
-
-        for (int row = 0; row < runItem->rowCount(); ++row)
-        {
-            const QStandardItem* child = runItem->child(row, 0);
+            QStandardItem* child = parent->child(row, 0);
             if (child == nullptr)
             {
                 continue;
@@ -1132,20 +1302,48 @@ namespace sd::widgets
             const int kind = child->data(kRoleNodeKind).toInt();
             if (kind == kNodeKindGroup)
             {
-                ++childCount;
-                if (child->checkState() == Qt::Checked)
-                {
-                    ++checkedCount;
-                }
+                child->setCheckState(state);
+                PushCheckStateToDescendants(child, state);
             }
             else if (kind == kNodeKindSignal)
             {
-                // Ian: Single-segment keys (signal leaves directly under the
-                // run/root node) have no group checkbox to uncheck — they are
-                // implicitly always visible.  Count them as checked children
-                // so the root tri-state reflects their presence correctly.
-                ++childCount;
+                child->setCheckState(state);
+            }
+        }
+    }
+
+    // Ian: Compute a group node's tri-state from its immediate children.
+    // A group is Checked if all children are checked, Unchecked if none are,
+    // and PartiallyChecked otherwise.  Children can be signal leaves or
+    // sub-groups — both are checkable.
+
+    void RunBrowserDock::UpdateGroupCheckState(QStandardItem* groupItem)
+    {
+        if (groupItem == nullptr)
+        {
+            return;
+        }
+
+        int checkedCount = 0;
+        int partialCount = 0;
+        int childCount = 0;
+
+        for (int row = 0; row < groupItem->rowCount(); ++row)
+        {
+            const QStandardItem* child = groupItem->child(row, 0);
+            if (child == nullptr || !child->isCheckable())
+            {
+                continue;
+            }
+
+            ++childCount;
+            if (child->checkState() == Qt::Checked)
+            {
                 ++checkedCount;
+            }
+            else if (child->checkState() == Qt::PartiallyChecked)
+            {
+                ++partialCount;
             }
         }
 
@@ -1156,7 +1354,53 @@ namespace sd::widgets
             {
                 newState = Qt::Checked;
             }
-            else if (checkedCount > 0)
+            else if (checkedCount > 0 || partialCount > 0)
+            {
+                newState = Qt::PartiallyChecked;
+            }
+        }
+
+        groupItem->setCheckState(newState);
+    }
+
+    void RunBrowserDock::UpdateRunCheckState(QStandardItem* runItem)
+    {
+        if (runItem == nullptr)
+        {
+            return;
+        }
+
+        int checkedCount = 0;
+        int partialCount = 0;
+        int childCount = 0;
+
+        for (int row = 0; row < runItem->rowCount(); ++row)
+        {
+            const QStandardItem* child = runItem->child(row, 0);
+            if (child == nullptr || !child->isCheckable())
+            {
+                continue;
+            }
+
+            ++childCount;
+            if (child->checkState() == Qt::Checked)
+            {
+                ++checkedCount;
+            }
+            else if (child->checkState() == Qt::PartiallyChecked)
+            {
+                ++partialCount;
+            }
+        }
+
+        Qt::CheckState newState = Qt::Unchecked;
+        if (childCount > 0)
+        {
+            if (checkedCount == childCount)
+            {
+                newState = Qt::Checked;
+            }
+            else if (checkedCount > 0 || partialCount > 0)
             {
                 newState = Qt::PartiallyChecked;
             }
@@ -1170,9 +1414,11 @@ namespace sd::widgets
         QSet<QString> checkedKeys;
         QMap<QString, QString> keyToType;
 
-        // Ian: Shared recursive leaf collector — walks a parent node and adds
-        // all signal-leaf descendants to checkedKeys.  In streaming mode the
-        // type comes from m_discoveredKeyTypes; in reading mode from m_runs.
+        // Ian: Recursive leaf collector — walks a parent node and adds all
+        // signal-leaf descendants that are individually checked.  Each leaf
+        // owns its own check state, so we only include leaves with
+        // Qt::Checked.  In streaming mode the type comes from
+        // m_discoveredKeyTypes; in reading mode from m_runs.
         std::function<void(const QStandardItem*, int)> collectLeaves;
         collectLeaves = [&](const QStandardItem* parent, int runIdx)
         {
@@ -1187,6 +1433,10 @@ namespace sd::widgets
                 const int kind = child->data(kRoleNodeKind).toInt();
                 if (kind == kNodeKindSignal)
                 {
+                    if (child->checkState() != Qt::Checked)
+                    {
+                        continue;
+                    }
                     const QString key = child->data(kRoleSignalKey).toString();
                     if (!key.isEmpty())
                     {
@@ -1214,6 +1464,9 @@ namespace sd::widgets
                 }
                 else if (kind == kNodeKindGroup)
                 {
+                    // Recurse into groups regardless of check state —
+                    // a partially-checked group can have individually
+                    // checked leaves inside.
                     collectLeaves(child, runIdx);
                 }
             }
@@ -1221,62 +1474,36 @@ namespace sd::widgets
 
         if (m_streamingMode)
         {
-            // Ian: Streaming mode — groups sit under the synthetic root node
-            // (kNodeKindRun).  Walk the root's children: checked groups
-            // contribute their leaves, signal leaves (single-segment keys)
-            // are always visible since the root is their only gating ancestor.
+            // Ian: Streaming mode — walk the synthetic root node.
+            // If the root is unchecked, nothing is visible.
             QStandardItem* rootItem = m_streamingRootItem;
             if (rootItem == nullptr)
             {
-                // No root node yet — nothing to collect.
                 emit CheckedSignalsChanged(checkedKeys, keyToType);
                 return;
             }
 
-            // If the root itself is unchecked, nothing is visible.
             if (rootItem->checkState() == Qt::Unchecked)
             {
                 emit CheckedSignalsChanged(checkedKeys, keyToType);
                 return;
             }
 
-            for (int row = 0; row < rootItem->rowCount(); ++row)
-            {
-                const QStandardItem* item = rootItem->child(row, 0);
-                if (item == nullptr)
-                {
-                    continue;
-                }
-
-                const int kind = item->data(kRoleNodeKind).toInt();
-
-                if (kind == kNodeKindGroup && item->checkState() == Qt::Checked)
-                {
-                    collectLeaves(item, -1);
-                }
-                else if (kind == kNodeKindSignal)
-                {
-                    // Single-segment keys: visible when the root is checked.
-                    const QString key = item->data(kRoleSignalKey).toString();
-                    if (!key.isEmpty())
-                    {
-                        checkedKeys.insert(key);
-                        const auto typeIt = m_discoveredKeyTypes.find(key);
-                        if (typeIt != m_discoveredKeyTypes.end())
-                        {
-                            keyToType.insert(key, typeIt.value());
-                        }
-                    }
-                }
-            }
+            collectLeaves(rootItem, -1);
         }
         else
         {
-            // Reading mode — walk run nodes, then their group children.
+            // Reading mode — walk run nodes.
             for (int runRow = 0; runRow < m_treeModel->rowCount(); ++runRow)
             {
                 const QStandardItem* runItem = m_treeModel->item(runRow, 0);
                 if (runItem == nullptr)
+                {
+                    continue;
+                }
+
+                // If the run is completely unchecked, skip its subtree.
+                if (runItem->checkState() == Qt::Unchecked)
                 {
                     continue;
                 }
@@ -1287,56 +1514,18 @@ namespace sd::widgets
                     continue;
                 }
 
-                for (int groupRow = 0; groupRow < runItem->rowCount(); ++groupRow)
-                {
-                    const QStandardItem* groupOrLeaf = runItem->child(groupRow, 0);
-                    if (groupOrLeaf == nullptr)
-                    {
-                        continue;
-                    }
-
-                    const int childKind = groupOrLeaf->data(kRoleNodeKind).toInt();
-
-                    if (childKind == kNodeKindGroup && groupOrLeaf->checkState() == Qt::Checked)
-                    {
-                        collectLeaves(groupOrLeaf, runIdx);
-                    }
-                    else if (childKind == kNodeKindSignal)
-                    {
-                        // Ian: Signals directly under a run (no group folder) are
-                        // included when the run itself is checked.  This handles
-                        // single-segment keys like "TopLevel" that have no folder.
-                        if (runItem->checkState() == Qt::Checked)
-                        {
-                            const QString key = groupOrLeaf->data(kRoleSignalKey).toString();
-                            if (!key.isEmpty())
-                            {
-                                checkedKeys.insert(key);
-                                for (const RunSignalInfo& sig : m_runs[static_cast<size_t>(runIdx)].signalInfos)
-                                {
-                                    if (sig.key == key)
-                                    {
-                                        keyToType.insert(key, sig.type);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                collectLeaves(runItem, runIdx);
             }
         }
 
         emit CheckedSignalsChanged(checkedKeys, keyToType);
     }
 
-    // Ian: Programmatically check groups whose signals are in the given key set.
-    // Used by MainWindow to restore persisted checked state on startup.  We walk
-    // every group in the tree and check it if ANY of its descendant signals are
-    // in signalKeys.  This fires OnModelItemChanged for each group, which is fine —
-    // the suppress guard handles the cascading updates.  We call
-    // CollectAndEmitCheckedSignals once at the end to give the consumer the
-    // final aggregated state.
+    // Ian: Programmatically check signal leaves whose keys are in the given
+    // set, then recompute group and run tri-states.  Used by MainWindow to
+    // restore persisted checked state on startup.  We walk every leaf in the
+    // tree and check it if its key is in signalKeys, then update ancestor
+    // group/run tri-states to match.
 
     void RunBrowserDock::SetCheckedGroupsBySignalKeys(const QSet<QString>& signalKeys)
     {
@@ -1345,14 +1534,14 @@ namespace sd::widgets
             return;
         }
 
-        // Recursive helper: returns true if any descendant signal is in signalKeys.
-        std::function<bool(QStandardItem*)> checkGroup;
-        checkGroup = [&](QStandardItem* groupItem) -> bool
+        // Recursive helper: check matching leaves and return true if any were checked.
+        std::function<bool(QStandardItem*)> checkLeaves;
+        checkLeaves = [&](QStandardItem* parentItem) -> bool
         {
             bool hasMatch = false;
-            for (int row = 0; row < groupItem->rowCount(); ++row)
+            for (int row = 0; row < parentItem->rowCount(); ++row)
             {
-                QStandardItem* child = groupItem->child(row, 0);
+                QStandardItem* child = parentItem->child(row, 0);
                 if (child == nullptr)
                 {
                     continue;
@@ -1364,22 +1553,21 @@ namespace sd::widgets
                     const QString key = child->data(kRoleSignalKey).toString();
                     if (signalKeys.contains(key))
                     {
+                        child->setCheckState(Qt::Checked);
                         hasMatch = true;
                     }
                 }
                 else if (kind == kNodeKindGroup)
                 {
-                    if (checkGroup(child))
+                    if (checkLeaves(child))
                     {
                         hasMatch = true;
                     }
+                    // Recompute this group's tri-state from its children.
+                    UpdateGroupCheckState(child);
                 }
             }
 
-            if (hasMatch && groupItem->isCheckable())
-            {
-                groupItem->setCheckState(Qt::Checked);
-            }
             return hasMatch;
         };
 
@@ -1393,20 +1581,7 @@ namespace sd::widgets
                 continue;
             }
 
-            for (int row = 0; row < runItem->rowCount(); ++row)
-            {
-                QStandardItem* child = runItem->child(row, 0);
-                if (child == nullptr)
-                {
-                    continue;
-                }
-
-                const int kind = child->data(kRoleNodeKind).toInt();
-                if (kind == kNodeKindGroup)
-                {
-                    checkGroup(child);
-                }
-            }
+            checkLeaves(runItem);
 
             // Update the run node tri-state after all children are set.
             UpdateRunCheckState(runItem);
@@ -1496,8 +1671,10 @@ namespace sd::widgets
     {
         QSet<QString> result;
 
-        std::function<void(const QStandardItem*, bool)> collect;
-        collect = [&](const QStandardItem* parent, bool parentGroupChecked)
+        // Ian: Recursive collector — walks the tree and adds all signal
+        // leaves that are individually checked (Qt::Checked).
+        std::function<void(const QStandardItem*)> collect;
+        collect = [&](const QStandardItem* parent)
         {
             for (int row = 0; row < parent->rowCount(); ++row)
             {
@@ -1510,10 +1687,11 @@ namespace sd::widgets
                 const int kind = child->data(kRoleNodeKind).toInt();
                 if (kind == kNodeKindGroup)
                 {
-                    const bool groupChecked = (child->checkState() == Qt::Checked);
-                    collect(child, groupChecked);
+                    // Recurse into groups — a partially-checked group
+                    // can still have individually checked leaves.
+                    collect(child);
                 }
-                else if (kind == kNodeKindSignal && parentGroupChecked)
+                else if (kind == kNodeKindSignal && child->checkState() == Qt::Checked)
                 {
                     const QString key = child->data(kRoleSignalKey).toString();
                     if (!key.isEmpty())
@@ -1526,10 +1704,6 @@ namespace sd::widgets
 
         if (m_streamingMode)
         {
-            // Ian: Streaming mode — groups sit under the synthetic root node
-            // (kNodeKindRun).  Walk the root's children: checked groups
-            // contribute their leaves, signal leaves (single-segment keys)
-            // are visible when the root is checked.
             if (m_streamingRootItem == nullptr)
             {
                 return result;
@@ -1541,30 +1715,7 @@ namespace sd::widgets
                 return result;
             }
 
-            for (int row = 0; row < m_streamingRootItem->rowCount(); ++row)
-            {
-                const QStandardItem* item = m_streamingRootItem->child(row, 0);
-                if (item == nullptr)
-                {
-                    continue;
-                }
-
-                const int kind = item->data(kRoleNodeKind).toInt();
-                if (kind == kNodeKindGroup)
-                {
-                    const bool groupChecked = (item->checkState() == Qt::Checked);
-                    collect(item, groupChecked);
-                }
-                else if (kind == kNodeKindSignal)
-                {
-                    // Single-segment keys — visible when the root is checked.
-                    const QString key = item->data(kRoleSignalKey).toString();
-                    if (!key.isEmpty())
-                    {
-                        result.insert(key);
-                    }
-                }
-            }
+            collect(m_streamingRootItem);
         }
         else
         {
@@ -1572,34 +1723,12 @@ namespace sd::widgets
             for (int runRow = 0; runRow < m_treeModel->rowCount(); ++runRow)
             {
                 const QStandardItem* runItem = m_treeModel->item(runRow, 0);
-                if (runItem == nullptr)
+                if (runItem == nullptr || runItem->checkState() == Qt::Unchecked)
                 {
                     continue;
                 }
 
-                // For direct children of run that are signals (no group), use run check state.
-                for (int row = 0; row < runItem->rowCount(); ++row)
-                {
-                    const QStandardItem* child = runItem->child(row, 0);
-                    if (child == nullptr)
-                    {
-                        continue;
-                    }
-                    const int kind = child->data(kRoleNodeKind).toInt();
-                    if (kind == kNodeKindGroup)
-                    {
-                        const bool groupChecked = (child->checkState() == Qt::Checked);
-                        collect(child, groupChecked);
-                    }
-                    else if (kind == kNodeKindSignal && runItem->checkState() == Qt::Checked)
-                    {
-                        const QString key = child->data(kRoleSignalKey).toString();
-                        if (!key.isEmpty())
-                        {
-                            result.insert(key);
-                        }
-                    }
-                }
+                collect(runItem);
             }
         }
 

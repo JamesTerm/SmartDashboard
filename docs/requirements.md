@@ -93,3 +93,11 @@ Build an educational, community-friendly C++ dashboard prototype for FRC that de
 - [x] Non-editable mode restores control interactions, including gauge command writes.
 - [x] Layout serialization persists geometry and widget type.
 - [x] Dashboard-owned control values replay/re-publish correctly across simulator reconnects in direct mode.
+- [x] NT4 interoperability connects to SmartDashboard, Glass, and Robot_Simulation backends.
+- [x] SendableChooser autonomous selection is supported and survives reconnects.
+- [x] Camera stream viewing with MJPEG auto-discovery and auto-reconnect.
+- [x] Run Browser provides signal navigation with per-leaf visibility control and layout-persisted hidden keys.
+- [x] Recording/playback with timeline scrub, seek, and speed control.
+- [x] Graph/plot support covers normal SmartDashboard expectations for numeric telemetry.
+
+**Status (2026-03-31):** Core SmartDashboard scope is feature-complete. See `docs/roadmap.md` for active work (multi-trace line plot) and intentionally unsupported features.

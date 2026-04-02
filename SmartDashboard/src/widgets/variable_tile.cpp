@@ -986,11 +986,15 @@ namespace sd::widgets
                 });
             }
 
-            if (menu.actions().isEmpty())
+            // Ian: "Hide" is available in non-editable mode so the user can
+            // declutter the dashboard without entering edit mode.  This
+            // unchecks the corresponding Run Browser leaf and triggers the
+            // standard visibility pipeline (CheckedSignalsChanged -> hide).
+            QAction* hideAction = menu.addAction("Hide");
+            connect(hideAction, &QAction::triggered, this, [this]()
             {
-                event->ignore();
-                return;
-            }
+                emit HideRequested(m_key);
+            });
 
             menu.exec(event->globalPos());
             return;
@@ -1066,6 +1070,16 @@ namespace sd::widgets
         connect(removeAction, &QAction::triggered, this, [this]()
         {
             emit RemoveRequested(m_key);
+        });
+
+        // Ian: "Hide" unchecks the corresponding leaf in the Run Browser dock
+        // and hides the tile via the standard visibility pipeline.  Unlike
+        // "Remove", the tile is not destroyed — it can be re-shown by
+        // re-checking the leaf in the Run Browser.
+        QAction* hideAction = menu.addAction("Hide");
+        connect(hideAction, &QAction::triggered, this, [this]()
+        {
+            emit HideRequested(m_key);
         });
     }
 

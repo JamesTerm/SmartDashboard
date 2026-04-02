@@ -102,6 +102,7 @@ namespace sd::widgets
     signals:
         void ChangeWidgetRequested(const QString& key, const QString& widgetType);
         void RemoveRequested(const QString& key);
+        void HideRequested(const QString& key);
         void ControlBoolEdited(const QString& key, bool value);
         void ControlDoubleEdited(const QString& key, double value);
         void ControlStringEdited(const QString& key, const QString& value);

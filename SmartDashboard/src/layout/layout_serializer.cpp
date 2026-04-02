@@ -123,7 +123,7 @@ namespace sd::layout
         return base + "/layout.json";
     }
 
-    bool SaveLayout(const QWidget* canvas, const QString& filePath)
+    bool SaveLayout(const QWidget* canvas, const QString& filePath, const QSet<QString>& hiddenKeys)
     {
         if (canvas == nullptr)
         {
@@ -286,6 +286,16 @@ namespace sd::layout
         root["version"] = 1;
         root["widgets"] = widgets;
 
+        // Ian: Persist which keys were hidden at save time.  Only written when
+        // non-empty so older files without the field remain valid (empty set =
+        // show all).  Keys are sorted for deterministic JSON output.
+        if (!hiddenKeys.isEmpty())
+        {
+            QStringList sortedKeys(hiddenKeys.begin(), hiddenKeys.end());
+            sortedKeys.sort();
+            root["hiddenKeys"] = QJsonArray::fromStringList(sortedKeys);
+        }
+
         QFile file(filePath);
         QDir().mkpath(QFileInfo(filePath).absolutePath());
         if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
@@ -297,7 +307,7 @@ namespace sd::layout
         return true;
     }
 
-    bool LoadLayoutEntries(const QString& filePath, std::vector<WidgetLayoutEntry>& outEntries)
+    bool LoadLayoutEntries(const QString& filePath, std::vector<WidgetLayoutEntry>& outEntries, QSet<QString>* outHiddenKeys)
     {
         QFile file(filePath);
         if (!file.exists())
@@ -462,6 +472,22 @@ namespace sd::layout
                 layoutEntry.stringChooserOptions = optionList;
             }
             outEntries.push_back(layoutEntry);
+        }
+
+        // Ian: Read optional hiddenKeys array.  Older files without this field
+        // produce an empty set (= show all), preserving backward compatibility.
+        if (outHiddenKeys != nullptr)
+        {
+            outHiddenKeys->clear();
+            const QJsonArray hiddenArray = doc.object().value("hiddenKeys").toArray();
+            for (const QJsonValue& val : hiddenArray)
+            {
+                const QString key = val.toString();
+                if (!key.isEmpty())
+                {
+                    outHiddenKeys->insert(key);
+                }
+            }
         }
 
         return true;

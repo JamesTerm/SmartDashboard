@@ -79,6 +79,21 @@ struct TopicUpdate
     uint64_t serverSequence = 0;
 };
 
+/// @brief Announce metadata delivered when the server announces a topic.
+///
+/// Ian: This carries the NT4 announce-level metadata — topic name, type
+/// string, and the raw properties JSON. The properties field is how
+/// Sendable types tag themselves (e.g. {"SmartDashboard":"Scheduler"}).
+/// The host can use this to pre-create widgets before any value frames
+/// arrive. Currently the plugin bridge logs this; future iterations will
+/// forward it through the C ABI for widget-type hinting.
+struct TopicAnnounce
+{
+    std::string topicPath;      // Full NT4 path, e.g. "/SmartDashboard/Scheduler/.type"
+    std::string typeStr;        // NT4 type string, e.g. "string", "double", "string[]"
+    std::string propertiesJson; // Raw JSON object string, e.g. R"({"SmartDashboard":"Scheduler"})" or "{}"
+};
+
 /// @brief Connection state reported to the host.
 enum class ConnectionState
 {
@@ -93,6 +108,13 @@ using NT4UpdateCallback = std::function<void(const TopicUpdate&)>;
 
 /// @brief Callback for reporting connection state changes.
 using NT4ConnectionStateCallback = std::function<void(ConnectionState)>;
+
+/// @brief Callback for delivering topic announce metadata to the plugin bridge.
+///
+/// Ian: Fired once per topic when the server announces it. The plugin bridge
+/// can use the propertiesJson field to hint widget types before value frames
+/// arrive. This callback is optional — pass nullptr in Start() to skip.
+using NT4AnnounceCallback = std::function<void(const TopicAnnounce&)>;
 
 /// @brief Configuration for the NT4 client.
 struct NT4ClientConfig
@@ -124,10 +146,13 @@ public:
 
     /// @brief Start the client. Non-blocking — connection happens on a
     /// background thread and state changes arrive via the callback.
+    /// @param onAnnounce Optional callback for topic announce metadata.
+    ///        Pass nullptr or {} to skip announce notifications.
     /// @return true always (matching NativeLink TCP client convention).
     bool Start(const NT4ClientConfig& config,
                NT4UpdateCallback onUpdate,
-               NT4ConnectionStateCallback onConnectionState);
+               NT4ConnectionStateCallback onConnectionState,
+               NT4AnnounceCallback onAnnounce = nullptr);
 
     /// @brief Stop the client and disconnect. Safe to call if not started.
     void Stop();
