@@ -2717,6 +2717,18 @@ void MainWindow::OnRunBrowserCheckedSignalsChanged(const QSet<QString>& checkedK
             continue;
         }
 
+        // Ian: Plot-absorbed tiles must stay hidden regardless of Run Browser
+        // checked state.  Their visibility is managed exclusively by the
+        // merge/disband lifecycle in MergeTileIntoPlot / OnPlotSourceDisbanded.
+        // Without this guard, CheckedSignalsChanged emissions during transport
+        // lifecycle (connect, reconnect, replay load) would re-show absorbed
+        // tiles, breaking the multi-line plot visual.
+        if (m_plotSourceOwners.find(keyStd) != m_plotSourceOwners.end())
+        {
+            tile->hide();
+            continue;
+        }
+
         if (!m_runBrowserActive)
         {
             // Ian: No active Run Browser session.  Respect the layout's
@@ -3080,11 +3092,21 @@ bool MainWindow::SaveLayoutToPath(const QString& path)
     // We walk actual tile visibility rather than querying mode-specific state
     // (checked keys, hidden keys) so the saved set is always ground truth
     // regardless of whether we're in streaming, reading, or no-browser mode.
+    //
+    // IMPORTANT: Exclude tiles hidden because they were absorbed into a
+    // multi-line plot.  Absorption is already persisted via linePlotSources
+    // on the owning tile — writing absorbed keys into hiddenKeys would
+    // double-persist the hidden state and block OnPlotSourceDisbanded from
+    // restoring visibility after layout reload.
     QSet<QString> hiddenKeys;
     for (const auto& [keyStd, tile] : m_tiles)
     {
         if (tile != nullptr && tile->isHidden())
         {
+            if (m_plotSourceOwners.find(keyStd) != m_plotSourceOwners.end())
+            {
+                continue;  // Absorbed — hidden state persisted via linePlotSources
+            }
             hiddenKeys.insert(QString::fromStdString(keyStd));
         }
     }
@@ -5059,6 +5081,15 @@ void MainWindow::OnPlotSourceDisbanded(sd::widgets::VariableTile* plotTile, cons
 
     // Remove from reverse map
     m_plotSourceOwners.erase(sourceKeyStd);
+
+    // Ian: Remove the key from m_runBrowserHiddenKeys.  When a tile is
+    // absorbed into a multi-line plot, it gets hidden via tile->hide().
+    // SaveLayoutToPath now correctly excludes absorbed keys from the
+    // hiddenKeys set, but older layout files (or a save from before this
+    // fix) may still have them.  Without this removal, the "else if
+    // (!m_runBrowserHiddenKeys.contains)" check below would block the
+    // tile from becoming visible again after disband.
+    m_runBrowserHiddenKeys.remove(sourceKey);
 
     // Show or re-create the standalone tile
     auto tileIt = m_tiles.find(sourceKeyStd);

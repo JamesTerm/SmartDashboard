@@ -44,23 +44,31 @@ namespace sd::widgets
         });
     }
 
-    // --- Backward-compatible single-series API (operates on primary / series 0) ---
+    // --- Backward-compatible single-series API (operates on primary series) ---
 
     void LinePlotWidget::AddSample(double value)
     {
-        if (m_series.empty())
+        // Ian: Find or create the primary series by key, NOT by index.
+        // After persistence reload, SetPlotSources may have already pushed
+        // secondary series into m_series before the primary receives its
+        // first sample.  Using m_series[0] in that case would write the
+        // primary tile's data into the first secondary — causing one line
+        // to show merged data and an X-range truncation on the real series.
+        int primaryIdx = FindSeriesIndex(m_primaryKey);
+        if (primaryIdx < 0)
         {
-            // Auto-create primary series on first sample
             const auto& palette = DefaultColorPalette();
             Series primary;
             primary.key = m_primaryKey;
             primary.label = m_primaryKey;
             primary.color = palette[0];
-            m_series.push_back(std::move(primary));
+            // Insert at front so index 0 is the primary for legacy callers
+            m_series.insert(m_series.begin(), std::move(primary));
+            primaryIdx = 0;
             m_nextColorIndex = 1;
         }
 
-        AddSampleInternal(m_series[0], value);
+        AddSampleInternal(m_series[primaryIdx], value);
     }
 
     void LinePlotWidget::ResetGraph()
@@ -242,11 +250,12 @@ namespace sd::widgets
 
     int LinePlotWidget::GetSampleCountForTesting() const
     {
-        if (m_series.empty())
+        const int idx = FindSeriesIndex(m_primaryKey);
+        if (idx < 0)
         {
             return 0;
         }
-        return static_cast<int>(m_series[0].samples.size());
+        return static_cast<int>(m_series[idx].samples.size());
     }
 
     double LinePlotWidget::GetEstimatedSamplePeriodSecondsForTesting() const
@@ -262,20 +271,22 @@ namespace sd::widgets
 
     double LinePlotWidget::GetOldestSampleTimeForTesting() const
     {
-        if (m_series.empty() || m_series[0].samples.empty())
+        const int idx = FindSeriesIndex(m_primaryKey);
+        if (idx < 0 || m_series[idx].samples.empty())
         {
             return 0.0;
         }
-        return m_series[0].samples.front().xSeconds;
+        return m_series[idx].samples.front().xSeconds;
     }
 
     double LinePlotWidget::GetLatestSampleTimeForTesting() const
     {
-        if (m_series.empty() || m_series[0].samples.empty())
+        const int idx = FindSeriesIndex(m_primaryKey);
+        if (idx < 0 || m_series[idx].samples.empty())
         {
             return 0.0;
         }
-        return m_series[0].samples.back().xSeconds;
+        return m_series[idx].samples.back().xSeconds;
     }
 
     double LinePlotWidget::GetXTickIntervalForTesting(int drawWidth) const
