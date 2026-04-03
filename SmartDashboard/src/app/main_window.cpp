@@ -67,6 +67,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 
 #ifdef _DEBUG
 #include <QLocalServer>
@@ -1234,34 +1235,101 @@ MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
         &sd::camera::StaticCameraSource::AddCamera
     );
 
+    // Ian: "Reset fresh" config loading — if anything read from settings is
+    // corrupt or out of range, wipe ALL connection settings and reset to clean
+    // DirectConnect defaults.  Don't try to salvage individual fields from a
+    // broken config — just nuke it and start over.  The operator will see
+    // DirectConnect in the UI, which signals "something was wrong, reconfigure."
+    //
+    // Philosophy: "turn it off and back on."  Corrupt saved state gets cleaned
+    // up so the next launch starts fresh.  April 2026 investigation: mangled
+    // pluginSettingsJson (PowerShell stripped JSON quotes) silently broke the
+    // NativeLink plugin.  This validation would have caught and fixed it
+    // automatically on the next launch.
     QSettings settings("SmartDashboard", "SmartDashboardApp");
+    bool configCorrupt = false;
+
     const int persistedKindValue = settings.value("connection/transportKind", static_cast<int>(sd::transport::TransportKind::Direct)).toInt();
-    m_connectionConfig.kind = static_cast<sd::transport::TransportKind>(persistedKindValue);
-    m_connectionConfig.transportId = settings.value("connection/transportId").toString().trimmed();
-    if (m_connectionConfig.transportId.isEmpty())
+    if (persistedKindValue < 0 || persistedKindValue > static_cast<int>(sd::transport::TransportKind::Replay))
     {
-        if (persistedKindValue == 2)
+        fprintf(stderr, "[SmartDashboard] WARNING: transportKind=%d is out of range "
+            "— resetting all connection settings to DirectConnect.\n", persistedKindValue);
+        configCorrupt = true;
+    }
+
+    const QString persistedPluginJson = settings.value("connection/pluginSettingsJson").toString();
+    if (!persistedPluginJson.trimmed().isEmpty())
+    {
+        const QJsonDocument testDoc = QJsonDocument::fromJson(persistedPluginJson.toUtf8());
+        if (!testDoc.isObject())
         {
-            m_connectionConfig.transportId = "replay";
-        }
-        else if (persistedKindValue == 1)
-        {
-            m_connectionConfig.transportId = "legacy-nt";
-        }
-        else
-        {
-            m_connectionConfig.transportId = "direct";
+            fprintf(stderr, "[SmartDashboard] WARNING: pluginSettingsJson is not valid JSON "
+                "— resetting all connection settings to DirectConnect.\n");
+            configCorrupt = true;
         }
     }
-    m_connectionConfig.ntHost = settings.value("connection/ntHost", "127.0.0.1").toString();
-    m_connectionConfig.ntTeam = settings.value("connection/ntTeam", 0).toInt();
-    m_connectionConfig.ntUseTeam = settings.value("connection/ntUseTeam", true).toBool();
-    m_connectionConfig.ntClientName = settings.value("connection/ntClientName", "SmartDashboardApp").toString();
-    m_connectionConfig.pluginSettingsJson = settings.value("connection/pluginSettingsJson").toString();
-    m_connectionConfig.replayFilePath = settings.value("connection/replayFilePath").toString();
-    SyncConnectionConfigFromPluginSettingsJson();
+
+    if (configCorrupt)
+    {
+        // Nuke all connection keys and write clean defaults.
+        settings.remove("connection/transportKind");
+        settings.remove("connection/transportId");
+        settings.remove("connection/pluginSettingsJson");
+        settings.remove("connection/ntHost");
+        settings.remove("connection/ntTeam");
+        settings.remove("connection/ntUseTeam");
+        settings.remove("connection/ntClientName");
+        settings.remove("connection/replayFilePath");
+
+        m_connectionConfig.kind = sd::transport::TransportKind::Direct;
+        m_connectionConfig.transportId = "direct";
+        m_connectionConfig.ntHost = "127.0.0.1";
+        m_connectionConfig.ntTeam = 0;
+        m_connectionConfig.ntUseTeam = true;
+        m_connectionConfig.ntClientName = "SmartDashboardApp";
+        m_connectionConfig.pluginSettingsJson = QString();
+        m_connectionConfig.replayFilePath = QString();
+
+        SyncConnectionConfigToPluginSettingsJson();
+        PersistConnectionSettings();
+
+        DebugLogUiEvent("config_reset_fresh: corrupt settings detected, reset to DirectConnect defaults");
+    }
+    else
+    {
+        m_connectionConfig.kind = static_cast<sd::transport::TransportKind>(persistedKindValue);
+        m_connectionConfig.transportId = settings.value("connection/transportId").toString().trimmed();
+        if (m_connectionConfig.transportId.isEmpty())
+        {
+            if (persistedKindValue == 2)
+            {
+                m_connectionConfig.transportId = "replay";
+            }
+            else if (persistedKindValue == 1)
+            {
+                m_connectionConfig.transportId = "legacy-nt";
+            }
+            else
+            {
+                m_connectionConfig.transportId = "direct";
+            }
+        }
+        m_connectionConfig.ntHost = settings.value("connection/ntHost", "127.0.0.1").toString();
+        m_connectionConfig.ntTeam = settings.value("connection/ntTeam", 0).toInt();
+        m_connectionConfig.ntUseTeam = settings.value("connection/ntUseTeam", true).toBool();
+        m_connectionConfig.ntClientName = settings.value("connection/ntClientName", "SmartDashboardApp").toString();
+        m_connectionConfig.pluginSettingsJson = settings.value("connection/pluginSettingsJson").toString();
+        m_connectionConfig.replayFilePath = settings.value("connection/replayFilePath").toString();
+        SyncConnectionConfigFromPluginSettingsJson();
+    }
     if (GetSelectedTransportDescriptor() == nullptr)
     {
+        // Ian: The persisted transportId doesn't match any registered transport
+        // (plugin may have been uninstalled, or the id was corrupted).  Fall back
+        // to DirectConnect and persist the clean state so this doesn't repeat.
+        fprintf(stderr, "[SmartDashboard] WARNING: transportId '%s' not found in "
+            "registry — falling back to DirectConnect.\n",
+            m_connectionConfig.transportId.toUtf8().constData());
         SelectTransport("direct");
     }
     else
