@@ -12,6 +12,17 @@ class QWidget;
 
 namespace sd::layout
 {
+    // Ian: Describes one additional data source in a multi-line plot.
+    // The primary series is always the tile's own variableKey; these
+    // are the extras merged via drag-and-drop.
+    struct LinePlotSourceEntry
+    {
+        QString key;
+        QString color;  // hex RGB, e.g. "#e74c3c"
+        QString originalWidgetType;  // widget type before absorption (Fix 5)
+        bool visible = true;  // Ian: legend/series visibility (Fix 4)
+    };
+
     struct WidgetLayoutEntry
     {
         QString variableKey;
@@ -41,6 +52,12 @@ namespace sd::layout
         QVariant showLabel;
         QVariant stringChooserMode;
         QVariant stringChooserOptions;
+        // Ian: Additional data sources for multi-line plots.
+        // Empty for single-series line plots and all other widget types.
+        std::vector<LinePlotSourceEntry> linePlotSources;
+        // Ian: When true the line plot tile accepts drag-and-drop merges.
+        // Persisted so the user doesn't have to re-enable after reload.
+        bool multiLinePlotMode = false;
     };
 
     // Ian: hiddenKeys is a top-level JSON array in the layout file that captures

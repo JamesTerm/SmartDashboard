@@ -273,6 +273,46 @@ namespace sd::layout
                 entry["stringChooserOptions"] = QJsonArray::fromStringList(stringChooserOptions.toStringList());
             }
 
+            // Ian: Multi-line plot sources.  Persisted as a JSON array of
+            // {key, color} objects on the widget entry.  Only written when
+            // non-empty so single-series plots and non-line-plot widgets
+            // produce no extra JSON.  We must cast to VariableTile* because
+            // this data lives in m_plotSources, not in a Qt dynamic property.
+            auto* variableTile = qobject_cast<sd::widgets::VariableTile*>(widget);
+            if (variableTile != nullptr && variableTile->IsLinePlotWidget())
+            {
+                // Ian: Multi-line drop target mode flag.
+                if (variableTile->IsMultiLinePlotDropTarget())
+                {
+                    entry["multiLinePlotMode"] = true;
+                }
+
+                if (variableTile->IsMultiLinePlot())
+                {
+                    const auto sources = variableTile->GetPlotSources();
+                    if (!sources.empty())
+                    {
+                        QJsonArray sourcesArray;
+                        for (const auto& src : sources)
+                        {
+                            QJsonObject srcObj;
+                            srcObj["key"] = src.key;
+                            srcObj["color"] = src.color.name();
+                            if (!src.originalWidgetType.isEmpty())
+                            {
+                                srcObj["originalWidgetType"] = src.originalWidgetType;
+                            }
+                            if (!src.visible)
+                            {
+                                srcObj["visible"] = false;
+                            }
+                            sourcesArray.append(srcObj);
+                        }
+                        entry["linePlotSources"] = sourcesArray;
+                    }
+                }
+            }
+
             QJsonObject geo;
             geo["x"] = geometry.x();
             geo["y"] = geometry.y();
@@ -470,6 +510,31 @@ namespace sd::layout
                     optionList.push_back(optionValue.toString());
                 }
                 layoutEntry.stringChooserOptions = optionList;
+            }
+            // Ian: Multi-line plot sources.  Parsed from a JSON array of
+            // {key, color, originalWidgetType} objects.  Missing or empty array
+            // means single-series (backward compatible with older layout files).
+            if (entry.contains("linePlotSources"))
+            {
+                const QJsonArray sourcesArray = entry.value("linePlotSources").toArray();
+                for (const QJsonValue& srcVal : sourcesArray)
+                {
+                    const QJsonObject srcObj = srcVal.toObject();
+                    const QString srcKey = srcObj.value("key").toString();
+                    if (!srcKey.isEmpty())
+                    {
+                        LinePlotSourceEntry srcEntry;
+                        srcEntry.key = srcKey;
+                        srcEntry.color = srcObj.value("color").toString();
+                        srcEntry.originalWidgetType = srcObj.value("originalWidgetType").toString();
+                        srcEntry.visible = srcObj.contains("visible") ? srcObj.value("visible").toBool() : true;
+                        layoutEntry.linePlotSources.push_back(srcEntry);
+                    }
+                }
+            }
+            if (entry.contains("multiLinePlotMode"))
+            {
+                layoutEntry.multiLinePlotMode = entry.value("multiLinePlotMode").toBool();
             }
             outEntries.push_back(layoutEntry);
         }

@@ -1,8 +1,12 @@
 #pragma once
 
+#include <QColor>
 #include <QFrame>
 #include <QSize>
+#include <QString>
 #include <QStringList>
+
+#include <vector>
 
 class QLabel;
 class QMenu;
@@ -20,6 +24,18 @@ namespace sd::widgets
 {
     class TileControlWidget;
     class LinePlotWidget;
+
+    // Ian: Describes one additional data source merged into a multi-line plot.
+    // The primary series is always the tile's own key; these are the extras.
+    // originalWidgetType records what the source tile was before absorption so
+    // disband can restore it (Fix 5).
+    struct PlotSourceEntry
+    {
+        QString key;
+        QColor color;
+        QString originalWidgetType;
+        bool visible = true;  // Ian: When false, legend label and series line are hidden (Fix 4)
+    };
 }
 
 namespace sd::widgets
@@ -82,7 +98,28 @@ namespace sd::widgets
         void SetStringChooserMode(bool chooserMode);
         void SetStringChooserOptions(const QStringList& options);
         bool IsLinePlotWidget() const;
+        bool IsMultiLinePlot() const;
+        // Ian: Multi-line drop target mode.  When true, this line plot accepts
+        // drag-and-drop merges from other number tiles.  Off by default to
+        // prevent accidental merges.
+        void SetMultiLinePlotMode(bool enabled);
+        bool IsMultiLinePlotDropTarget() const;
         void ResetLinePlotGraph();
+
+        // Ian: Multi-line plot API.  AddPlotSource registers an additional NT
+        // key as a series on this tile's line plot widget.  The tile becomes
+        // the owner of that key's visual representation — MainWindow handles
+        // hiding/removing the original tile and routing updates here.
+        void AddPlotSource(const QString& key, const QColor& color);
+        void RemovePlotSource(const QString& key);
+        void AddSampleToPlotSource(const QString& key, double value);
+        std::vector<PlotSourceEntry> GetPlotSources() const;
+        void SetPlotSources(const std::vector<PlotSourceEntry>& sources);
+        // Ian: Programmatically set visibility of an absorbed series.  Updates
+        // both the LinePlotWidget rendering and the PlotSourceEntry persistence
+        // state.  Called by MainWindow when the Run Browser check state changes
+        // for an absorbed key (Direction B of bidirectional visibility sync).
+        void SetSeriesVisibleBySource(const QString& key, bool visible);
 
         QString GetKey() const;
         VariableType GetType() const;
@@ -106,6 +143,14 @@ namespace sd::widgets
         void ControlBoolEdited(const QString& key, bool value);
         void ControlDoubleEdited(const QString& key, double value);
         void ControlStringEdited(const QString& key, const QString& value);
+        // Ian: Emitted when the user disbands the multi-line plot, requesting
+        // that each additional source key gets its own tile back.
+        // originalWidgetType is what the tile was before absorption (Fix 5).
+        void PlotSourceDisbanded(const QString& sourceKey, const QString& originalWidgetType);
+        // Ian: Emitted when per-series visibility changes in the Properties
+        // dialog, so MainWindow can sync the Run Browser check state.
+        // Direction A of bidirectional visibility sync.
+        void PlotSeriesVisibilityChanged(const QString& sourceKey, bool visible);
 
     protected:
         void paintEvent(QPaintEvent* event) override;
@@ -199,6 +244,12 @@ namespace sd::widgets
         bool m_linePlotShowGridLines = false;
         double m_linePlotYLowerLimit = 0.0;
         double m_linePlotYUpperLimit = 1.0;
+        // Ian: Additional data sources merged into this tile's multi-line plot.
+        // Empty for single-series plots.  The primary series is always m_key.
+        std::vector<PlotSourceEntry> m_plotSources;
+        // Ian: When true, this line plot tile accepts drag-and-drop merges.
+        // Persisted in layout JSON.  Off by default to prevent accidental drops.
+        bool m_multiLinePlotMode = false;
         QString m_stringValue;
 
         QLabel* m_titleLabel = nullptr;

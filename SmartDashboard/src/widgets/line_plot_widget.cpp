@@ -4,14 +4,49 @@
 #include <QPainterPath>
 #include <QPaintEvent>
 #include <QPen>
+#include <QStringList>
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <vector>
 
 namespace sd::widgets
 {
+    namespace
+    {
+        // Ian: Extract the leaf name from a NetworkTables key path for legend
+        // labels.  E.g. "/SmartDashboard/Drive/LeftSpeed" -> "LeftSpeed".
+        // Mirrors the LeafName helper in variable_tile.cpp and the logic in
+        // MainWindow::BuildDisplayLabel.
+        QString LeafName(const QString& key)
+        {
+            const QStringList segments = key.split('/', Qt::SkipEmptyParts);
+            if (segments.isEmpty())
+            {
+                return key;
+            }
+            return segments.back();
+        }
+    }
+
+    // Ian: ROY-G-BIV palette for multi-line plot default colors.  The first
+    // color (#33b5e5) is the legacy single-series blue, kept as the primary
+    // series color for visual continuity with existing single-line plots.
+    const std::vector<QColor>& LinePlotWidget::DefaultColorPalette()
+    {
+        static const std::vector<QColor> palette =
+        {
+            QColor("#33b5e5"),  // Original blue (primary series)
+            QColor("#e74c3c"),  // Red
+            QColor("#f39c12"),  // Orange
+            QColor("#f1c40f"),  // Yellow
+            QColor("#2ecc71"),  // Green
+            QColor("#3498db"),  // Blue (lighter)
+            QColor("#8e44ad"),  // Indigo/Violet
+        };
+        return palette;
+    }
+
     LinePlotWidget::LinePlotWidget(QWidget* parent)
         : QWidget(parent)
     {
@@ -27,48 +62,39 @@ namespace sd::widgets
         });
     }
 
+    // --- Backward-compatible single-series API (operates on primary series) ---
+
     void LinePlotWidget::AddSample(double value)
     {
-        const auto now = std::chrono::steady_clock::now();
-        if (!m_hasStarted)
+        // Ian: Find or create the primary series by key, NOT by index.
+        // After persistence reload, SetPlotSources may have already pushed
+        // secondary series into m_series before the primary receives its
+        // first sample.  Using m_series[0] in that case would write the
+        // primary tile's data into the first secondary — causing one line
+        // to show merged data and an X-range truncation on the real series.
+        int primaryIdx = FindSeriesIndex(m_primaryKey);
+        if (primaryIdx < 0)
         {
-            m_startTime = now;
-            m_hasStarted = true;
-            m_lastSampleTime = now;
-            m_hasLastSampleTime = true;
-            m_samples.push_back(SamplePoint{ 0.0, value });
-        }
-        else if (m_hasLastSampleTime)
-        {
-            const std::chrono::duration<double> delta = now - m_lastSampleTime;
-            const double deltaSeconds = std::clamp(delta.count(), 0.001, 1.0);
-            // Exponential moving average: smooth sample-period estimate used to
-            // derive a stable visible time window from sample-count buffer size.
-            m_estimatedSamplePeriodSeconds =
-                (0.1 * deltaSeconds) + (0.9 * m_estimatedSamplePeriodSeconds);
-            m_lastSampleTime = now;
-
-            const double nextX = m_samples.empty()
-                ? 0.0
-                : (m_samples.back().xSeconds + m_estimatedSamplePeriodSeconds);
-            m_samples.push_back(SamplePoint{ nextX, value });
+            const auto& palette = DefaultColorPalette();
+            Series primary;
+            primary.key = m_primaryKey;
+            primary.label = LeafName(m_primaryKey);
+            primary.color = palette[0];
+            // Insert at front so index 0 is the primary for legacy callers
+            m_series.insert(m_series.begin(), std::move(primary));
+            primaryIdx = 0;
+            m_nextColorIndex = 1;
         }
 
-        if (!m_renderTimer.isActive())
-        {
-            m_renderTimer.start();
-        }
-
-        while (static_cast<int>(m_samples.size()) > m_bufferSizeSamples)
-        {
-            m_samples.pop_front();
-        }
-
+        AddSampleInternal(m_series[primaryIdx], value);
     }
 
     void LinePlotWidget::ResetGraph()
     {
-        m_samples.clear();
+        for (auto& series : m_series)
+        {
+            series.samples.clear();
+        }
         m_hasStarted = false;
         m_hasLastSampleTime = false;
         m_estimatedSamplePeriodSeconds = 0.02;
@@ -85,9 +111,12 @@ namespace sd::widgets
         }
 
         m_bufferSizeSamples = samples;
-        while (static_cast<int>(m_samples.size()) > m_bufferSizeSamples)
+        for (auto& series : m_series)
         {
-            m_samples.pop_front();
+            while (static_cast<int>(series.samples.size()) > m_bufferSizeSamples)
+            {
+                series.samples.pop_front();
+            }
         }
 
         update();
@@ -123,9 +152,139 @@ namespace sd::widgets
         update();
     }
 
+    void LinePlotWidget::SetShowLegend(bool enabled)
+    {
+        m_showLegend = enabled;
+        update();
+    }
+
+    bool LinePlotWidget::IsShowLegend() const
+    {
+        return m_showLegend;
+    }
+
+    // --- Multi-series API ---
+
+    int LinePlotWidget::AddSeries(const QString& key, const QString& label, const QColor& color)
+    {
+        // Don't add duplicates
+        const int existing = FindSeriesIndex(key);
+        if (existing >= 0)
+        {
+            return existing;
+        }
+
+        Series s;
+        s.key = key;
+        s.label = label;
+        s.color = color;
+        m_series.push_back(std::move(s));
+        return static_cast<int>(m_series.size()) - 1;
+    }
+
+    void LinePlotWidget::RemoveSeries(const QString& key)
+    {
+        const int idx = FindSeriesIndex(key);
+        if (idx < 0)
+        {
+            return;
+        }
+
+        m_series.erase(m_series.begin() + idx);
+    }
+
+    void LinePlotWidget::AddSampleToSeries(const QString& key, double value)
+    {
+        const int idx = FindSeriesIndex(key);
+        if (idx < 0)
+        {
+            return;
+        }
+
+        AddSampleInternal(m_series[idx], value);
+    }
+
+    void LinePlotWidget::SetSeriesColor(const QString& key, const QColor& color)
+    {
+        const int idx = FindSeriesIndex(key);
+        if (idx >= 0)
+        {
+            m_series[idx].color = color;
+            update();
+        }
+    }
+
+    void LinePlotWidget::SetSeriesVisible(const QString& key, bool visible)
+    {
+        const int idx = FindSeriesIndex(key);
+        if (idx >= 0)
+        {
+            m_series[idx].visible = visible;
+            update();
+        }
+    }
+
+    bool LinePlotWidget::IsSeriesVisible(const QString& key) const
+    {
+        const int idx = FindSeriesIndex(key);
+        if (idx >= 0)
+        {
+            return m_series[idx].visible;
+        }
+        return true;
+    }
+
+    int LinePlotWidget::GetSeriesCount() const
+    {
+        return static_cast<int>(m_series.size());
+    }
+
+    QColor LinePlotWidget::GetSeriesColor(const QString& key) const
+    {
+        const int idx = FindSeriesIndex(key);
+        if (idx >= 0)
+        {
+            return m_series[idx].color;
+        }
+        return QColor();
+    }
+
+    QString LinePlotWidget::GetSeriesLabel(const QString& key) const
+    {
+        const int idx = FindSeriesIndex(key);
+        if (idx >= 0)
+        {
+            return m_series[idx].label;
+        }
+        return {};
+    }
+
+    QStringList LinePlotWidget::GetSeriesKeys() const
+    {
+        QStringList keys;
+        keys.reserve(static_cast<int>(m_series.size()));
+        for (const auto& s : m_series)
+        {
+            keys.push_back(s.key);
+        }
+        return keys;
+    }
+
+    void LinePlotWidget::SetPrimarySeriesKey(const QString& key)
+    {
+        m_primaryKey = key;
+    }
+
+    // --- Testing API ---
+
     int LinePlotWidget::GetSampleCountForTesting() const
     {
-        return static_cast<int>(m_samples.size());
+        const int idx = FindSeriesIndex(m_primaryKey);
+        if (idx < 0)
+        {
+            return 0;
+        }
+        return static_cast<int>(m_series[idx].samples.size());
     }
 
     double LinePlotWidget::GetEstimatedSamplePeriodSecondsForTesting() const
@@ -141,18 +300,83 @@ namespace sd::widgets
 
     double LinePlotWidget::GetOldestSampleTimeForTesting() const
     {
-        return m_samples.empty() ? 0.0 : m_samples.front().xSeconds;
+        const int idx = FindSeriesIndex(m_primaryKey);
+        if (idx < 0 || m_series[idx].samples.empty())
+        {
+            return 0.0;
+        }
+        return m_series[idx].samples.front().xSeconds;
     }
 
     double LinePlotWidget::GetLatestSampleTimeForTesting() const
     {
-        return m_samples.empty() ? 0.0 : m_samples.back().xSeconds;
+        const int idx = FindSeriesIndex(m_primaryKey);
+        if (idx < 0 || m_series[idx].samples.empty())
+        {
+            return 0.0;
+        }
+        return m_series[idx].samples.back().xSeconds;
     }
 
     double LinePlotWidget::GetXTickIntervalForTesting(int drawWidth) const
     {
         return ComputeXTickInterval(drawWidth);
     }
+
+    // --- Internal helpers ---
+
+    int LinePlotWidget::FindSeriesIndex(const QString& key) const
+    {
+        for (int i = 0; i < static_cast<int>(m_series.size()); ++i)
+        {
+            if (m_series[i].key == key)
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    void LinePlotWidget::AddSampleInternal(Series& series, double value)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        if (!m_hasStarted)
+        {
+            m_startTime = now;
+            m_hasStarted = true;
+            m_lastSampleTime = now;
+            m_hasLastSampleTime = true;
+            series.samples.push_back(SamplePoint{ 0.0, value });
+        }
+        else if (m_hasLastSampleTime)
+        {
+            const std::chrono::duration<double> delta = now - m_lastSampleTime;
+            const double deltaSeconds = std::clamp(delta.count(), 0.001, 1.0);
+            // Exponential moving average: smooth sample-period estimate used to
+            // derive a stable visible time window from sample-count buffer size.
+            m_estimatedSamplePeriodSeconds =
+                (0.1 * deltaSeconds) + (0.9 * m_estimatedSamplePeriodSeconds);
+            m_lastSampleTime = now;
+
+            // Ian: Use the global X time base for all series so they align on
+            // the same time axis.  The X position is computed from the shared
+            // start time, not per-series.
+            const std::chrono::duration<double> sinceStart = now - m_startTime;
+            series.samples.push_back(SamplePoint{ sinceStart.count(), value });
+        }
+
+        if (!m_renderTimer.isActive())
+        {
+            m_renderTimer.start();
+        }
+
+        while (static_cast<int>(series.samples.size()) > m_bufferSizeSamples)
+        {
+            series.samples.pop_front();
+        }
+    }
+
+    // --- Paint ---
 
     void LinePlotWidget::paintEvent(QPaintEvent* event)
     {
@@ -161,14 +385,27 @@ namespace sd::widgets
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing, true);
 
+        const bool hasMultipleSeries = (m_series.size() > 1);
         const int leftPad = m_showNumberLines ? 44 : 6;
         const int rightPad = 6;
-        const int topPad = 6;
+        // Ian: Dynamic legend height — wraps to multiple rows when keys
+        // exceed available width (Fix 4).  Legend is completely hidden when
+        // m_showLegend is false, reclaiming the vertical space for the plot.
+        const bool showLegend = hasMultipleSeries && m_showLegend;
+        const int legendHeight = showLegend ? ComputeLegendHeight(rect().width() - leftPad - rightPad) : 0;
+
+        const int topPad = 6 + legendHeight;
         const int bottomPad = m_showNumberLines ? 24 : 6;
         const QRect drawRect = rect().adjusted(leftPad, topPad, -rightPad, -bottomPad);
         if (drawRect.width() <= 2 || drawRect.height() <= 2)
         {
             return;
+        }
+
+        // Draw legend above the plot area when multi-series and legend visible
+        if (showLegend)
+        {
+            DrawLegend(painter, QRect(leftPad, 4, drawRect.width(), legendHeight), drawRect.width());
         }
 
         painter.setPen(QPen(QColor("#3b3b3b"), 1));
@@ -196,6 +433,7 @@ namespace sd::widgets
             }
             return QString::number(value, 'f', 2);
         };
+        static_cast<void>(formatTick);  // suppress unused warning when numberLines off
 
         const double yStep = ChooseNiceTickStep(ySpan, std::max(2, drawRect.height() / 60));
 
@@ -334,12 +572,23 @@ namespace sd::widgets
             }
         }
 
-        // Only draw line plot if we have at least 2 samples
-        if (m_samples.size() >= 2)
+        // Draw all series
+        for (const Series& series : m_series)
         {
+            // Ian: Skip hidden series (Fix 4 hide-key option)
+            if (!series.visible)
+            {
+                continue;
+            }
+
+            if (series.samples.size() < 2)
+            {
+                continue;
+            }
+
             QPainterPath path;
             bool first = true;
-            for (const SamplePoint& sample : m_samples)
+            for (const SamplePoint& sample : series.samples)
             {
                 const double xNormalized = (sample.xSeconds - xRange.min) / xSpan;
                 const double clippedY = std::clamp(sample.yValue, yRange.min, yRange.max);
@@ -358,21 +607,132 @@ namespace sd::widgets
                 }
             }
 
-            painter.setPen(QPen(QColor("#33b5e5"), 1.5));
+            painter.setPen(QPen(series.color, 1.5));
             painter.drawPath(path);
         }
     }
 
+    // Ian: Multi-row legend with wrapping (Fix 4).  Returns total height used.
+    // Hidden series (visible=false) are skipped.  Each row is rowHeight pixels.
+    int LinePlotWidget::DrawLegend(QPainter& painter, const QRect& legendRect, int availableWidth) const
+    {
+        QFont legendFont = font();
+        legendFont.setPointSize(7);
+        painter.setFont(legendFont);
+
+        const QFontMetrics fm(legendFont);
+        const int lineLen = 14;
+        const int gap = 6;
+        const int textGap = 3;
+        const int rowHeight = 16;
+        const int maxLabelWidth = 100;
+
+        int x = legendRect.left();
+        int y = legendRect.top();
+        int rowCount = 1;
+
+        for (const Series& series : m_series)
+        {
+            // Ian: Skip hidden series from legend display (Fix 4 hide-key)
+            if (!series.visible)
+            {
+                continue;
+            }
+
+            const QString label = series.label.isEmpty() ? series.key : series.label;
+            const int labelWidth = std::min(maxLabelWidth, fm.horizontalAdvance(label));
+            const int entryWidth = lineLen + textGap + labelWidth + gap;
+
+            // Wrap to next row if this entry won't fit
+            if (x + entryWidth > legendRect.left() + availableWidth && x > legendRect.left())
+            {
+                x = legendRect.left();
+                y += rowHeight;
+                rowCount++;
+            }
+
+            // Draw colored line segment
+            painter.setPen(QPen(series.color, 2));
+            const int lineY = y + rowHeight / 2;
+            painter.drawLine(x, lineY, x + lineLen, lineY);
+            x += lineLen + textGap;
+
+            // Draw label
+            painter.setPen(QPen(QColor("#b0b0b0"), 1));
+            const QString elidedLabel = fm.elidedText(label, Qt::ElideRight, std::min(maxLabelWidth, legendRect.left() + availableWidth - x));
+            painter.drawText(x, y, availableWidth, rowHeight, Qt::AlignLeft | Qt::AlignVCenter, elidedLabel);
+            x += fm.horizontalAdvance(elidedLabel) + gap;
+        }
+
+        painter.setFont(font());  // restore
+        return rowCount * rowHeight;
+    }
+
+    int LinePlotWidget::ComputeLegendHeight(int availableWidth) const
+    {
+        // Ian: Pre-compute how many rows the legend needs without painting.
+        QFont legendFont = font();
+        legendFont.setPointSize(7);
+        const QFontMetrics fm(legendFont);
+        const int lineLen = 14;
+        const int gap = 6;
+        const int textGap = 3;
+        const int rowHeight = 16;
+        const int maxLabelWidth = 100;
+
+        int x = 0;
+        int rowCount = 1;
+
+        for (const Series& series : m_series)
+        {
+            if (!series.visible)
+            {
+                continue;
+            }
+
+            const QString label = series.label.isEmpty() ? series.key : series.label;
+            const int labelWidth = std::min(maxLabelWidth, fm.horizontalAdvance(label));
+            const int entryWidth = lineLen + textGap + labelWidth + gap;
+
+            if (x + entryWidth > availableWidth && x > 0)
+            {
+                x = 0;
+                rowCount++;
+            }
+
+            x += entryWidth;
+        }
+
+        return rowCount * rowHeight;
+    }
+
+    // --- Axis computations ---
+
     LinePlotWidget::AxisRange LinePlotWidget::ComputeXRange() const
     {
-        if (m_samples.empty())
+        // Compute the union of all series' X ranges
+        double globalStart = std::numeric_limits<double>::max();
+        double globalEnd = std::numeric_limits<double>::lowest();
+        bool hasSamples = false;
+
+        for (const Series& series : m_series)
+        {
+            if (series.samples.empty())
+            {
+                continue;
+            }
+            hasSamples = true;
+            globalStart = std::min(globalStart, series.samples.front().xSeconds);
+            globalEnd = std::max(globalEnd, series.samples.back().xSeconds);
+        }
+
+        if (!hasSamples)
         {
             return AxisRange{ 0.0, 1.0 };
         }
 
-        const double start = m_samples.front().xSeconds;
-        const double end = std::max(m_samples.back().xSeconds, start + 0.001);
-        return AxisRange{ start, end };
+        const double end = std::max(globalEnd, globalStart + 0.001);
+        return AxisRange{ globalStart, end };
     }
 
     double LinePlotWidget::ChooseNiceTickStep(double span, int targetTicks)
@@ -437,7 +797,17 @@ namespace sd::widgets
             return AxisRange{ m_manualYLowerLimit, m_manualYUpperLimit };
         }
 
-        if (m_samples.empty())
+        bool hasSamples = false;
+        for (const Series& series : m_series)
+        {
+            if (!series.samples.empty())
+            {
+                hasSamples = true;
+                break;
+            }
+        }
+
+        if (!hasSamples)
         {
             return AxisRange{ 0.0, 1.0 };
         }
@@ -456,25 +826,31 @@ namespace sd::widgets
 
     LinePlotWidget::YExtents LinePlotWidget::ComputeRecentYExtents() const
     {
-        if (m_samples.empty())
-        {
-            return YExtents{ 0.0, 1.0 };
-        }
-
-        const size_t sampleCount = m_samples.size();
-        const size_t windowCount = std::min(sampleCount, static_cast<size_t>(m_bufferSizeSamples));
-        const size_t startIndex = sampleCount - windowCount;
-
         double minY = std::numeric_limits<double>::max();
         double maxY = std::numeric_limits<double>::lowest();
-        for (size_t i = startIndex; i < sampleCount; ++i)
+        bool hasSamples = false;
+
+        for (const Series& series : m_series)
         {
-            const double value = m_samples[i].yValue;
-            minY = std::min(minY, value);
-            maxY = std::max(maxY, value);
+            if (series.samples.empty())
+            {
+                continue;
+            }
+
+            hasSamples = true;
+            const size_t sampleCount = series.samples.size();
+            const size_t windowCount = std::min(sampleCount, static_cast<size_t>(m_bufferSizeSamples));
+            const size_t startIndex = sampleCount - windowCount;
+
+            for (size_t i = startIndex; i < sampleCount; ++i)
+            {
+                const double value = series.samples[i].yValue;
+                minY = std::min(minY, value);
+                maxY = std::max(maxY, value);
+            }
         }
 
-        if (minY > maxY)
+        if (!hasSamples || minY > maxY)
         {
             return YExtents{ 0.0, 1.0 };
         }

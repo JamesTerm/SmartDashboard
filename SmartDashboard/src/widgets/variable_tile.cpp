@@ -38,6 +38,20 @@ namespace sd::widgets
             static_cast<void>(line);
         }
 
+        // Ian: Extract the leaf name from a NetworkTables key path for use
+        // in plot legend labels.  Matches MainWindow::BuildDisplayLabel
+        // behavior — split on '/' and take the last segment.  E.g.
+        // "/SmartDashboard/Subsystems/Drivetrain/Speed" -> "Speed".
+        QString LeafName(const QString& key)
+        {
+            const QStringList segments = key.split('/', Qt::SkipEmptyParts);
+            if (segments.isEmpty())
+            {
+                return key;
+            }
+            return segments.back();
+        }
+
         QString GetDefaultWidgetType(VariableType type)
         {
             switch (type)
@@ -121,6 +135,7 @@ namespace sd::widgets
 
         m_linePlot = new LinePlotWidget(this);
         m_linePlot->setVisible(false);
+        m_linePlot->SetPrimarySeriesKey(key);
 
         m_doubleEdit = new QLineEdit(this);
         m_doubleEdit->setVisible(false);
@@ -529,9 +544,149 @@ namespace sd::widgets
         }
     }
 
+    // --- Multi-line plot source management ---
+
+    bool VariableTile::IsMultiLinePlot() const
+    {
+        return IsLinePlotWidget() && !m_plotSources.empty();
+    }
+
+    void VariableTile::SetMultiLinePlotMode(bool enabled)
+    {
+        if (m_multiLinePlotMode == enabled)
+        {
+            return;
+        }
+        m_multiLinePlotMode = enabled;
+        update();  // repaint for 3D border visual
+    }
+
+    bool VariableTile::IsMultiLinePlotDropTarget() const
+    {
+        return IsLinePlotWidget() && m_multiLinePlotMode;
+    }
+
+    void VariableTile::AddPlotSource(const QString& key, const QColor& color)
+    {
+        // Don't add duplicates or the tile's own key
+        if (key == m_key)
+        {
+            return;
+        }
+        for (const auto& src : m_plotSources)
+        {
+            if (src.key == key)
+            {
+                return;
+            }
+        }
+
+        m_plotSources.push_back(PlotSourceEntry{ key, color });
+
+        if (m_linePlot != nullptr)
+        {
+            // Ian: Use the leaf name for the legend label — strip all path
+            // segments, not just the /SmartDashboard/ prefix.
+            m_linePlot->AddSeries(key, LeafName(key), color);
+        }
+
+        DebugTileLog(QString("tile.add_plot_source key=%1 source=%2").arg(m_key).arg(key));
+    }
+
+    void VariableTile::RemovePlotSource(const QString& key)
+    {
+        for (auto it = m_plotSources.begin(); it != m_plotSources.end(); ++it)
+        {
+            if (it->key == key)
+            {
+                m_plotSources.erase(it);
+                if (m_linePlot != nullptr)
+                {
+                    m_linePlot->RemoveSeries(key);
+                }
+                DebugTileLog(QString("tile.remove_plot_source key=%1 source=%2").arg(m_key).arg(key));
+                return;
+            }
+        }
+    }
+
+    void VariableTile::AddSampleToPlotSource(const QString& key, double value)
+    {
+        if (m_linePlot != nullptr)
+        {
+            m_linePlot->AddSampleToSeries(key, value);
+        }
+    }
+
+    std::vector<PlotSourceEntry> VariableTile::GetPlotSources() const
+    {
+        return m_plotSources;
+    }
+
+    void VariableTile::SetPlotSources(const std::vector<PlotSourceEntry>& sources)
+    {
+        m_plotSources = sources;
+
+        if (m_linePlot != nullptr)
+        {
+            // Rebuild all series on the line plot widget
+            for (const auto& src : m_plotSources)
+            {
+                m_linePlot->AddSeries(src.key, LeafName(src.key), src.color);
+                m_linePlot->SetSeriesVisible(src.key, src.visible);
+            }
+        }
+    }
+
+    void VariableTile::SetSeriesVisibleBySource(const QString& key, bool visible)
+    {
+        // Ian: Programmatic series visibility — called by MainWindow when
+        // the Run Browser check state changes for an absorbed key.  Updates
+        // both the LinePlotWidget rendering and the persisted PlotSourceEntry.
+        if (m_linePlot != nullptr)
+        {
+            m_linePlot->SetSeriesVisible(key, visible);
+        }
+        for (auto& src : m_plotSources)
+        {
+            if (src.key == key)
+            {
+                src.visible = visible;
+                return;
+            }
+        }
+    }
+
     void VariableTile::paintEvent(QPaintEvent* event)
     {
         QFrame::paintEvent(event);
+
+        // Ian: 3D depth border for multi-line drop target mode (Fix 2).
+        // Draws a subtle raised-edge effect: light highlight on top/left
+        // inner edges, dark shadow on right/bottom outer edges, giving
+        // visual "depth" so users can identify multi-line-capable plots.
+        // Drawn in both edit and run modes so the identity is always visible.
+        if (m_multiLinePlotMode && IsLinePlotWidget())
+        {
+            QPainter depthPainter(this);
+            depthPainter.setRenderHint(QPainter::Antialiasing, false);
+
+            const int w = width();
+            const int h = height();
+
+            // Light highlight on top and left inner edges
+            depthPainter.setPen(QPen(QColor(255, 255, 255, 40), 1));
+            depthPainter.drawLine(0, 0, w - 1, 0);       // top
+            depthPainter.drawLine(0, 0, 0, h - 1);       // left
+
+            // Dark shadow on right and bottom outer edges (2px for depth)
+            depthPainter.setPen(QPen(QColor(0, 0, 0, 80), 1));
+            depthPainter.drawLine(w - 1, 1, w - 1, h - 1);  // right outer
+            depthPainter.drawLine(1, h - 1, w - 1, h - 1);  // bottom outer
+            depthPainter.setPen(QPen(QColor(0, 0, 0, 50), 1));
+            depthPainter.drawLine(w - 2, 2, w - 2, h - 2);  // right inner
+            depthPainter.drawLine(2, h - 2, w - 2, h - 2);  // bottom inner
+        }
 
         if (!m_editable)
         {
@@ -674,6 +829,18 @@ namespace sd::widgets
 
     void VariableTile::SetWidgetType(const QString& widgetType)
     {
+        // Ian: When switching away from a multi-line plot, disband all
+        // additional sources so they get their own tiles back.
+        // Passes originalWidgetType so MainWindow can restore them (Fix 5).
+        if (IsMultiLinePlot() && widgetType != "double.lineplot")
+        {
+            for (const auto& src : m_plotSources)
+            {
+                emit PlotSourceDisbanded(src.key, src.originalWidgetType);
+            }
+            m_plotSources.clear();
+        }
+
         m_widgetType = widgetType;
         setProperty("widgetType", m_widgetType);
 
@@ -683,6 +850,12 @@ namespace sd::widgets
             if (height() < recommendedHeight)
             {
                 resize(width(), recommendedHeight);
+            }
+
+            // Ian: Set the primary series label from the display name
+            if (m_linePlot != nullptr)
+            {
+                m_linePlot->SetPrimarySeriesKey(m_key);
             }
         }
 
@@ -1052,6 +1225,38 @@ namespace sd::widgets
             OpenPropertiesDialog();
         });
 
+        // Ian: Multi-line drop target toggle.  Only shown for line plots.
+        // When enabled, other number tiles (including line plots) can be
+        // dragged onto this one to merge as additional series.
+        if (IsLinePlotWidget())
+        {
+            QAction* multiLineAction = menu.addAction("Enable Multi-Line Drop Target");
+            multiLineAction->setCheckable(true);
+            multiLineAction->setChecked(m_multiLinePlotMode);
+            connect(multiLineAction, &QAction::triggered, this, [this](bool checked)
+            {
+                SetMultiLinePlotMode(checked);
+            });
+        }
+
+        // Ian: Disband all sources — ejects all merged series back to their
+        // original standalone tiles, restoring their previous widget types
+        // (Fix 5).
+        if (IsMultiLinePlot())
+        {
+            QAction* disbandAction = menu.addAction("Disband All Sources");
+            connect(disbandAction, &QAction::triggered, this, [this]()
+            {
+                // Copy sources before clearing — emitting signals while iterating
+                const auto sources = m_plotSources;
+                for (const auto& src : sources)
+                {
+                    RemovePlotSource(src.key);
+                    emit PlotSourceDisbanded(src.key, src.originalWidgetType);
+                }
+            });
+        }
+
         QAction* sendToBackAction = menu.addAction("Send To Back");
         connect(sendToBackAction, &QAction::triggered, this, [this]()
         {
@@ -1314,8 +1519,14 @@ namespace sd::widgets
         else if (!showControl && showDoubleLinePlot)
         {
             // Ian: Line plot label -- centered title above the plot.  When
-            // hidden, the plot occupies the full tile height.
+            // hidden, the plot occupies the full tile height.  The legend
+            // inside the plot also hides with the label so "Show Label"
+            // controls both the tile title and the plot legend together.
             m_titleLabel->setVisible(m_showLabel);
+            if (m_linePlot != nullptr)
+            {
+                m_linePlot->SetShowLegend(m_showLabel);
+            }
             if (m_showLabel)
             {
                 m_layout->addWidget(m_titleLabel, 0, 0, 1, 2, Qt::AlignHCenter | Qt::AlignVCenter);
@@ -2086,6 +2297,81 @@ namespace sd::widgets
         form->addRow("Upper Limit", upperLimitSpin);
         form->addRow("Lower Limit", lowerLimitSpin);
 
+        auto* showLabelCheck = new QCheckBox(&dialog);
+        showLabelCheck->setChecked(m_showLabel);
+        form->addRow("Show Label", showLabelCheck);
+
+        // Ian: Series color pickers and visibility checkboxes — one row per
+        // additional source, plus the primary series (Fix 4).
+        struct SeriesColorState
+        {
+            QString key;
+            QColor color;
+            QPushButton* button;
+            QCheckBox* visibleCheck;
+        };
+        std::vector<SeriesColorState> seriesColors;
+
+        // Primary series color + visibility
+        {
+            const QColor primaryColor = (m_linePlot != nullptr)
+                ? m_linePlot->GetSeriesColor(m_key)
+                : LinePlotWidget::DefaultColorPalette()[0];
+            const bool primaryVisible = (m_linePlot != nullptr)
+                ? m_linePlot->IsSeriesVisible(m_key) : true;
+            auto* btn = new QPushButton(primaryColor.name(QColor::HexRgb), &dialog);
+            btn->setStyleSheet(QString("background:%1;").arg(primaryColor.name(QColor::HexRgb)));
+            auto* visCheck = new QCheckBox(&dialog);
+            visCheck->setChecked(primaryVisible);
+
+            auto* rowWidget = new QWidget(&dialog);
+            auto* rowLayout = new QHBoxLayout(rowWidget);
+            rowLayout->setContentsMargins(0, 0, 0, 0);
+            rowLayout->addWidget(btn);
+            rowLayout->addWidget(new QLabel("Visible:", &dialog));
+            rowLayout->addWidget(visCheck);
+            rowLayout->addStretch();
+            form->addRow(QString("Primary: %1").arg(m_key), rowWidget);
+
+            seriesColors.push_back({ m_key, primaryColor, btn, visCheck });
+        }
+
+        // Additional source colors + visibility
+        for (const auto& src : m_plotSources)
+        {
+            auto* btn = new QPushButton(src.color.name(QColor::HexRgb), &dialog);
+            btn->setStyleSheet(QString("background:%1;").arg(src.color.name(QColor::HexRgb)));
+            auto* visCheck = new QCheckBox(&dialog);
+            visCheck->setChecked(src.visible);
+
+            auto* rowWidget = new QWidget(&dialog);
+            auto* rowLayout = new QHBoxLayout(rowWidget);
+            rowLayout->setContentsMargins(0, 0, 0, 0);
+            rowLayout->addWidget(btn);
+            rowLayout->addWidget(new QLabel("Visible:", &dialog));
+            rowLayout->addWidget(visCheck);
+            rowLayout->addStretch();
+            form->addRow(QString("Source: %1").arg(src.key), rowWidget);
+
+            seriesColors.push_back({ src.key, src.color, btn, visCheck });
+        }
+
+        // Wire up color picker buttons
+        for (auto& sc : seriesColors)
+        {
+            connect(sc.button, &QPushButton::clicked, &dialog, [&sc, this]()
+            {
+                const QColor picked = QColorDialog::getColor(sc.color, this, QString("Choose color for %1").arg(sc.key));
+                if (!picked.isValid())
+                {
+                    return;
+                }
+                sc.color = picked;
+                sc.button->setText(picked.name(QColor::HexRgb));
+                sc.button->setStyleSheet(QString("background:%1;").arg(picked.name(QColor::HexRgb)));
+            });
+        }
+
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
         form->addRow(buttons);
 
@@ -2105,6 +2391,29 @@ namespace sd::widgets
         );
         SetLinePlotNumberLinesVisible(numberLinesCheck->isChecked());
         SetLinePlotGridLinesVisible(gridLinesCheck->isChecked());
+        SetShowLabel(showLabelCheck->isChecked());
+
+        // Apply color and visibility changes
+        for (const auto& sc : seriesColors)
+        {
+            if (m_linePlot != nullptr)
+            {
+                m_linePlot->SetSeriesColor(sc.key, sc.color);
+                m_linePlot->SetSeriesVisible(sc.key, sc.visibleCheck->isChecked());
+            }
+            // Update stored source colors and visibility
+            for (auto& src : m_plotSources)
+            {
+                if (src.key == sc.key)
+                {
+                    src.color = sc.color;
+                    src.visible = sc.visibleCheck->isChecked();
+                }
+            }
+            // Ian: Notify MainWindow so the Run Browser tree stays in sync
+            // with per-series visibility (Direction A of bidirectional sync).
+            emit PlotSeriesVisibilityChanged(sc.key, sc.visibleCheck->isChecked());
+        }
     }
 
     void VariableTile::ApplyGaugeSettings()

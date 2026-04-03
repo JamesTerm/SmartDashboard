@@ -788,6 +788,73 @@ namespace sd::widgets
         CollectAndEmitCheckedSignals();
     }
 
+    void RunBrowserDock::CheckSignalByKey(const QString& key)
+    {
+        // Ian: Mirror of UncheckSignalByKey — re-checks a previously unchecked
+        // signal leaf.  Used to sync the Run Browser tree when the user toggles
+        // a series back to visible in the multi-line plot Properties dialog.
+        std::function<QStandardItem*(QStandardItem*)> findLeaf;
+        findLeaf = [&](QStandardItem* parent) -> QStandardItem*
+        {
+            for (int row = 0; row < parent->rowCount(); ++row)
+            {
+                QStandardItem* child = parent->child(row, 0);
+                if (child == nullptr)
+                {
+                    continue;
+                }
+
+                const int kind = child->data(kRoleNodeKind).toInt();
+                if (kind == kNodeKindSignal)
+                {
+                    if (child->data(kRoleSignalKey).toString() == key)
+                    {
+                        return child;
+                    }
+                }
+                else if (kind == kNodeKindGroup || kind == kNodeKindRun)
+                {
+                    QStandardItem* found = findLeaf(child);
+                    if (found != nullptr)
+                    {
+                        return found;
+                    }
+                }
+            }
+            return nullptr;
+        };
+
+        QStandardItem* root = m_treeModel->invisibleRootItem();
+        QStandardItem* leaf = findLeaf(root);
+        if (leaf == nullptr || leaf->checkState() == Qt::Checked)
+        {
+            return;  // Key not in tree or already checked.
+        }
+
+        m_suppressCheckSignal = true;
+        leaf->setCheckState(Qt::Checked);
+
+        // Recompute ancestor tri-states up to the run/root node.
+        QStandardItem* ancestor = leaf->parent();
+        while (ancestor != nullptr)
+        {
+            const int ancestorKind = ancestor->data(kRoleNodeKind).toInt();
+            if (ancestorKind == kNodeKindGroup)
+            {
+                UpdateGroupCheckState(ancestor);
+            }
+            else if (ancestorKind == kNodeKindRun)
+            {
+                UpdateRunCheckState(ancestor);
+                break;
+            }
+            ancestor = ancestor->parent();
+        }
+
+        m_suppressCheckSignal = false;
+        CollectAndEmitCheckedSignals();
+    }
+
     void RunBrowserDock::EnsureStreamingRootNode()
     {
         if (m_streamingRootItem != nullptr)

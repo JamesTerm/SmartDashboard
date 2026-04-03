@@ -224,6 +224,9 @@ private:
     void BeginGroupDrag(sd::widgets::VariableTile* anchorTile, const QPoint& globalPos);
     void UpdateGroupDrag(const QPoint& globalPos);
     void EndGroupDrag();
+    void MergeTileIntoPlot(sd::widgets::VariableTile* plotTile, sd::widgets::VariableTile* sourceTile);
+    void OnPlotSourceDisbanded(sd::widgets::VariableTile* plotTile, const QString& sourceKey, const QString& originalWidgetType);
+    void RebuildPlotSourceOwners();
 
     QWidget* m_canvas = nullptr;
     QLabel* m_statusLabel = nullptr;
@@ -309,6 +312,13 @@ private:
     bool m_suppressLayoutDirty = false;
     QString m_layoutFilePath;
     TileMap m_tiles;
+    // Ian: Reverse map for multi-line plot fan-out routing.  When a key is
+    // absorbed into another tile's multi-line plot, this maps the absorbed
+    // key to the owning plot tile.  OnVariableUpdateReceived checks this map
+    // to route values to AddSampleToPlotSource instead of the (hidden)
+    // standalone tile.  Rebuilt from m_tiles on layout load; maintained
+    // incrementally on merge/disband.
+    std::unordered_map<std::string, sd::widgets::VariableTile*> m_plotSourceOwners;
     LayoutMap m_savedLayoutByKey;
     sd::model::VariableStore m_variableStore;
     sd::transport::ConnectionConfig m_connectionConfig;

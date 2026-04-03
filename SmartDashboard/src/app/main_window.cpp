@@ -5,6 +5,7 @@
 #include "layout/layout_serializer.h"
 #include "sd_direct_types.h"
 #include "widgets/playback_timeline_widget.h"
+#include "widgets/line_plot_widget.h"
 #include "widgets/run_browser_dock.h"
 #include "widgets/camera_viewer_dock.h"
 #include "camera/camera_discovery_aggregator.h"
@@ -295,6 +296,38 @@ namespace
         if (entry.stringChooserOptions.isValid())
         {
             tile->SetStringChooserOptions(entry.stringChooserOptions.toStringList());
+        }
+
+        // Ian: Restore multi-line plot sources from saved layout.  Converts
+        // LinePlotSourceEntry (key + hex color string + originalWidgetType)
+        // to PlotSourceEntry (key + QColor + originalWidgetType) and pushes
+        // them into the tile.  SetPlotSources rebuilds the series on the
+        // LinePlotWidget.  MainWindow is responsible for wiring the reverse
+        // map + hiding absorbed tiles after this function returns.
+        if (!entry.linePlotSources.empty())
+        {
+            std::vector<sd::widgets::PlotSourceEntry> sources;
+            sources.reserve(entry.linePlotSources.size());
+            for (const auto& src : entry.linePlotSources)
+            {
+                sd::widgets::PlotSourceEntry pe;
+                pe.key = src.key;
+                pe.color = QColor(src.color);
+                if (!pe.color.isValid())
+                {
+                    pe.color = QColor("#e74c3c");  // fallback red
+                }
+                pe.originalWidgetType = src.originalWidgetType;
+                pe.visible = src.visible;
+                sources.push_back(pe);
+            }
+            tile->SetPlotSources(sources);
+        }
+
+        // Ian: Restore multi-line drop target mode from saved layout.
+        if (entry.multiLinePlotMode)
+        {
+            tile->SetMultiLinePlotMode(true);
         }
 
         // Ian: Re-apply saved geometry after all property setters have run.
@@ -1707,6 +1740,20 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
             break;
     }
 
+    // Ian: Multi-line plot fan-out.  If this key has been absorbed into
+    // another tile's multi-line plot, forward the double value to the
+    // owning plot tile as an additional sample.  The standalone tile still
+    // exists (hidden) and gets its value above; this adds the data point
+    // to the composite plot's series for that key.
+    if (record.type == sd::widgets::VariableType::Double)
+    {
+        auto ownerIt = m_plotSourceOwners.find(keyStd);
+        if (ownerIt != m_plotSourceOwners.end() && ownerIt->second != nullptr)
+        {
+            ownerIt->second->AddSampleToPlotSource(key, record.value.toDouble());
+        }
+    }
+
     if (m_connectionConfig.kind == sd::transport::TransportKind::Direct
         && m_transport
         && IsOperatorControlWidget(tile))
@@ -2048,14 +2095,51 @@ void MainWindow::OnClearWidgets()
     }
 
     m_tiles.clear();
+    m_plotSourceOwners.clear();
     m_savedLayoutByKey.clear();
     m_variableStore.Clear();
     m_pluginControlEdits.clear();
     m_nextTileOffset = 0;
     m_lastTransportSeq = 0;
+    m_runBrowserHiddenKeys.clear();
     MarkLayoutDirty();
 
-    // Ian: Notify observers (Run Browser dock) that all tiles were removed.
+    // Ian: Hard-reset the Run Browser.  ClearAllRuns() wipes both replay
+    // runs and streaming state regardless of the current mode.  This is
+    // intentional — "Clear Widgets" means the user wants a blank slate,
+    // including the Run Browser tree.  ClearDiscoveredKeys (fired by
+    // TilesCleared below) has a streaming-mode guard that would skip the
+    // clear when coming from replay mode, so ClearAllRuns is the only
+    // reliable way to guarantee the tree is empty.
+    //
+    // If a non-replay transport is still connected, StartTransport (or
+    // incoming data via GetOrCreateTile → TileAdded) will re-enter
+    // streaming mode and repopulate the tree naturally.
+    if (m_runBrowserDock != nullptr)
+    {
+        m_runBrowserDock->ClearAllRuns();
+
+        // Ian: Re-enter streaming mode whenever the selected transport
+        // is non-replay.  This lets subsequent operations (Load Layout,
+        // incoming transport keys) repopulate the Run Browser tree via
+        // GetOrCreateTile → TileAdded → OnTileAdded.  Without this,
+        // ClearAllRuns leaves m_streamingMode false and OnTileAdded
+        // silently ignores every key.
+        //
+        // We check the *configured* transport kind, not whether
+        // m_transport is non-null, because the user may have switched
+        // to NT4/Direct but not yet clicked Connect — the layout load
+        // that follows still needs the tree to mirror the tiles.
+        if (m_connectionConfig.kind != sd::transport::TransportKind::Replay)
+        {
+            m_runBrowserDock->SetStreamingRootLabel(GetSelectedTransportDisplayName());
+        }
+    }
+
+    // Ian: Notify observers that all tiles were removed.  The
+    // ClearDiscoveredKeys handler is a harmless no-op here because
+    // ClearAllRuns already reset everything (and SetStreamingRootLabel,
+    // if called, re-initialized streaming state cleanly).
     emit TilesCleared();
 }
 
@@ -2085,6 +2169,44 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
     connect(tile, &sd::widgets::VariableTile::ControlStringEdited, this, &MainWindow::OnControlStringEdited);
     connect(tile, &sd::widgets::VariableTile::RemoveRequested, this, &MainWindow::OnRemoveWidgetRequested);
     connect(tile, &sd::widgets::VariableTile::HideRequested, this, &MainWindow::OnHideTileRequested);
+    // Ian: Multi-line plot disband signal.  When the tile switches away from
+    // a line plot widget type (or the user removes a source), it emits
+    // PlotSourceDisbanded for each absorbed key.  We capture the tile pointer
+    // so OnPlotSourceDisbanded knows which plot is disbanding.
+    connect(tile, &sd::widgets::VariableTile::PlotSourceDisbanded, this,
+        [this, tile](const QString& sourceKey, const QString& originalWidgetType)
+        {
+            OnPlotSourceDisbanded(tile, sourceKey, originalWidgetType);
+        }
+    );
+    // Ian: Bidirectional visibility sync (Direction A).  When the user toggles
+    // per-series visibility in the Properties dialog, update the Run Browser
+    // check state to match.  The m_plotSourceOwners guard in
+    // OnRunBrowserCheckedSignalsChanged prevents this from feeding back into
+    // SetSeriesVisible — the loop terminates cleanly.
+    connect(tile, &sd::widgets::VariableTile::PlotSeriesVisibilityChanged, this,
+        [this](const QString& sourceKey, bool visible)
+        {
+            if (m_runBrowserDock == nullptr)
+            {
+                return;
+            }
+            // Only sync absorbed keys — the primary series is not in the
+            // Run Browser as an absorbed key; it has its own standalone tile.
+            if (m_plotSourceOwners.find(sourceKey.toStdString()) == m_plotSourceOwners.end())
+            {
+                return;
+            }
+            if (visible)
+            {
+                m_runBrowserDock->CheckSignalByKey(sourceKey);
+            }
+            else
+            {
+                m_runBrowserDock->UncheckSignalByKey(sourceKey);
+            }
+        }
+    );
 
     tile->setObjectName(QString("tile_%1").arg(QString::number(m_tiles.size() + 1)));
     tile->SetDefaultSize(QSize(220, 84));
@@ -2141,7 +2263,14 @@ sd::widgets::VariableTile* MainWindow::GetOrCreateTile(const QString& key, sd::w
     // layout.  Groups start checked, so the key will be in
     // m_runBrowserCheckedKeys after the dock emits CheckedSignalsChanged.
 
-    if (m_runBrowserActive)
+    // Ian: If this key has been absorbed into a multi-line plot, hide the
+    // standalone tile unconditionally — its data renders inside the owning
+    // plot tile.  This takes priority over Run Browser visibility.
+    if (m_plotSourceOwners.find(keyStd) != m_plotSourceOwners.end())
+    {
+        tile->hide();
+    }
+    else if (m_runBrowserActive)
     {
         if (m_runBrowserCheckedKeys.isEmpty() || !m_runBrowserCheckedKeys.contains(key))
         {
@@ -2516,8 +2645,23 @@ void MainWindow::OnRemoveWidgetRequested(const QString& key)
         return;
     }
 
+    // Ian: Multi-line plot cleanup on removal.
+    // If this tile is a multi-line plot owner, remove all its absorbed keys
+    // from the reverse map (the disband signal will handle re-showing tiles).
+    // If this tile's key is absorbed by another plot, remove it from that
+    // plot's source list and from the reverse map.
     if (it->second != nullptr)
     {
+        if (it->second->IsMultiLinePlot())
+        {
+            const auto sources = it->second->GetPlotSources();
+            for (const auto& src : sources)
+            {
+                m_plotSourceOwners.erase(src.key.toStdString());
+            }
+        }
+        m_plotSourceOwners.erase(keyStd);
+
         m_selectedTiles.remove(it->second);
         it->second->deleteLater();
     }
@@ -2634,6 +2778,31 @@ void MainWindow::OnRunBrowserCheckedSignalsChanged(const QSet<QString>& checkedK
     {
         if (tile == nullptr)
         {
+            continue;
+        }
+
+        // Ian: Plot-absorbed tiles must stay hidden regardless of Run Browser
+        // checked state.  Their visibility is managed exclusively by the
+        // merge/disband lifecycle in MergeTileIntoPlot / OnPlotSourceDisbanded.
+        // Without this guard, CheckedSignalsChanged emissions during transport
+        // lifecycle (connect, reconnect, replay load) would re-show absorbed
+        // tiles, breaking the multi-line plot visual.
+        //
+        // Direction B of bidirectional sync: when the user unchecks an absorbed
+        // key in the Run Browser, hide the corresponding series line in the
+        // owning plot (and vice versa for re-checking).  The tile itself stays
+        // hidden — only the series rendering is affected.
+        auto ownerIt = m_plotSourceOwners.find(keyStd);
+        if (ownerIt != m_plotSourceOwners.end())
+        {
+            tile->hide();
+            // Sync series visibility with Run Browser check state
+            if (ownerIt->second != nullptr)
+            {
+                const QString key = QString::fromStdString(keyStd);
+                const bool shouldBeVisible = checkedKeys.contains(key);
+                ownerIt->second->SetSeriesVisibleBySource(key, shouldBeVisible);
+            }
             continue;
         }
 
@@ -2873,6 +3042,48 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
                 {
                     EndGroupDrag();
                 }
+
+                // Ian: Drag-to-merge detection.  When a double-type tile is
+                // dropped and its bounding rect intersects a line plot tile
+                // that has multi-line drop target mode enabled, merge it into
+                // that plot as an additional series.  Requires explicit opt-in
+                // via the context menu toggle (Fix 1) to prevent accidental
+                // merges.  Any double-type tile can drop in, including other
+                // line plots (Fix 3).
+                auto* me = static_cast<QMouseEvent*>(event);
+                if (me->button() == Qt::LeftButton
+                    && tile->GetType() == sd::widgets::VariableType::Double
+                    && tile->isVisible())
+                {
+                    const QRect tileRect = tile->geometry();
+                    for (const auto& [otherKeyStd, otherTile] : m_tiles)
+                    {
+                        if (otherTile == nullptr || otherTile == tile)
+                        {
+                            continue;
+                        }
+                        if (!otherTile->IsMultiLinePlotDropTarget() || !otherTile->isVisible())
+                        {
+                            continue;
+                        }
+                        // Check if at least 30% of the dropped tile overlaps
+                        // the target plot tile (prevents accidental merges
+                        // from barely touching edges).
+                        const QRect plotRect = otherTile->geometry();
+                        const QRect intersection = tileRect.intersected(plotRect);
+                        if (intersection.isEmpty())
+                        {
+                            continue;
+                        }
+                        const int tileArea = tileRect.width() * tileRect.height();
+                        const int overlapArea = intersection.width() * intersection.height();
+                        if (tileArea > 0 && overlapArea >= tileArea * 3 / 10)
+                        {
+                            MergeTileIntoPlot(otherTile, tile);
+                            break;  // Only merge into one plot
+                        }
+                    }
+                }
             }
             else if (event->type() == QEvent::Move && m_groupDragActive && tile == m_groupDragAnchor)
             {
@@ -2958,11 +3169,21 @@ bool MainWindow::SaveLayoutToPath(const QString& path)
     // We walk actual tile visibility rather than querying mode-specific state
     // (checked keys, hidden keys) so the saved set is always ground truth
     // regardless of whether we're in streaming, reading, or no-browser mode.
+    //
+    // IMPORTANT: Exclude tiles hidden because they were absorbed into a
+    // multi-line plot.  Absorption is already persisted via linePlotSources
+    // on the owning tile — writing absorbed keys into hiddenKeys would
+    // double-persist the hidden state and block OnPlotSourceDisbanded from
+    // restoring visibility after layout reload.
     QSet<QString> hiddenKeys;
     for (const auto& [keyStd, tile] : m_tiles)
     {
         if (tile != nullptr && tile->isHidden())
         {
+            if (m_plotSourceOwners.find(keyStd) != m_plotSourceOwners.end())
+            {
+                continue;  // Absorbed — hidden state persisted via linePlotSources
+            }
             hiddenKeys.insert(QString::fromStdString(keyStd));
         }
     }
@@ -3038,6 +3259,19 @@ bool MainWindow::LoadLayoutFromPath(const QString& path, bool applyToExistingTil
         }
 
         ApplyTemporaryDefaultValuesToTiles();
+
+        // Ian: Rebuild the reverse map for multi-line plot fan-out routing
+        // after all tiles have been created and their linePlotSources restored.
+        // Then hide any tiles whose keys are now absorbed into a plot.
+        RebuildPlotSourceOwners();
+        for (const auto& [absorbedKeyStd, ownerTile] : m_plotSourceOwners)
+        {
+            auto absorbedIt = m_tiles.find(absorbedKeyStd);
+            if (absorbedIt != m_tiles.end() && absorbedIt->second != nullptr)
+            {
+                absorbedIt->second->hide();
+            }
+        }
 
         // Ian: Apply layout-persisted visibility state.
         //
@@ -4798,6 +5032,190 @@ void MainWindow::EndGroupDrag()
     m_groupDragAnchor = nullptr;
     m_groupDragUpdating = false;
     m_groupDragEntries.clear();
+}
+
+// Ian: Multi-line plot merge.  Called when the user drops a number tile
+// onto a line plot tile (drag-to-merge gesture).  The source tile is hidden,
+// its key is added as an additional series on the plot tile, and the reverse
+// map is updated so OnVariableUpdateReceived can fan-out values.
+// Fix 3: When the source tile is itself a line plot (possibly multi-line),
+// transfer all its series into the target plot before hiding it.
+// Fix 5: Records originalWidgetType so disband can restore it.
+void MainWindow::MergeTileIntoPlot(sd::widgets::VariableTile* plotTile, sd::widgets::VariableTile* sourceTile)
+{
+    if (plotTile == nullptr || sourceTile == nullptr)
+    {
+        return;
+    }
+
+    if (!plotTile->IsLinePlotWidget())
+    {
+        return;
+    }
+
+    const QString sourceKey = sourceTile->GetKey();
+    const std::string sourceKeyStd = sourceKey.toStdString();
+
+    // Don't merge a tile into itself
+    if (sourceKey == plotTile->GetKey())
+    {
+        return;
+    }
+
+    // Don't merge if already a source
+    const auto existingSources = plotTile->GetPlotSources();
+    for (const auto& src : existingSources)
+    {
+        if (src.key == sourceKey)
+        {
+            return;
+        }
+    }
+
+    // Ian: If the source tile is itself a multi-line plot, absorb all its
+    // secondary series first (Fix 3).  Each transferred series keeps its
+    // color and originalWidgetType.  The source tile's own key is added
+    // separately below.
+    if (sourceTile->IsMultiLinePlot())
+    {
+        const auto sourceSources = sourceTile->GetPlotSources();
+        for (const auto& ss : sourceSources)
+        {
+            // Skip if already present on the target
+            bool alreadyPresent = false;
+            const auto currentSources = plotTile->GetPlotSources();
+            for (const auto& cs : currentSources)
+            {
+                if (cs.key == ss.key)
+                {
+                    alreadyPresent = true;
+                    break;
+                }
+            }
+            if (alreadyPresent || ss.key == plotTile->GetKey())
+            {
+                continue;
+            }
+
+            plotTile->AddPlotSource(ss.key, ss.color);
+            // Preserve the original widget type from the transferred source
+            auto targetSources = plotTile->GetPlotSources();
+            for (auto& ts : targetSources)
+            {
+                if (ts.key == ss.key && ts.originalWidgetType.isEmpty())
+                {
+                    ts.originalWidgetType = ss.originalWidgetType;
+                }
+            }
+            plotTile->SetPlotSources(targetSources);
+            m_plotSourceOwners[ss.key.toStdString()] = plotTile;
+        }
+        // Disband the source tile's own multi-line (without re-showing tiles)
+        // so it becomes a plain tile again before hiding.
+        sourceTile->SetPlotSources({});
+        sourceTile->SetMultiLinePlotMode(false);
+    }
+
+    // Pick next color from palette
+    const auto& palette = sd::widgets::LinePlotWidget::DefaultColorPalette();
+    const auto updatedSources = plotTile->GetPlotSources();
+    const int colorIndex = static_cast<int>(updatedSources.size() + 1) % static_cast<int>(palette.size());
+    const QColor color = palette[colorIndex];
+
+    plotTile->AddPlotSource(sourceKey, color);
+
+    // Ian: Record original widget type for disband restoration (Fix 5).
+    {
+        auto sources = plotTile->GetPlotSources();
+        for (auto& src : sources)
+        {
+            if (src.key == sourceKey && src.originalWidgetType.isEmpty())
+            {
+                src.originalWidgetType = sourceTile->GetWidgetType();
+            }
+        }
+        plotTile->SetPlotSources(sources);
+    }
+
+    m_plotSourceOwners[sourceKeyStd] = plotTile;
+
+    // Hide the source tile — its data now renders inside the plot tile
+    sourceTile->hide();
+    m_selectedTiles.remove(sourceTile);
+
+    MarkLayoutDirty();
+}
+
+// Ian: Multi-line plot disband handler.  Called when a plot tile's widget
+// type changes away from line plot, or when the user explicitly removes a
+// source from the properties dialog.  Restores the source key's standalone
+// tile to visibility (creates it if it was removed).
+// Fix 5: Restores originalWidgetType if recorded.
+void MainWindow::OnPlotSourceDisbanded(sd::widgets::VariableTile* plotTile, const QString& sourceKey, const QString& originalWidgetType)
+{
+    Q_UNUSED(plotTile);
+    const std::string sourceKeyStd = sourceKey.toStdString();
+
+    // Remove from reverse map
+    m_plotSourceOwners.erase(sourceKeyStd);
+
+    // Ian: Remove the key from m_runBrowserHiddenKeys.  When a tile is
+    // absorbed into a multi-line plot, it gets hidden via tile->hide().
+    // SaveLayoutToPath now correctly excludes absorbed keys from the
+    // hiddenKeys set, but older layout files (or a save from before this
+    // fix) may still have them.  Without this removal, the "else if
+    // (!m_runBrowserHiddenKeys.contains)" check below would block the
+    // tile from becoming visible again after disband.
+    m_runBrowserHiddenKeys.remove(sourceKey);
+
+    // Show or re-create the standalone tile
+    auto tileIt = m_tiles.find(sourceKeyStd);
+    if (tileIt != m_tiles.end() && tileIt->second != nullptr)
+    {
+        // Ian: Restore original widget type if we have a record (Fix 5).
+        // If no record was saved (empty string), leave the tile as-is.
+        if (!originalWidgetType.isEmpty())
+        {
+            tileIt->second->SetWidgetType(originalWidgetType);
+        }
+
+        // Ian: Respect Run Browser visibility when restoring a disbanded
+        // source tile.  If the Run Browser is active and the key is not
+        // checked, leave it hidden — the user hasn't opted it back in yet.
+        if (m_runBrowserActive)
+        {
+            if (m_runBrowserCheckedKeys.contains(sourceKey))
+            {
+                tileIt->second->show();
+            }
+        }
+        else if (!m_runBrowserHiddenKeys.contains(sourceKey))
+        {
+            tileIt->second->show();
+        }
+    }
+
+    MarkLayoutDirty();
+}
+
+// Ian: Rebuild the entire m_plotSourceOwners reverse map by walking all
+// tiles.  Used after layout load when many tiles may have linePlotSources
+// that were restored from the saved layout.
+void MainWindow::RebuildPlotSourceOwners()
+{
+    m_plotSourceOwners.clear();
+    for (const auto& [keyStd, tile] : m_tiles)
+    {
+        if (tile == nullptr || !tile->IsMultiLinePlot())
+        {
+            continue;
+        }
+        const auto sources = tile->GetPlotSources();
+        for (const auto& src : sources)
+        {
+            m_plotSourceOwners[src.key.toStdString()] = tile;
+        }
+    }
 }
 
 void MainWindow::keyPressEvent(QKeyEvent* event)
