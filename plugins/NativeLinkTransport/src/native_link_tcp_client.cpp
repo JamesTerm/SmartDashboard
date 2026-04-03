@@ -389,9 +389,13 @@ namespace sd::nativelink
         // exit the outer loop without retrying.
         bool TryConnect()
         {
+            printf("[NativeLink-Client] TryConnect to %s:%d\n",
+                config.host.c_str(), static_cast<int>(config.port));
+
             SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
             if (sock == INVALID_SOCKET)
             {
+                printf("[NativeLink-Client] socket() failed — WSAError=%d\n", WSAGetLastError());
                 return false;
             }
 
@@ -408,6 +412,7 @@ namespace sd::nativelink
             address.sin_port = htons(config.port);
             if (InetPtonA(AF_INET, config.host.c_str(), &address.sin_addr) != 1)
             {
+                printf("[NativeLink-Client] InetPtonA failed for host='%s'\n", config.host.c_str());
                 closesocket(sock);
                 return false;
             }
@@ -421,6 +426,7 @@ namespace sd::nativelink
                 const int err = WSAGetLastError();
                 if (err != WSAEWOULDBLOCK && err != WSAEINPROGRESS)
                 {
+                    printf("[NativeLink-Client] connect() failed — WSAError=%d\n", err);
                     closesocket(sock);
                     return false;
                 }
@@ -440,6 +446,8 @@ namespace sd::nativelink
             const int ready = select(0, nullptr, &writeSet, &errorSet, &tv);
             if (ready <= 0 || FD_ISSET(sock, &errorSet) || !FD_ISSET(sock, &writeSet))
             {
+                printf("[NativeLink-Client] select() failed — ready=%d errorSet=%d writeSet=%d\n",
+                    ready, FD_ISSET(sock, &errorSet) ? 1 : 0, FD_ISSET(sock, &writeSet) ? 1 : 0);
                 closesocket(sock);
                 return false;
             }
@@ -451,6 +459,7 @@ namespace sd::nativelink
                            reinterpret_cast<char*>(&sockErr), &sockErrLen) != 0
                 || sockErr != 0)
             {
+                printf("[NativeLink-Client] SO_ERROR check failed — sockErr=%d\n", sockErr);
                 closesocket(sock);
                 return false;
             }
@@ -477,10 +486,13 @@ namespace sd::nativelink
             CopyUtf8(hello.clientId, sizeof(hello.clientId), config.clientId);
             if (!SendFrame(tcp::FrameKind::ClientHello, &hello, sizeof(hello)))
             {
+                printf("[NativeLink-Client] ClientHello send failed\n");
                 CloseSocket();
                 return false;
             }
 
+            printf("[NativeLink-Client] TCP connected + ClientHello sent to %s:%d\n",
+                config.host.c_str(), static_cast<int>(config.port));
             return true;
         }
 
@@ -508,6 +520,7 @@ namespace sd::nativelink
 
             if (!TryConnect())
             {
+                printf("[NativeLink-Client] TryConnect FAILED — firing Disconnected\n");
                 if (!stopRequested.load(std::memory_order_acquire) && onConnectionState)
                 {
                     onConnectionState(kConnectionStateDisconnected);
@@ -516,9 +529,11 @@ namespace sd::nativelink
                 return;
             }
 
+            printf("[NativeLink-Client] TryConnect OK — entering recv loop\n");
             // Receive loop — runs until the connection dies or Stop() is called.
             RunRecvLoop();
 
+            printf("[NativeLink-Client] RecvLoop exited — disconnecting\n");
             // Connection dropped. Clear connected state.
             if (connected.exchange(false) && onConnectionState)
             {
@@ -613,12 +628,16 @@ namespace sd::nativelink
                 {
                     if (payload.size() != sizeof(tcp::ServerHelloPayload))
                     {
+                        printf("[NativeLink-Client] ServerHello bad size=%zu expected=%zu\n",
+                            payload.size(), sizeof(tcp::ServerHelloPayload));
                         return false;
                     }
                     tcp::ServerHelloPayload hello {};
                     memcpy(&hello, payload.data(), sizeof(hello));
                     serverSessionId.store(hello.serverSessionId, std::memory_order_release);
                     lastHeartbeatUs.store(GetSteadyNowUs(), std::memory_order_release);
+                    printf("[NativeLink-Client] ServerHello received — sessionId=%llu\n",
+                        static_cast<unsigned long long>(hello.serverSessionId));
                     return true;
                 }
                 case tcp::FrameKind::ServerMessage:
@@ -689,6 +708,7 @@ namespace sd::nativelink
                 // delta, rather than treating socket connect as semantic ready.
                 if (!connected.exchange(true) && onConnectionState)
                 {
+                    printf("[NativeLink-Client] __live_begin__ — firing Connected\n");
                     onConnectionState(kConnectionStateConnected);
                 }
                 return true;

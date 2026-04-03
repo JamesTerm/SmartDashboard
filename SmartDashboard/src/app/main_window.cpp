@@ -1778,7 +1778,11 @@ void MainWindow::OnVariableUpdateReceived(const QString& key, int valueType, con
         }
     }
 
-    RecordVariableEvent(key, valueType, value, seq);
+    // Ian: Recording used to live here, but it has been moved to the transport
+    // callback lambda in StartTransport() so that every sample is captured for
+    // telemetry *before* the UI queue overflow discard can drop it.  The
+    // same-thread shortcut and retained-controls replay paths call
+    // RecordVariableEvent explicitly before reaching this function.
 }
 
 void MainWindow::OnConnectionStateChanged(int state)
@@ -4208,16 +4212,59 @@ void MainWindow::StartTransport()
     const bool started = m_transport->Start(
         [this](const sd::transport::VariableUpdate& update)
         {
+            // Ian: Record every sample for telemetry BEFORE the UI queue, so
+            // overflow discard below doesn't lose telemetry data.  This is the
+            // single recording point for live transport updates — recording was
+            // removed from OnVariableUpdateReceived to avoid double-recording.
+            RecordVariableEvent(update.key, update.valueType, update.value,
+                static_cast<quint64>(update.seq));
+
             if (QThread::currentThread() == thread())
             {
                 OnVariableUpdateReceived(update.key, update.valueType, update.value, static_cast<quint64>(update.seq));
                 return;
             }
 
+            // Ian: Queue overflow discard (Fix D).  During auton the robot
+            // publishes ~25 keys at ~62 Hz (~1,500 msg/sec).  If the UI thread
+            // can't drain fast enough, the queue grows without bound, causing
+            // ever-increasing display latency.  When the queue exceeds the
+            // high-water mark we collapse it to latest-value-per-key — the UI
+            // only needs the most recent value anyway.  Telemetry capture above
+            // has already recorded every sample, so no data is truly lost.
+            static constexpr int kQueueHighWater = 500;
+
             bool scheduleDrain = false;
             {
                 std::lock_guard<std::mutex> lock(m_pendingUiUpdatesMutex);
+
                 m_pendingUiUpdates.push_back(update);
+
+                if (static_cast<int>(m_pendingUiUpdates.size()) > kQueueHighWater)
+                {
+                    // Collapse: keep the last value for each key, in order of
+                    // first appearance, so tile creation order is stable.
+                    QVector<sd::transport::VariableUpdate> collapsed;
+                    collapsed.reserve(m_pendingUiUpdates.size());
+                    std::unordered_map<std::string, int> keyIdx;
+                    keyIdx.reserve(static_cast<size_t>(m_pendingUiUpdates.size()));
+                    for (const auto& u : m_pendingUiUpdates)
+                    {
+                        const std::string k = u.key.toStdString();
+                        auto it = keyIdx.find(k);
+                        if (it == keyIdx.end())
+                        {
+                            keyIdx[k] = static_cast<int>(collapsed.size());
+                            collapsed.push_back(u);
+                        }
+                        else
+                        {
+                            collapsed[it->second] = u;  // overwrite with newer
+                        }
+                    }
+                    m_pendingUiUpdates = std::move(collapsed);
+                }
+
                 if (!m_uiDrainScheduled)
                 {
                     m_uiDrainScheduled = true;
@@ -4254,6 +4301,7 @@ void MainWindow::StartTransport()
             m_transport->ReplayRetainedControls(
                 [this](const QString& key, int valueType, const QVariant& value)
                 {
+                    RecordVariableEvent(key, valueType, value, 0);
                     OnVariableUpdateReceived(key, valueType, value, 0);
                 }
             );
@@ -5410,6 +5458,11 @@ void MainWindow::StopSessionRecording()
     m_recordingStopRequested = false;
 }
 
+// Ian: Thread-safety — this function is called from both the UI thread (same-thread
+// shortcut, retained-controls replay) and the transport worker thread (background
+// push path).  The m_recordingLastTimestampUs monotonicity update is now inside the
+// m_recordingMutex lock so concurrent callers serialize correctly.  The JSON
+// serialization happens before the lock to keep the critical section short.
 void MainWindow::RecordVariableEvent(const QString& key, int valueType, const QVariant& value, quint64 seq)
 {
     if (!IsRecordingTransportKind(m_connectionConfig.kind))
@@ -5423,17 +5476,6 @@ void MainWindow::RecordVariableEvent(const QString& key, int valueType, const QV
         ).count()
     );
 
-    std::uint64_t timestampUs = 0;
-    if (nowSteadyUs >= m_recordingStartSteadyUs)
-    {
-        timestampUs = nowSteadyUs - m_recordingStartSteadyUs;
-    }
-    if (timestampUs < m_recordingLastTimestampUs)
-    {
-        timestampUs = m_recordingLastTimestampUs;
-    }
-    m_recordingLastTimestampUs = timestampUs;
-
     QString typeString = "string";
     if (valueType == static_cast<int>(sd::direct::ValueType::Bool))
     {
@@ -5444,9 +5486,10 @@ void MainWindow::RecordVariableEvent(const QString& key, int valueType, const QV
         typeString = "double";
     }
 
+    // Build the JSON payload outside the lock to minimize contention.
     QJsonObject object;
     object.insert("eventKind", "data");
-    object.insert("timestampUs", static_cast<qint64>(timestampUs));
+    // timestampUs placeholder — filled inside lock after monotonicity check.
     object.insert("key", key);
     object.insert("valueType", typeString);
     object.insert("seq", QString::number(seq));
@@ -5463,7 +5506,6 @@ void MainWindow::RecordVariableEvent(const QString& key, int valueType, const QV
         object.insert("value", value.toString());
     }
 
-    const QByteArray line = QJsonDocument(object).toJson(QJsonDocument::Compact);
     {
         std::lock_guard<std::mutex> lock(m_recordingMutex);
         if (!m_recordingThreadRunning || m_recordingStopRequested)
@@ -5471,6 +5513,21 @@ void MainWindow::RecordVariableEvent(const QString& key, int valueType, const QV
             return;
         }
 
+        // Ian: Monotonicity check must be inside the lock so concurrent threads
+        // don't race on m_recordingLastTimestampUs.
+        std::uint64_t timestampUs = 0;
+        if (nowSteadyUs >= m_recordingStartSteadyUs)
+        {
+            timestampUs = nowSteadyUs - m_recordingStartSteadyUs;
+        }
+        if (timestampUs < m_recordingLastTimestampUs)
+        {
+            timestampUs = m_recordingLastTimestampUs;
+        }
+        m_recordingLastTimestampUs = timestampUs;
+
+        object.insert("timestampUs", static_cast<qint64>(timestampUs));
+        const QByteArray line = QJsonDocument(object).toJson(QJsonDocument::Compact);
         m_recordingQueue.push_back(line);
     }
     m_recordingCv.notify_one();

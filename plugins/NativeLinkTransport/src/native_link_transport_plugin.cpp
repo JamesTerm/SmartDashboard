@@ -384,6 +384,13 @@ namespace
         // Ian: The semantic contract sits above carrier choice now. If the
         // operator selects a carrier we do not implement yet, fail loudly here
         // instead of silently falling back to SHM and hiding a selection bug.
+        printf("[NativeLink-Client] StartNativeLink carrier=%s host=%s port=%d channel=%s clientId=%s\n",
+            instance->carrierName.c_str(),
+            clientConfig.host.c_str(),
+            static_cast<int>(clientConfig.port),
+            clientConfig.channelId.c_str(),
+            clientConfig.clientId.c_str());
+
         instance->client = CreateNativeLinkCarrierClient(clientConfig.carrierKind);
         if (instance->client == nullptr)
         {
