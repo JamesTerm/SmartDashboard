@@ -1337,7 +1337,11 @@ MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
         m_connectionConfig.kind = GetSelectedTransportDescriptor()->kind;
     }
     m_telemetryFeatureEnabled = settings.value("telemetry/enabled", true).toBool();
-    m_recordRequested = settings.value("telemetry/recordEnabled", false).toBool();
+    // Ian: m_recordRequested is no longer restored from persistence.  Now that
+    // recording shows a file dialog, auto-starting a recording on launch would
+    // pop an unexpected save requester before the user sees the main window.
+    // The user must explicitly click the Record button each session.
+    m_recordRequested = false;
     m_replayControlsPreferredVisible = settings.value("replay/controlsVisible", true).toBool();
     m_replayTimelinePreferredVisible = settings.value("replay/timelineVisible", true).toBool();
     m_replayMarkersPreferredVisible = settings.value("replay/markersVisible", true).toBool();
