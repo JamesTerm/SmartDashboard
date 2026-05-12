@@ -2176,6 +2176,19 @@ void MainWindow::OnClearWidgets()
     m_runBrowserHiddenKeys.clear();
     MarkLayoutDirty();
 
+    // Ian: Disable m_runBrowserActive BEFORE ClearAllRuns().  ClearAllRuns
+    // emits CheckedSignalsChanged with an empty set; if m_runBrowserActive
+    // is still true, OnRunBrowserCheckedSignalsChanged interprets "active +
+    // empty checked set" as "hide all tiles".  That empties
+    // m_runBrowserCheckedKeys, and any subsequent tile creation (replay
+    // seek/playback, Load Layout) also hides tiles because GetOrCreateTile
+    // sees active + empty checked keys.  Disabling the flag first makes the
+    // emission harmless (handler takes the "not active → show all" path).
+    // For replay transports, PopulateRunBrowserFromReplayFile() will
+    // re-enable it when the user plays again or a seek is triggered.
+    m_runBrowserActive = false;
+    m_runBrowserCheckedKeys.clear();
+
     // Ian: Hard-reset the Run Browser.  ClearAllRuns() wipes both replay
     // runs and streaming state regardless of the current mode.  This is
     // intentional — "Clear Widgets" means the user wants a blank slate,
@@ -4277,6 +4290,27 @@ void MainWindow::StartTransport()
         return;
     }
 
+    // Ian: Reset sequence tracking BEFORE Start() because replay transports
+    // call SeekPlaybackUs(0) inside Start(), which synchronously delivers all
+    // values at t=0 via OnVariableUpdateReceived.  If sequence gates still
+    // hold values from a previous live session (e.g. Direct at seq 5000+),
+    // the replay's lower seq numbers (1, 2, 3...) would be rejected by
+    // VariableStore::Upsert as stale, leaving tiles unpopulated.
+    m_variableStore.ResetSequenceTracking();
+
+    // Ian: For replay transports, temporarily disable m_runBrowserActive before
+    // Start().  ReplayDashboardTransport::Start() calls SeekPlaybackUs(0) which
+    // synchronously creates tiles via GetOrCreateTile.  If m_runBrowserActive is
+    // true (carried over from a previous live session) and m_runBrowserCheckedKeys
+    // is empty (cleared by OnOpenReplayFile), every tile would be hidden.
+    // PopulateRunBrowserFromReplayFile() later re-enables m_runBrowserActive
+    // after the Run Browser is properly loaded.
+    const bool savedRunBrowserActive = m_runBrowserActive;
+    if (m_connectionConfig.kind == sd::transport::TransportKind::Replay)
+    {
+        m_runBrowserActive = false;
+    }
+
     const bool started = m_transport->Start(
         [this](const sd::transport::VariableUpdate& update)
         {
@@ -4360,11 +4394,9 @@ void MainWindow::StartTransport()
     {
         if (m_transport)
         {
-            // Ian: Retained replay uses synthetic seq=0 values on startup.
-            // Clear per-key sequence gates first so a dashboard restart accepts
-            // those values and visibly repaints tiles instead of treating them
-            // as older than the previous live session.
-            m_variableStore.ResetSequenceTracking();
+            // Ian: ResetSequenceTracking() now runs before Start() (above)
+            // so that both the initial SeekPlaybackUs(0) and retained-controls
+            // replay see cleared gates.
 
             m_transport->ReplayRetainedControls(
                 [this](const QString& key, int valueType, const QVariant& value)
@@ -4525,6 +4557,7 @@ void MainWindow::StartTransport()
 
     if (!started)
     {
+        m_runBrowserActive = savedRunBrowserActive;
         StopSessionRecording();
         m_transport.reset();
         OnConnectionStateChanged(static_cast<int>(sd::transport::ConnectionState::Disconnected));
@@ -5427,7 +5460,32 @@ void MainWindow::StartSessionRecording()
     QDir().mkpath(logsDir);
 
     const QString timestamp = QDateTime::currentDateTimeUtc().toString("yyyyMMdd_HHmmss_zzz");
-    m_recordingFilePath = QString("%1/session_%2.json").arg(logsDir, timestamp);
+    const QString defaultPath = QString("%1/session_%2.json").arg(logsDir, timestamp);
+
+    const QString selected = QFileDialog::getSaveFileName(
+        this,
+        "Save Telemetry Recording",
+        defaultPath,
+        "JSON Files (*.json);;All Files (*)"
+    );
+
+    if (selected.isEmpty())
+    {
+        // User cancelled — untoggle the record button without re-entering.
+        m_recordRequested = false;
+        if (m_recordButton != nullptr)
+        {
+            const bool prior = m_recordButton->blockSignals(true);
+            m_recordButton->setChecked(false);
+            m_recordButton->blockSignals(prior);
+        }
+        return;
+    }
+
+    m_recordingFilePath = selected;
+
+    // Ensure the parent directory exists for user-chosen paths.
+    QDir().mkpath(QFileInfo(m_recordingFilePath).absolutePath());
 
     m_recordingStartEpochUs = static_cast<std::uint64_t>(QDateTime::currentMSecsSinceEpoch()) * 1000ULL;
     m_recordingStartSteadyUs = static_cast<std::uint64_t>(
