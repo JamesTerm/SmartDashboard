@@ -5456,11 +5456,14 @@ void MainWindow::StartSessionRecording()
         return;
     }
 
-    const QString logsDir = QDir::currentPath() + "/logs";
-    QDir().mkpath(logsDir);
+    QSettings settings("SmartDashboard", "SmartDashboardApp");
+    const QString lastDir = settings.value("telemetry/lastRecordingDir").toString();
+
+    const QString baseDir = (!lastDir.isEmpty() && QDir(lastDir).exists()) ? lastDir : (QDir::currentPath() + "/logs");
+    QDir().mkpath(baseDir);
 
     const QString timestamp = QDateTime::currentDateTimeUtc().toString("yyyyMMdd_HHmmss_zzz");
-    const QString defaultPath = QString("%1/session_%2.json").arg(logsDir, timestamp);
+    const QString defaultPath = QString("%1/session_%2.json").arg(baseDir, timestamp);
 
     const QString selected = QFileDialog::getSaveFileName(
         this,
@@ -5481,6 +5484,9 @@ void MainWindow::StartSessionRecording()
         }
         return;
     }
+
+    // Persist the directory the user chose so next time it defaults there.
+    settings.setValue("telemetry/lastRecordingDir", QFileInfo(selected).absolutePath());
 
     m_recordingFilePath = selected;
 
