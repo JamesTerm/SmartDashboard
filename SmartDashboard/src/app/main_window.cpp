@@ -4683,7 +4683,7 @@ void MainWindow::UpdatePlaybackUiState()
         m_nextMarkerButton->setEnabled(hasMarkers);
     }
 
-    const bool dockContextVisible = m_telemetryFeatureEnabled && replayMode;
+    const bool dockContextVisible = m_telemetryFeatureEnabled && (replayMode || canRecordOnTransport);
 
     const bool allowMarkerDockAction = dockContextVisible;
     if (m_replayMarkersViewAction != nullptr)
