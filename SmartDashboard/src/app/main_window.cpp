@@ -4272,13 +4272,19 @@ void MainWindow::RememberControlValueIfAllowed(const QString& key, int valueType
 void MainWindow::StartTransport()
 {
     StopTransport();
-    StartSessionRecording();
 
     const sd::transport::TransportDescriptor* descriptor = GetSelectedTransportDescriptor();
     if (descriptor != nullptr)
     {
         m_connectionConfig.kind = descriptor->kind;
     }
+
+    // Ian: StartSessionRecording must run AFTER m_connectionConfig.kind is
+    // updated.  It checks IsRecordingTransportKind() to decide whether to
+    // show the save dialog.  Previously it ran before the kind was set,
+    // so on startup (or transport switch) it could see the stale kind from
+    // a prior session and pop the file requester unexpectedly.
+    StartSessionRecording();
 
     m_transport = m_transportRegistry.CreateTransport(m_connectionConfig);
     DebugLogUiEvent(QString("transport_start id=%1 kind=%2")
