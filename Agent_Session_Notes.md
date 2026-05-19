@@ -26,7 +26,7 @@ cmake -G "Visual Studio 17 2022" -B build -DCMAKE_TOOLCHAIN_FILE="<your-vcpkg-ro
 # Build
 cmake --build build --config Debug
 
-# Test (247 tests, 2 disabled, 1 pre-existing failure)
+# Test (305 tests, 2 disabled, 1 pre-existing failure)
 ctest -C Debug --output-on-failure
 ```
 
@@ -41,6 +41,12 @@ ctest -C Debug --output-on-failure
 - **"Reset fresh" config self-cleaning (April 2026).** On startup, `main_window.cpp` validates `transportKind` (must be 0–2) and `pluginSettingsJson` (must be parseable JSON if non-empty). If either is corrupt, ALL connection settings are nuked from QSettings, reset to DirectConnect defaults, and the clean state is persisted. The operator sees DirectConnect in the UI, signaling "something was wrong — reconfigure." Similarly, if `transportId` doesn't match any registered transport descriptor, SmartDashboard falls back to DirectConnect and persists. Root cause: mangled JSON from PowerShell registry writes silently broke the NativeLink plugin. This validation catches and auto-heals it on next launch.
 - **WSAStartup is deferred:** Winsock is initialized only when a WebSocket-based transport actually connects (via `ix::initNetSystem()`). Direct/NativeLink sessions never trigger it.
 - **NT4Client::Start() is backward-compatible:** The 4th `onAnnounce` callback parameter defaults to `nullptr`. Existing callers that pass 3 arguments continue to work unchanged.
+- **ResetSequenceTracking before Start():** `m_variableStore.ResetSequenceTracking()` must run before `m_transport->Start()` in `StartTransport()`. Replay transports call `SeekPlaybackUs(0)` inside `Start()`, which synchronously delivers values. If sequence gates still hold values from a prior session, replay events are rejected as stale.
+- **m_runBrowserActive must be false during initial replay seek:** `StartTransport()` temporarily disables `m_runBrowserActive` before `Start()` for replay transports. Without this, tiles created during `SeekPlaybackUs(0)` are hidden because `m_runBrowserCheckedKeys` is empty. `PopulateRunBrowserFromReplayFile()` re-enables it afterward.
+- **OnClearWidgets resets m_runBrowserActive:** Clearing widgets sets `m_runBrowserActive = false` and clears `m_runBrowserCheckedKeys` before `ClearAllRuns()`. Without this, subsequent replay playback hides every newly created tile.
+- **Recording never auto-resumes on startup:** `m_recordRequested` is always `false` on launch regardless of persisted state. The file dialog makes auto-resume inappropriate — the user must click Record explicitly each session.
+- **StartSessionRecording runs after kind update:** In `StartTransport()`, `StartSessionRecording()` must be called after `m_connectionConfig.kind` is set from the descriptor, not before. Otherwise it checks the stale kind from a prior session.
+- **Replay Controls dock auto-heals on startup:** If telemetry is enabled and the transport supports recording, the startup reconciliation forces `m_replayControlsPreferredVisible = true` regardless of the persisted `replay/controlsVisible` value. This prevents the dock from being permanently stuck hidden. The "Replay Controls" view action uses `QAction::triggered` (not `toggled`) to avoid interference from the timer's `blockSignals`+`setChecked` pattern.
 
 ## Transport architecture
 
@@ -65,6 +71,14 @@ Current plugins:
 - `PublishBool/Double/String` in the plugin ABI is fully wired for NT4. The `EnsurePublished` path in `nt4_client.cpp` uses the `/SmartDashboard/` prefix.
 - `supports_chooser` returns true. This property controls whether inbound updates are assembled into chooser widgets — it does NOT gate outbound publish.
 - `RememberControlValueIfAllowed` only works for Direct transport (`CurrentTransportUsesRememberedControlValues()` returns true only for `TransportKind::Direct`).
+
+## Telemetry recording/replay
+
+- **Recording UI:** The Record button lives in the Replay Controls dock (`m_replayControlsDock`). The dock is visible when `m_telemetryFeatureEnabled && (replayMode || canRecordOnTransport)` — i.e., during replay OR when the transport supports recording (Direct). On startup, the dock preference is auto-healed to visible if the context allows it (see key invariants).
+- **File dialog on record:** Clicking Record opens a Save File dialog. The last directory is persisted in `telemetry/lastRecordingDir` registry key. Default is `logs/session_<UTC-timestamp>.json`.
+- **Recording format:** Line-delimited JSON. Each line is a compact JSON object with `eventKind`, `timestampUs`, `key`, `valueType`, `seq`, `value`. Connection events use `eventKind: "connection_state"`.
+- **Replay parser:** `ReplayDashboardTransport::LoadReplayFile()` tries full-document JSON first (capture CLI format with `signals` array), then single-event JSON, then falls back to line-delimited parsing.
+- **supportsRecording flag:** Only Direct transport sets `supportsRecording = true` by default. Plugins can opt in via `SD_TRANSPORT_PLUGIN_FLAG_SUPPORTS_RECORDING`.
 
 ## Cross-repo sync
 

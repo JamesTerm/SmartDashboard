@@ -7,6 +7,32 @@ Curated milestone history for this repository.
 - Keep milestone sections in descending chronological order (newest first) so recent changes are immediately visible.
 - Historical branch/status wording in older entries is time-bound; read each section as a snapshot from that date.
 
+## 2026-05-19 — Fix: Replay Controls dock stuck hidden (startup reconciliation)
+
+The Replay Controls dock (telemetry recording UI) was invisible on launch even though `telemetry/enabled` was `true` in the registry.  The user could not recover via the "Enable telemetry recording/playback UI" menu toggle because that only controls `m_telemetryFeatureEnabled`, not `m_replayControlsPreferredVisible`.
+
+**Root cause:** `replay/controlsVisible` in the Windows registry was persisted as `false` (from a prior session where the dock was closed via X button or the "Replay Controls" View menu item).  Even when `dockContextVisible` was `true`, the dock remained hidden because `m_replayControlsPreferredVisible` was `false`.  The obvious recovery path (View > "Replay Controls") was not discoverable.  Additionally, `QAction::toggled` was unreliable under the 100ms timer that repeatedly calls `setChecked()` with `blockSignals(true)`.
+
+**Fix:**
+
+1. **Startup reconciliation**: If telemetry is enabled and the transport supports recording, force `m_replayControlsPreferredVisible = true` on launch regardless of persisted value.
+2. **OnToggleTelemetryFeature reset**: Toggling the telemetry feature ON also forces dock preferences to `true`.
+3. **Signal change**: "Replay Controls" view action uses `QAction::triggered` (not `toggled`) to avoid timer interference.
+
+**Design tradeoff:** The dock always reappears on next launch (no cross-session "permanently hidden" state), which is acceptable since it's core UI for the telemetry feature.
+
+## 2026-05-12 — Telemetry recording/replay stabilization
+
+A batch of fixes to make telemetry recording and replay reliable in daily use.
+
+**Replay transport tile population:** `ResetSequenceTracking()` must run before `Start()` so replay values aren't rejected by stale sequence gates from a prior live session.  `m_runBrowserActive` is temporarily disabled during the initial `SeekPlaybackUs(0)` so tiles aren't hidden, and `OnClearWidgets` resets it so subsequent playback can repopulate.
+
+**Recording file dialog:** `StartSessionRecording` now opens a Save File dialog for user-chosen filenames.  Last directory is persisted in `telemetry/lastRecordingDir`.
+
+**Recording startup ordering:** `StartSessionRecording` was running before `m_connectionConfig.kind` was updated from the transport descriptor, causing it to check the stale kind from a prior session.  Moved after the kind update.
+
+**Recording never auto-resumes:** Since recording now shows a file dialog, restoring `m_recordRequested` from the registry caused an unexpected save dialog on launch.  Recording always starts off — the user must click Record each session.
+
 ## 2026-03-31 - Feature-complete declaration: SmartDashboard scope achieved
 
 The dashboard is now feature-complete relative to the original SmartDashboard product scope. All must-have items in the "Foundation before enabling NetworkTables broadly" gate are checked. The next active work item is the multi-trace line plot (Want #2).

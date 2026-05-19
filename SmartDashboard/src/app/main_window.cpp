@@ -925,7 +925,7 @@ MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
     );
     connect(
         m_replayControlsViewAction,
-        &QAction::toggled,
+        &QAction::triggered,
         this,
         [this](bool checked)
         {
@@ -1345,6 +1345,27 @@ MainWindow::MainWindow(QWidget* parent, bool startTransportOnInit)
     m_replayControlsPreferredVisible = settings.value("replay/controlsVisible", true).toBool();
     m_replayTimelinePreferredVisible = settings.value("replay/timelineVisible", true).toBool();
     m_replayMarkersPreferredVisible = settings.value("replay/markersVisible", true).toBool();
+
+    // Ian: Startup reconciliation — if telemetry is enabled and the transport
+    // supports recording, force the replay controls dock visible.  This heals
+    // the state where the registry preference was set false by a prior session
+    // (e.g., user closed the dock accidentally) but the user still expects the
+    // telemetry UI to be present.  Without this, there is no obvious way to
+    // recover because the "Replay Controls" menu item is buried and users
+    // naturally reach for "Enable telemetry recording/playback UI" instead.
+    if (m_telemetryFeatureEnabled && IsRecordingTransportKind(m_connectionConfig.kind))
+    {
+        if (!m_replayControlsPreferredVisible)
+        {
+            m_replayControlsPreferredVisible = true;
+            settings.setValue("replay/controlsVisible", true);
+        }
+        if (!m_replayTimelinePreferredVisible)
+        {
+            m_replayTimelinePreferredVisible = true;
+            settings.setValue("replay/timelineVisible", true);
+        }
+    }
     m_clearLinePlotsOnRewind = settings.value("replay/clearLinePlotsOnRewind", false).toBool();
     m_clearLinePlotsOnBackwardSeek = settings.value("replay/clearLinePlotsOnBackwardSeek", false).toBool();
 
@@ -3648,6 +3669,18 @@ void MainWindow::OnToggleTelemetryFeature()
         checked = m_telemetryFeatureViewAction->isChecked();
     }
     m_telemetryFeatureEnabled = checked;
+
+    // Ian: When the user enables the telemetry feature, force the replay controls
+    // dock visible.  This prevents a confusing state where the feature is "on" but
+    // the dock is hidden because of a stale persisted preference from a prior session.
+    if (m_telemetryFeatureEnabled)
+    {
+        m_replayControlsPreferredVisible = true;
+        m_replayTimelinePreferredVisible = true;
+        QSettings settings("SmartDashboard", "SmartDashboardApp");
+        settings.setValue("replay/controlsVisible", true);
+        settings.setValue("replay/timelineVisible", true);
+    }
 
     if (m_telemetryFeatureViewAction != nullptr)
     {
