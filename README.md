@@ -104,9 +104,9 @@ See `docs/development_workflow.md` and `docs/ai_development_guidelines.md` for p
 
 ## Project Status
 
-- Early prototype
-- Exploring dashboard architecture trade-offs
-- Exploring AI-assisted development workflows in a student-mentored setting
+- Active prototype
+- feature-complete experimental dashboard
+- architecture validation
 
 Current product-direction priorities:
 
