@@ -11,6 +11,10 @@ Lightweight C++ dashboard for FRC, inspired by WPILib SmartDashboard.
 - Adoption principle: teams should be able to keep existing robot publishing patterns whenever possible; compatibility/translation adapters are preferred over forcing robot-code rewrites.
 - Product research is selective, not imitative: we study ideas from dashboards like `Shuffleboard`, `Glass`, `Elastic`, and other popular tools, then adopt only the parts that fit this product's identity.
 
+## Screenshot
+
+![SmartDashboard showing telemetry widgets, dashboard layout, and live data visualization](https://www.termstech.com/images/SmartDashboard_ScreenShot_crop.png)
+
 ## Transition Strategy
 
 - `Direct` and `Replay` stay native to the core app.
